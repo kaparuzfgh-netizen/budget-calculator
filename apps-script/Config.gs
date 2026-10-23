@@ -101,6 +101,7 @@ const SHEETS = {
   DEBTS: 'Debt_Engine',
   PORTFOLIO: 'Portfolio',
   NETWORTH: 'NetWorth_History',
+  FX_HISTORY: 'FX_History',
 };
 
 /** Ключи Script Properties. */

@@ -12,7 +12,8 @@ Google Apps Script как оркестратор, Gemini 2.0 Flash как vision
 | 2 | **Dynamic Debt State & Roll-Forward** | Две ипотеки: Сбербанк 11.9% (аннуитет, платёж 44 282 ₽) и Т-Банк 8.59% (раз в 2 недели 17 314 ₽ = 37 513.67 ₽/мес). ЧДП вычитается из тела и **снижает платёж с сохранением даты maturity (2029-07-25)** по формуле $P_{нов}=(B-L)\cdot\frac{r(1+r)^n}{(1+r)^n-1}$; `Commitments_Registry` обновляется автоматически |
 | 3 | **Weekly Expense Sync via Vision AI** | Триггер каждое **воскресенье 20:00**: бот спрашивает траты за неделю. Скриншот MBANK (Кыргызстан) → Gemini 2.0 Flash со строгой JSON-схемой (`total_spent`, `currency ∈ {KGS,RUB,USD}`, `top_categories`, `is_full_month_analytics`) → строка в `Weekly_Expenses` + отчёт: потрачено, burn rate, допустимо в день до конца месяца |
 | 4 | **Investment & Net Worth Tracker** | `Portfolio`: цена через `=GOOGLEFINANCE(A,"price")` для акций/ETF и `=GOOGLEFINANCE("CURRENCY:"&A&"USD")` для крипты; PnL, текущая/целевая доля, rebalance delta. Net Worth = `(Cash + Portfolio) − (долг по ипотекам в USD)`, ежедневные снапшоты |
-| 5 | **Interactive UI** | Telegram-бот (команды + диалоги + inline-кнопки `[Apply to Sheet]` / `[Edit Commitments]`) + Telegram Mini App (dark mode, тикер валют, слайдер дохода, слайдер ЧДП Сбербанка 0→1 287 312 ₽ с мгновенным «платёж ↓ vs срок ↓», портфель, net worth gauge) |
+| 5 | **Interactive UI** | Telegram-бот (команды + диалоги + inline-кнопки `[Apply to Sheet]` / `[Edit Commitments]`) + Telegram Mini App (dark mode, тикер валют, слайдер дохода, слайдер ЧДП Сбербанка 0→1 287 312 ₽ с мгновенным «платёж ↓ vs срок ↓», валютные сигналы, портфель, net worth gauge) |
+| 6 | **FX Analytics & Forecast** | 180-дневная история курсов (GOOGLEFINANCE) → перцентили, RSI(14), SMA-тренд, волатильность ±σ и статистический прогноз на 7/30 дней; рекомендации по таймингу конвертаций **EUR→RUB (ипотеки), EUR→KGS (жизнь), EUR→USD (инвестиции)**: «конвертировать сейчас / дробить 50/50 / отложить» с гасителем боковика |
 
 ## Архитектура
 
@@ -61,6 +62,7 @@ budget-calculator/
 │   ├── CashflowEngine.gs      водопад месяца, каскад дельты бонуса, арбитраж
 │   ├── DebtEngine.gs          аннуитет, replay событий, ЧДП, roll-forward, проекции
 │   ├── VisionParser.gs        Gemini Flash: скриншот → строгий JSON
+│   ├── FXAnalytics.gs        валюты: перцентили, RSI, тренд, прогноз ±σ, рекомендации
 │   ├── InvestNetWorth.gs      портфель, net worth, ежедневные снапшоты
 │   ├── TmaApi.gs              REST для Mini App (валидация initData + read-token)
 │   ├── Triggers.gs            Sunday 20:00 weekly ask, daily maintenance, monthly
@@ -86,6 +88,7 @@ budget-calculator/
 | `Debt_Engine` | Живое состояние ипотек + **ЧДП-калькулятор с формулой аннуитета прямо в листе** + журнал событий (платежи/ЧДП) + Arbitrage Monitor («16.0% deposit yields +XX ₽/yr more…») |
 | `Portfolio` | `Ticker \| Class \| Units \| Avg Buy \| Current Price (GOOGLEFINANCE) \| Value \| PnL $ \| PnL % \| Share \| Target \| Rebalance Delta $` |
 | `NetWorth_History` | Ежедневные снапшоты: `Date \| Cash \| Portfolio \| Debt ₽ \| Debt $ \| Net Worth $` + встроенный график |
+| `FX_History` | 180-дневная история курсов GOOGLEFINANCE (EURUSD, USDRUB, USDKGS, EURRUB) — данные для `/fx`: перцентили, RSI, прогноз |
 
 ## Финансовая математика
 
@@ -106,6 +109,15 @@ budget-calculator/
 **Мультивалютность.** Весь учёт в базовом USD; курсы — живые `GOOGLEFINANCE`:
 EUR→USD (B2), RUB→USD (÷B3), KGS→USD (÷B4), EUR→RUB (B5). Недельные траты
 хранятся в KGS и формульно конвертируются в RUB/USD.
+
+**Валютный анализ и прогноз (`/fx`, вкладка «Валюты»).** По 180-дневной истории
+GOOGLEFINANCE для каждой конвертации пользователя (EUR→RUB, EUR→KGS, EUR→USD)
+считаются: перцентиль текущего курса в диапазоне, RSI(14), SMA20/50-тренд,
+σ-волатильность; прогноз на 7/30 дней — линейная регрессия ± σ√h. Рекомендация:
+перцентиль ≥ 70 → «конвертировать сейчас», 45–69 → «дробить 50/50», 30–44 →
+«отложить», < 30 → «отложить (кроме обязательных платежей)»; если тренд за 30д
+тише собственного шума (|move| < 0.5·σ√30) — рынок боковой, всегда «50/50».
+Статистика ≠ гарантия: обязательные платежи конвертируются в срок.
 
 ## Бесплатные лимиты
 

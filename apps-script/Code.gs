@@ -67,6 +67,7 @@ const CMD_ALIAS = {
   'план': 'plan', 'статус': 'status', 'досрочное': 'prepay', 'чдп': 'prepay',
   'ипотека': 'mortgage', 'инвестиции': 'invest', 'портфель': 'invest',
   'кэш': 'cash', 'cash': 'cash', 'синк': 'sync', 'приложение': 'app',
+  'валюта': 'fx', 'курс': 'fx', 'курсы': 'fx', 'валютаанализ': 'fx',
 };
 
 function routeCommand_(chatId, text) {
@@ -87,6 +88,7 @@ function routeCommand_(chatId, text) {
       case 'prepay': cmdPrepay_(chatId, args); break;
       case 'mortgage': cmdMortgage_(chatId, args); break;
       case 'invest': cmdInvest_(chatId); break;
+      case 'fx': cmdFx_(chatId); break;
       case 'cash': cmdCash_(chatId, args); break;
       case 'status': cmdStatus_(chatId); break;
       case 'sync': cmdSync_(chatId); break;
@@ -126,6 +128,7 @@ function sendHelp_(chatId, prefix) {
     '/prepay sber|tbank 50000 — частичное досрочное погашение\n' +
     '/mortgage sber|tbank [сумма] — отметить плановый платёж вручную\n' +
     '/invest — портфель и дрейф от целей 58/23/19\n' +
+    '/fx — валюты: перцентили, RSI, прогноз 7/30д и когда выгодно менять EUR→₽/сом/$\n' +
     '/cash 12000 kgs — установить остаток кэша\n' +
     '/status — Net Worth сводка\n' +
     '/sync — roll-forward долгов + снапшот Net Worth\n' +
@@ -222,6 +225,11 @@ function cmdMortgage_(chatId, args) {
 
 function cmdInvest_(chatId) {
   sendMessage_(chatId, InvestNetWorth.renderText());
+}
+
+/** /fx — анализ валют: перцентили, RSI, прогноз и тайминг конвертаций. */
+function cmdFx_(chatId) {
+  sendMessage_(chatId, FXAnalytics.renderText(FXAnalytics.build()));
 }
 
 function cmdCash_(chatId, args) {

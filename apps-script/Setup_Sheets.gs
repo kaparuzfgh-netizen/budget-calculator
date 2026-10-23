@@ -17,6 +17,7 @@ function setup() {
       debts: buildOnce_(SHEETS.DEBTS, buildDebtEngine_),
       portfolio: buildOnce_(SHEETS.PORTFOLIO, buildPortfolio_),
       networth: buildOnce_(SHEETS.NETWORTH, buildNetWorth_),
+      fxhistory: buildOnce_(SHEETS.FX_HISTORY, buildFxHistory_),
       triggers: installTriggers_(),
     };
   });
@@ -275,6 +276,29 @@ function buildNetWorth_(sh) {
     .setPosition(1, 8, 0, 0)
     .build();
   sh.insertChart(chart);
+}
+
+// ─────────────────────── FX_History (180 дней для анализа/прогноза) ───────────────────────
+
+/** Блоки истории GOOGLEFINANCE: пара → якорь формулы и колонки (Date, Close). */
+const FX_HISTORY_BLOCKS = [
+  { pair: 'EURUSD', anchor: 'A3', col: 1 },
+  { pair: 'USDRUB', anchor: 'D3', col: 4 },
+  { pair: 'USDKGS', anchor: 'G3', col: 7 },
+  { pair: 'EURRUB', anchor: 'J3', col: 10 },
+];
+
+function buildFxHistory_(sh) {
+  sh.getRange('A1:K1').setValues([['EUR/USD', '', '', 'USD/RUB', '', '', 'USD/KGS', '', '', 'EUR/RUB', '']])
+    .setFontWeight('bold');
+  sh.getRange('A2:K2').setValues([['Дата', 'Курс', '', 'Дата', 'Курс', '', 'Дата', 'Курс', '', 'Дата', 'Курс']])
+    .setFontWeight('bold');
+  FX_HISTORY_BLOCKS.forEach(function (b) {
+    sh.getRange(b.anchor).setFormula(
+      '=GOOGLEFINANCE("CURRENCY:' + b.pair + '","price",TODAY()-180,TODAY(),"DAILY")'
+    );
+  });
+  sh.setFrozenRows(2);
 }
 
 // ─────────────────────── Webhook ───────────────────────

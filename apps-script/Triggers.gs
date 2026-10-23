@@ -61,12 +61,13 @@ function weeklySundayAsk() {
   }
 }
 
-/** Ежедневно: автопостановка наступивших платежей, replay долгов, снапшот Net Worth. */
+/** Ежедневно: автопостановка наступивших платежей, replay долгов, снапшот Net Worth, FX. */
 function dailyMaintenance() {
   try {
     const posted = DebtEngine.checkDuePayments(); // roll-forward
     DebtEngine.replayAll();
     InvestNetWorth.takeSnapshot();
+    try { FXAnalytics.refreshFormulas(); } catch (fxErr) { console.warn('fx refresh: ' + fxErr.message); }
     console.log('dailyMaintenance ok; auto-posted: ' + JSON.stringify(posted));
   } catch (e) {
     console.error('dailyMaintenance: ' + e.message);

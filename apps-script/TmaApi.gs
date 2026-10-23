@@ -158,6 +158,7 @@ function buildOverview_() {
       total_usd: round2_(nw.netWorthUSD),
     },
     net_worth_history: InvestNetWorth.history(90),
+    fx_analytics: FXAnalytics.build(),
     weekly: {
       week_rub: round2_(weekly.weekRUB),
       week_budget_rub: weekly.weekBudgetRUB,
