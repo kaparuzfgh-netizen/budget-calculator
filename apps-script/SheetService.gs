@@ -39,16 +39,25 @@ function clearSheet_(code) {
 
 // ─────────────────────────── FX ───────────────────────────
 
-/** Живые курсы из FX_and_Settings (B2 EURUSD, B3 USDRUB, B4 USDKGS) с fallback. */
+/** Живые курсы из FX_and_Settings (B2 EURUSD, B3 USDRUB, B4 USDKGS) с fallback.
+ *  Флаг FALLBACK_USED = true, если хоть один курс не рассчитан (#N/A/пусто):
+ *  значит GOOGLEFINANCE недоступен и все конвертации идут на резервные значения. */
 function getFx_() {
   const sh = sheet_(SHEETS.FX_SETTINGS);
   const v = sh.getRange('B2:B4').getValues();
-  const num = (x, fb) => (typeof x === 'number' && isFinite(x) && x > 0.1 ? x : fb);
-  return {
+  let fbUsed = false;
+  const num = function (x, fb) {
+    if (typeof x === 'number' && isFinite(x) && x > 0.1) return x;
+    fbUsed = true;
+    return fb;
+  };
+  const out = {
     EURUSD: num(v[0][0], CONFIG.FX_FALLBACK.EURUSD),
     USDRUB: num(v[1][0], CONFIG.FX_FALLBACK.USDRUB),
     USDKGS: num(v[2][0], CONFIG.FX_FALLBACK.USDKGS),
   };
+  out.FALLBACK_USED = fbUsed;
+  return out;
 }
 
 /** Конвертация между EUR/USD/RUB/KGS через базу USD. */

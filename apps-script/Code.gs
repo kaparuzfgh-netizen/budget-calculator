@@ -245,6 +245,10 @@ function cmdStatus_(chatId) {
   const nw = InvestNetWorth.takeSnapshot();
   const weekly = CashflowEngine.weeklyStatus();
   const L = [InvestNetWorth.renderNetWorthText(nw), ''];
+  if (getFx_().FALLBACK_USED) {
+    L.push('⚠️ Курсы GOOGLEFINANCE недоступны — цифры на резервных значениях (примерные).');
+    L.push('');
+  }
   debts.forEach(function (d) {
     const p = DebtEngine.projection(d, 0);
     L.push('🏦 ' + escHtml_(d.name) + ': ' + fmtMoney_(d.balance, 'RUB') +
