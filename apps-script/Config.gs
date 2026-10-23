@@ -88,6 +88,22 @@ const CONFIG = {
   // Таймауты внешних API (мс) — защита от зависаний UrlFetchApp
   HTTP_TIMEOUT_MS: 25000,
 
+  // Резервный vision-провайдер: Groq (console.groq.com, free tier).
+  // Ключ GROQ_API_KEY в Script Properties — опционален; используется,
+  // если Gemini недоступен или его ключ не задан.
+  GROQ: {
+    URL: 'https://api.groq.com/openai/v1/chat/completions',
+    MODEL: 'meta-llama/llama-4-scout-17b-16e-instruct',
+  },
+
+  // Push-алерты по валютам (ежедневная проверка в dailyMaintenance)
+  FX_ALERTS: {
+    ACTIONS: ['eur_rub', 'eur_kgs'], // какие конвертации мониторить
+    HIGH_PERCENTILE: 85,             // окно «выгодно конвертировать»
+    LOW_PERCENTILE: 15,              // «курс в нижней зоне — отложите»
+    COOLDOWN_DAYS: 7,                // не спамить чаще раза в N дней на пару
+  },
+
   // URL Mini App (опционально; кнопка /app)
   MINI_APP_URL: '',
 };
@@ -102,6 +118,8 @@ const SHEETS = {
   PORTFOLIO: 'Portfolio',
   NETWORTH: 'NetWorth_History',
   FX_HISTORY: 'FX_History',
+  DEPOSITS: 'Deposits',
+  METRICS: 'Metrics',
 };
 
 /** Ключи Script Properties. */
@@ -109,6 +127,7 @@ const PROP = {
   BOT_TOKEN: 'TELEGRAM_BOT_TOKEN',
   CHAT_ID: 'TELEGRAM_CHAT_ID',
   GEMINI_KEY: 'GEMINI_API_KEY',
+  GROQ_KEY: 'GROQ_API_KEY',
   WEBHOOK_SECRET: 'WEBHOOK_SECRET',
   SHEET_ID: 'SHEET_ID', // опционально, если скрипт не привязан к таблице
 };

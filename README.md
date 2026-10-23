@@ -10,10 +10,11 @@ Google Apps Script как оркестратор, Gemini 2.0 Flash как vision
 |---|--------|-----------|
 | 1 | **Monthly Cashflow & Waterfall Engine** | `/income 6200 eur` → конвертация в базовый USD, аудит активных обязательств из `Commitments_Registry`, расчёт Free Surplus; **дельта бонуса** (доход − база $5 800) каскадом 50/50: досрочное погашение (с арбитражем «вклад 16%») и инвестиционный пул (58% ETF / 23% Tech / 19% Crypto) |
 | 2 | **Dynamic Debt State & Roll-Forward** | Две ипотеки: Сбербанк 11.9% (аннуитет, платёж 44 282 ₽) и Т-Банк 8.59% (раз в 2 недели 17 314 ₽ = 37 513.67 ₽/мес). ЧДП вычитается из тела и **снижает платёж с сохранением даты maturity (2029-07-25)** по формуле $P_{нов}=(B-L)\cdot\frac{r(1+r)^n}{(1+r)^n-1}$; `Commitments_Registry` обновляется автоматически |
-| 3 | **Weekly Expense Sync via Vision AI** | Триггер каждое **воскресенье 20:00**: бот спрашивает траты за неделю. Скриншот MBANK (Кыргызстан) → Gemini 2.0 Flash со строгой JSON-схемой (`total_spent`, `currency ∈ {KGS,RUB,USD}`, `top_categories`, `is_full_month_analytics`) → строка в `Weekly_Expenses` + отчёт: потрачено, burn rate, допустимо в день до конца месяца |
-| 4 | **Investment & Net Worth Tracker** | `Portfolio`: цена через `=GOOGLEFINANCE(A,"price")` для акций/ETF и `=GOOGLEFINANCE("CURRENCY:"&A&"USD")` для крипты; PnL, текущая/целевая доля, rebalance delta. Net Worth = `(Cash + Portfolio) − (долг по ипотекам в USD)`, ежедневные снапшоты |
+| 3 | **Weekly Expense Sync via Vision AI** | Воскресенье 20:00 — бот спрашивает траты. Скриншот из MBANK → **Gemini 2.0 Flash** (бесплатный лимит), при недоступности — **резервный Groq** (Llama 4 Scout); строгая JSON-схема различает экраны: аналитика расходов (→ недельный лимит, burn rate, дневной остаток) и **остаток ипотеки → сверка с движком одной кнопкой**. Категории обучаются: `/alias "кафе" Питание` |
+| 4 | **Investment & Net Worth Tracker** | `Portfolio`: цена через `=GOOGLEFINANCE(A,"price")` для акций/ETF и `=GOOGLEFINANCE("CURRENCY:"&A&"USD")` для крипты (MOEX-бумаги — ручная цена колонкой Manual Price); PnL, текущая/целевая доля, rebalance delta. Net Worth = `(Cash + Вклады + Portfolio) − (долг в USD)`: мультивалютный кэш (USD/EUR/RUB/KGS), вклады из листа `Deposits`, ежедневные снапшоты |
 | 5 | **Interactive UI** | Telegram-бот (команды + диалоги + inline-кнопки `[Apply to Sheet]` / `[Edit Commitments]`) + Telegram Mini App (dark mode, тикер валют, слайдер дохода, слайдер ЧДП Сбербанка 0→1 287 312 ₽ с мгновенным «платёж ↓ vs срок ↓», валютные сигналы, портфель, net worth gauge) |
 | 6 | **FX Analytics & Forecast** | 180-дневная история курсов (GOOGLEFINANCE) → перцентили, RSI(14), SMA-тренд, волатильность ±σ и статистический прогноз на 7/30 дней; рекомендации по таймингу конвертаций **EUR→RUB (ипотеки), EUR→KGS (жизнь), EUR→USD (инвестиции)**: «конвертировать сейчас / дробить 50/50 / отложить» с гасителем боковика |
+| 7 | **Автопилот и метрики** | Push-алерты при входе курса в выгодную зону (топ-15% перцентиля, кулдаун 7 дней); напоминания о списаниях за 2 дня (реестр + ипотеки); понедельничный nudge; digest «факт vs план» с savings rate в последний день месяца; продуктовые метрики (ответы недели, применённый каскад, точность Vision) |
 
 ## Архитектура
 
@@ -63,8 +64,9 @@ budget-calculator/
 │   ├── CashflowEngine.gs      водопад месяца, каскад дельты бонуса, арбитраж
 │   ├── DebtEngine.gs          аннуитет, replay событий, ЧДП, roll-forward, проекции
 │   ├── VisionParser.gs        Gemini Flash: скриншот → строгий JSON
-│   ├── FXAnalytics.gs        валюты: перцентили, RSI, тренд, прогноз ±σ, рекомендации
-│   ├── InvestNetWorth.gs      портфель, net worth, ежедневные снапшоты
+│   ├── FXAnalytics.gs        валюты: перцентили, RSI, тренд, прогноз ±σ, рекомендации, push-алерты
+│   ├── MetricsEngine.gs      продуктовые метрики и digest «факт vs план» с savings rate
+│   ├── InvestNetWorth.gs      портфель, вклады, мультивалютный кэш, net worth, снапшоты
 │   ├── TmaApi.gs              REST для Mini App (валидация initData + read-token)
 │   ├── Triggers.gs            Sunday 20:00 weekly ask, daily maintenance, monthly
 │   ├── SecurityAudit.gs       🔐 рантайм-аудит: секреты, токены, webhook, доступы
@@ -89,8 +91,31 @@ budget-calculator/
 | `Weekly_Expenses` | `Date \| Week # \| Total (KGS) \| In RUB (формула) \| In USD (формула) \| Top Cat 1 \| Top Cat 2 \| Budget ₽ \| Variance ₽ \| File ID/Note` |
 | `Debt_Engine` | Живое состояние ипотек + **ЧДП-калькулятор с формулой аннуитета прямо в листе** + журнал событий (платежи/ЧДП) + Arbitrage Monitor («16.0% deposit yields +XX ₽/yr more…») |
 | `Portfolio` | `Ticker \| Class \| Units \| Avg Buy \| Current Price (GOOGLEFINANCE) \| Value \| PnL $ \| PnL % \| Share \| Target \| Rebalance Delta $` |
-| `NetWorth_History` | Ежедневные снапшоты: `Date \| Cash \| Portfolio \| Debt ₽ \| Debt $ \| Net Worth $` + встроенный график |
+| `NetWorth_History` | Ежедневные снапшоты: `Date \| Cash \| Deposits \| Portfolio \| Debt ₽ \| Debt $ \| Net Worth $` + встроенный график |
 | `FX_History` | 180-дневная история курсов GOOGLEFINANCE (EURUSD, USDRUB, USDKGS, EURRUB) — данные для `/fx`: перцентили, RSI, прогноз |
+| `Deposits` | Вклады как актив: `Date Opened \| Name \| Amount \| Currency \| Rate \| Maturity \| Active` → Net Worth и арбитраж «фактически размещено» |
+| `Metrics` | Продуктовые метрики: weekly-ответы, применённый каскад, сверки, исправления Vision, savings rate |
+
+## Команды бота
+
+| Команда | Алиасы | Действие |
+|---------|--------|----------|
+| `/plan [сумма] [валюта]` | `/план` | Водопад месяца: доход → обязательства → лимит жизни → профицит → каскад |
+| `/income 6200 eur` | `/доход` | Доход месяца + кнопки `Apply to Sheet` / `Edit Commitments` |
+| `/spent 3200 [₽/kgs/$]` | `/трата` | Быстрая трата в недельный учёт |
+| фото | | Аналитика расходов MBANK → разбор; экран ипотеки → сверка остатка кнопкой |
+| `/week` | `/неделя` | Недельный/месячный бюджет, burn rate, дневной лимит |
+| `/prepay sber 50000` | `/чдп` | Досрочное погашение: платёж ↓, срок сохранён |
+| `/balance sber 1234567` | `/остаток` | Сверка ипотеки вручную |
+| `/fx` | `/валюта`, `/курс` | Валюты: перцентили, RSI, прогноз 7/30д, «когда менять» |
+| `/invest` | `/инвестиции` | Портфель и дрейф от целей 58/23/19 |
+| `/cash 12000 kgs` | `/кэш` | Кэш в конкретной валюте (usd/eur/rub/kgs) |
+| `/alias "кафе" Питание` | `/категория` | Обучение категорий Vision |
+| `/status` | `/статус` | Net Worth: кэш + вклады + портфель − долг |
+| `/metrics` | `/метрики` | Продуктовые метрики |
+| `/guide` | `/гайд` | Гид установки: что готово и следующий шаг |
+| `/sync` | | Roll-forward долгов + снапшот Net Worth |
+| `/app` | | Открыть Mini App |
 
 ## Финансовая математика
 

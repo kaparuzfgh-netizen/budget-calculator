@@ -87,7 +87,8 @@ function json_(obj) {
 function debtPayload_(d) {
   const ppy = DebtEngine.periodsPerYear_(d.type);
   const proj = DebtEngine.projection(d, 0);
-  const n0 = DebtEngine.derivePeriods_(d.initialBalance, d.rate, ppy, DebtEngine.initialPayment_(d.id));
+  // оставшийся срок = инверсия аннуитета от текущего состояния (консистентно после reconcile)
+  const remaining = DebtEngine.derivePeriods_(d.balance, d.rate, ppy, d.payment);
   return {
     id: d.id,
     name: d.name,
@@ -97,7 +98,7 @@ function debtPayload_(d) {
     normalized_monthly_rub: round2_(DebtEngine.normalizedMonthlyRUB(d)),
     periods_per_year: ppy,
     rate_annual: d.rate,
-    remaining_periods: Math.max(0, Math.round((n0 - d.paymentsMade) * 10) / 10),
+    remaining_periods: isFinite(remaining) ? Math.round(remaining * 10) / 10 : 0,
     initial_balance_rub: d.initialBalance,
     months_left: proj.monthsLeft,
     payoff_date: proj.payoffISO,
@@ -152,6 +153,7 @@ function buildOverview_() {
     },
     net_worth: {
       cash_usd: round2_(nw.cashUSD),
+      deposits_usd: round2_(nw.depositsUSD),
       portfolio_usd: round2_(nw.portfolioUSD),
       debt_rub: round2_(nw.debtRUB),
       debt_usd: round2_(nw.debtUSD),

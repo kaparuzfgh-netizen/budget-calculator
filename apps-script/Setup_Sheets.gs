@@ -23,6 +23,9 @@ function setup() {
       portfolio: buildOnce_(SHEETS.PORTFOLIO, buildPortfolio_),
       networth: buildOnce_(SHEETS.NETWORTH, buildNetWorth_),
       fxhistory: buildOnce_(SHEETS.FX_HISTORY, buildFxHistory_),
+      deposits: buildOnce_(SHEETS.DEPOSITS, buildDeposits_),
+      metrics: buildOnce_(SHEETS.METRICS, buildMetrics_),
+      networthMigrated: migrateNetWorthSheet_(),
       triggers: installTriggers_(),
     };
   });
@@ -285,22 +288,32 @@ function buildPortfolio_(sh) {
 // ─────────────────────── NetWorth_History ───────────────────────
 
 function buildNetWorth_(sh) {
-  const headers = ['Date', 'Cash USD', 'Portfolio USD', 'Debt ₽', 'Debt USD', 'Net Worth USD'];
+  const headers = ['Date', 'Cash USD', 'Deposits USD', 'Portfolio USD', 'Debt ₽', 'Debt USD', 'Net Worth USD'];
   sh.getRange(1, 1, 1, headers.length).setValues([headers]);
   boldHeader_(sh, headers.length);
-  sh.getRange('B2:F1000').setNumberFormat('#,##0.00');
+  sh.getRange('B2:G1000').setNumberFormat('#,##0.00');
 
   // Встроенный график Net Worth (BI прямо в таблице)
   const chart = sh.newChart()
     .setChartType(Charts.ChartType.LINE)
     .addRange(sh.getRange('A2:A1000'))
-    .addRange(sh.getRange('F2:F1000'))
+    .addRange(sh.getRange('G2:G1000'))
     .setOption('title', 'Net Worth, USD')
     .setOption('curveType', 'function')
     .setOption('legend', { position: 'none' })
-    .setPosition(1, 8, 0, 0)
+    .setPosition(1, 9, 0, 0)
     .build();
   sh.insertChart(chart);
+}
+
+/** Миграция старых 6-колоночных таблиц NetWorth → 7 колонок (Deposits USD). */
+function migrateNetWorthSheet_() {
+  const sh = sheet_(SHEETS.NETWORTH);
+  if (sh.getLastColumn() !== 6) return false;
+  sh.insertColumnAfter(3); // после Cash USD
+  sh.getRange(1, 4).setValue('Deposits USD');
+  sh.getRange('B2:G1000').setNumberFormat('#,##0.00');
+  return true;
 }
 
 // ─────────────────────── FX_History (180 дней для анализа/прогноза) ───────────────────────
@@ -324,6 +337,27 @@ function buildFxHistory_(sh) {
     );
   });
   sh.setFrozenRows(2);
+}
+
+// ─────────────────────── Deposits (вклады как актив) ───────────────────────
+
+function buildDeposits_(sh) {
+  const headers = ['Date Opened', 'Name', 'Amount', 'Currency', 'Rate', 'Maturity', 'Active'];
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  boldHeader_(sh, headers.length);
+  sh.getRange('C2:C100').setNumberFormat('#,##0.00');
+  sh.getRange('E2:E100').setNumberFormat('0.00%');
+  sh.setColumnWidth(2, 220);
+}
+
+// ─────────────────────── Metrics (продуктовые метрики) ───────────────────────
+
+function buildMetrics_(sh) {
+  const headers = ['Date', 'Key', 'Value'];
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  boldHeader_(sh, headers.length);
+  sh.getRange('A2:A10000').setNumberFormat('yyyy-mm-dd');
+  sh.setColumnWidth(2, 200);
 }
 
 // ─────────────────────── Webhook ───────────────────────

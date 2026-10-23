@@ -16,6 +16,7 @@ ORDER=(
   VisionParser.gs
   InvestNetWorth.gs
   FXAnalytics.gs
+  MetricsEngine.gs
   TmaApi.gs
   Triggers.gs
   SecurityAudit.gs

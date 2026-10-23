@@ -239,4 +239,51 @@ const FXAnalytics = {
     });
     SpreadsheetApp.flush();
   },
+
+  /**
+   * Push-алерты по валютам (P0): вызывается из dailyMaintenance.
+   * Верхняя зона (перцентиль ≥ HIGH): «выгодное окно конвертации».
+   * Нижняя зона (≤ LOW): «отложите конвертации» (информационно).
+   * Кулдаун COOLDOWN_DAYS дней на пару и тип, чтобы не спамить.
+   */
+  checkAlerts: function () {
+    const cfg = CONFIG.FX_ALERTS;
+    const chatId = getProp_(PROP.CHAT_ID, '');
+    if (!chatId) return [];
+    const a = this.build();
+    if (!a.ok) return [];
+    const sent = [];
+
+    a.actions.forEach(function (action) {
+      if (cfg.ACTIONS.indexOf(action.key) === -1) return;
+      const kind = action.percentile >= cfg.HIGH_PERCENTILE ? 'hi' :
+        (action.percentile <= cfg.LOW_PERCENTILE ? 'lo' : null);
+      if (!kind) return;
+
+      const cooldownKey = 'FXALERT_' + action.key + '_' + kind;
+      const lastStr = getSetting_(cooldownKey, '');
+      const last = lastStr ? new Date(String(lastStr)) : null;
+      const daysSince = last && !isNaN(last) ? Math.floor((new Date() - last) / 86400000) : Infinity;
+      if (daysSince < cfg.COOLDOWN_DAYS) return;
+
+      const curLabel = action.label.indexOf('RUB') > -1 ? '₽' : action.label.indexOf('KGS') > -1 ? 'сом' : '$';
+      let text;
+      if (kind === 'hi') {
+        text = '🟢 <b>Выгодное окно конвертации ' + action.emoji + ' ' + action.label + '</b>\n' +
+          'Курс ' + fmtMoney_(action.current, curLabel === '$' ? 'USD' : action.label.indexOf('RUB') > -1 ? 'RUB' : 'KGS') +
+          ' — ' + action.percentile + '-й перцентиль за 180 дней (RSI ' + action.rsi14 + ').\n' +
+          (action.key === 'eur_rub' ? 'Хороший момент продать EUR против платежей по ипотекам.' :
+           'Хороший момент обменять EUR на жизнь/MBANK.') + '\n\n' + action.signal_text + '\n/fx — детали';
+      } else {
+        text = '🔴 <b>Курс ' + action.emoji + ' ' + action.label + ' в нижней зоне</b>\n' +
+          'Перцентиль ' + action.percentile + '/100 — по возможности отложите конвертацию ' +
+          '(кроме обязательных платежей).\n/fx — детали';
+      }
+      sendMessage_(chatId, text);
+      setSetting_(cooldownKey, fmtISO_(new Date()));
+      MetricsEngine.log('fx_alert:' + action.key + ':' + kind, fmtISO_(new Date()));
+      sent.push(action.key + ':' + kind);
+    });
+    return sent;
+  },
 };

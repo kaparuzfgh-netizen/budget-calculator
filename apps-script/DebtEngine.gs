@@ -117,6 +117,7 @@ const DebtEngine = {
       let payment = DebtEngine.initialPayment_(debt.id);
       let made = 0;
       const n0 = DebtEngine.derivePeriods_(debt.initialBalance, debt.rate, ppy, payment);
+      let n0Eff = n0; // эффективно смещается событиями reconcile
 
       events.forEach(function (ev) {
         if (ev.debt !== debt.id || !ev.amount) return;
@@ -126,8 +127,12 @@ const DebtEngine = {
           made += 1;
         } else if (ev.event === 'prepay') {
           balance = Math.max(0, balance - ev.amount);
-          const nLeft = Math.max(0, n0 - made);
+          const nLeft = Math.max(0, n0Eff - made);
           payment = DebtEngine.annuityPayment_(balance, debt.rate, ppy, nLeft); // срок сохраняется
+        } else if (ev.event === 'reconcile') {
+          // сверка с банком: факт главнее; платёж не меняется, срок пересчитывается
+          balance = Math.max(0, ev.amount);
+          n0Eff = made + DebtEngine.derivePeriods_(balance, debt.rate, ppy, payment);
         }
       });
 
@@ -151,8 +156,9 @@ const DebtEngine = {
     const debts = this.getDebts();
     const sber = debts.filter(function (d) { return d.id === 'SBER'; })[0];
     if (sber) {
-      const n0 = this.derivePeriods_(sber.initialBalance, sber.rate, 12, this.initialPayment_('SBER'));
-      const n = Math.max(0, n0 - sber.paymentsMade);
+      // оставшийся срок = инверсия аннуитета от текущего (баланс, ставка, платёж):
+      // консистентно и после ЧДП, и после reconcile
+      const n = this.derivePeriods_(sber.balance, sber.rate, 12, sber.payment);
       sheet_(SHEETS.DEBTS).getRange('B7').setValue(Math.round(n * 10) / 10);
     }
   },
@@ -216,6 +222,41 @@ const DebtEngine = {
       const sh = sheet_(SHEETS.DEBTS);
       sh.getRange(sh.getLastRow(), 5, 1, 2).setValues([[after.balance, after.payment]]);
       return after;
+    });
+  },
+
+  /**
+   * Сверка с банком (P1 + Vision): установить ФАКТИЧЕСКИЙ остаток долга из
+   * приложения банка. Платёж не меняется — срок пересчитывается.
+   * Возвращает { before, after, drift, projection }.
+   */
+  reconcile: function (debtId, actualBalanceRUB) {
+    const self = this;
+    return runWithLock_(function () {
+      const debt = self.getDebt(debtId);
+      const actual = Number(actualBalanceRUB);
+      if (!isFinite(actual) || actual < 0) throw new Error('Остаток должен быть неотрицательным числом');
+      const before = debt.balance;
+      if (Math.abs(before - actual) < 1) {
+        return { id: debt.id, name: debt.name, before: before, after: before, drift: 0, unchanged: true };
+      }
+      self.appendEvent_(debt.id, 'reconcile', actual, 'vision-reconcile');
+      self.replayAll();
+      const after = self.getDebt(debt.id);
+      const sh = sheet_(SHEETS.DEBTS);
+      sh.getRange(sh.getLastRow(), 5, 1, 2).setValues([[after.balance, after.payment]]);
+      const proj = self.projection(after, 0);
+      MetricsEngine.log('recon_drift:' + debt.id + ':' + fmtMonthKey_(new Date()), Math.round(Math.abs(before - actual)));
+      return {
+        id: debt.id,
+        name: debt.name,
+        before: before,
+        after: after.balance,
+        drift: actual - before,
+        unchanged: false,
+        monthsLeft: proj.monthsLeft,
+        payoffISO: proj.payoffISO,
+      };
     });
   },
 

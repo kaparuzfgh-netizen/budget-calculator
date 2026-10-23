@@ -68,6 +68,8 @@ const CMD_ALIAS = {
   'ипотека': 'mortgage', 'инвестиции': 'invest', 'портфель': 'invest',
   'кэш': 'cash', 'cash': 'cash', 'синк': 'sync', 'приложение': 'app',
   'валюта': 'fx', 'курс': 'fx', 'курсы': 'fx', 'валютаанализ': 'fx',
+  'баланс': 'balance', 'остаток': 'balance', 'алиас': 'alias', 'категория': 'alias',
+  'гайд': 'guide', 'метрики': 'metrics',
 };
 
 function routeCommand_(chatId, text) {
@@ -89,6 +91,10 @@ function routeCommand_(chatId, text) {
       case 'mortgage': cmdMortgage_(chatId, args); break;
       case 'invest': cmdInvest_(chatId); break;
       case 'fx': cmdFx_(chatId); break;
+      case 'balance': cmdBalance_(chatId, args); break;
+      case 'alias': cmdAlias_(chatId, args); break;
+      case 'guide': cmdGuide_(chatId); break;
+      case 'metrics': cmdMetrics_(chatId); break;
       case 'cash': cmdCash_(chatId, args); break;
       case 'status': cmdStatus_(chatId); break;
       case 'sync': cmdSync_(chatId); break;
@@ -123,15 +129,19 @@ function sendHelp_(chatId, prefix) {
     '/plan [сумма] [валюта] — водопад месяца (без аргументов — по базовому доходу)\n' +
     '/income 6200 eur [заметка] — доход месяца: каскад дельты бонуса 50/50 + кнопка Apply\n' +
     '/spent 3200 [₽/kgs/$] [заметка] — трата в недельный учёт\n' +
-    'фото-скриншот MBANK — Vision-разбор суммы и категорий\n' +
+    'фото-скриншот MBANK — расходы; скриншот ипотеки — сверка остатка с банком\n' +
     '/week — бюджет недели/месяца, burn rate, дневной лимит\n' +
     '/prepay sber|tbank 50000 — частичное досрочное погашение\n' +
+    '/balance sber 1234567 — сверка остатка ипотеки вручную\n' +
     '/mortgage sber|tbank [сумма] — отметить плановый платёж вручную\n' +
     '/invest — портфель и дрейф от целей 58/23/19\n' +
     '/fx — валюты: перцентили, RSI, прогноз 7/30д и когда выгодно менять EUR→₽/сом/$\n' +
-    '/cash 12000 kgs — установить остаток кэша\n' +
-    '/status — Net Worth сводка\n' +
+    '/cash 12000 kgs — остаток кэша в валюте (usd/eur/rub/kgs)\n' +
+    '/alias "кафе" Питание — исправить категорию Vision на будущее\n' +
+    '/status — Net Worth (кэш + вклады + портфель − долг)\n' +
+    '/metrics — продуктовые метрики (ответы недели, savings rate, vision)\n' +
     '/sync — roll-forward долгов + снапшот Net Worth\n' +
+    '/guide — гид установки: что готово и следующий шаг\n' +
     '/app — открыть Mini App (дашборд со слайдерами)'
   );
 }
@@ -184,6 +194,7 @@ function cmdSpent_(chatId, args) {
   const status = CashflowEngine.logWeeklyExpense({
     amount: parsed.total_spent, currency: parsed.currency, note: args, source: 'manual',
   });
+  MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), 'manual');
   sendMessage_(chatId,
     '🧾 Записано: ' + fmtMoney_(parsed.total_spent, parsed.currency) + '\n\n' +
     CashflowEngine.renderWeeklyText(status));
@@ -202,6 +213,7 @@ function cmdPrepay_(chatId, args) {
   if (!amount) throw new Error('Не понял сумму: ' + escHtml_(parts[1]));
   const r = DebtEngine.registerPrepay(debtId, amount);
   const arb = DebtEngine.arbitrage(r.amount);
+  const dep = InvestNetWorth.depositsSummary();
   sendMessage_(
     chatId,
     '💸 <b>ЧДП ' + escHtml_(r.name) + '</b>\n' +
@@ -210,7 +222,9 @@ function cmdPrepay_(chatId, args) {
     'Платёж (срок сохранён): ' + fmtMoney_(r.paymentBefore, 'RUB') + ' → <b>' + fmtMoney_(r.paymentAfter, 'RUB') + '</b>' +
     (r.paymentSaved > 0 ? ' (−' + fmtMoney_(r.paymentSaved, 'RUB') + '/мес)' : '') + '\n\n' +
     '🔗 Commitments_Registry обновится сам (формулы ссылаются на Debt_Engine).\n' +
-    '⚖️ ' + (arb.depositWins ? '⚠️ ' : '✅ ') + arb.verdict
+    '⚖️ ' + (arb.depositWins ? '⚠️ ' : '✅ ') + arb.verdict +
+    (dep.count ? '\n🏦 Уже на вкладах: ' + fmtMoney_(dep.totalUSD, 'USD') + ' под ~' + fmtPct_(dep.avgRate) +
+      ' — арбитраж фактически работает.' : '')
   );
 }
 
@@ -232,12 +246,91 @@ function cmdFx_(chatId) {
   sendMessage_(chatId, FXAnalytics.renderText(FXAnalytics.build()));
 }
 
+/** /balance sber|tbank <остаток ₽> — сверка ипотеки с банком вручную. */
+function cmdBalance_(chatId, args) {
+  const parts = String(args || '').split(/\s+/);
+  if (parts.length < 2 || !parseAmount_(parts[1])) {
+    throw new Error('Формат: /balance sber 1234567 (или tbank)');
+  }
+  proposeReconciliation_(chatId, parts[0], parseAmount_(parts[1]));
+}
+
+/** /alias "кафе" Питание — переименование категории Vision на будущее. */
+function cmdAlias_(chatId, args) {
+  const m = String(args || '').match(/^"?([^"]+?)"?\s+"?([^"]+?)"?$/);
+  if (!m || !m[1] || !m[2]) throw new Error('Формат: /alias "как распознал" "как правильно"');
+  const from = m[1].trim(), to = m[2].trim();
+  setSetting_('CAT_ALIAS_' + from.toLowerCase(), to);
+  MetricsEngine.log('vision_fix:' + fmtISO_(new Date()), from + '→' + to);
+  sendMessage_(chatId, '✅ Категория «' + escHtml_(from) + '» теперь записывается как «' + escHtml_(to) + '».');
+}
+
+/** /guide — интерактивный онбординг: что уже готово и следующий шаг (P2). */
+function cmdGuide_(chatId) {
+  const L = ['🧭 <b>Гид установки</b> — состояние и следующий шаг\n'];
+  let step = 0;
+
+  const token = getProp_(PROP.BOT_TOKEN, '');
+  const chatIdProp = getProp_(PROP.CHAT_ID, '');
+  const visionKey = getProp_(PROP.GEMINI_KEY, '') || getProp_(PROP.GROQ_KEY, '');
+  L.push((token ? '✅' : '⬜') + ' 1. Токен бота (TELEGRAM_BOT_TOKEN)');
+  L.push((chatIdProp ? '✅' : '⬜') + ' 2. Chat ID (TELEGRAM_CHAT_ID)');
+  L.push((visionKey ? '✅' : '⬜') + ' 3. Ключ Vision (GEMINI_API_KEY или GROQ_API_KEY)');
+  if (!token) step = 1; else if (!chatIdProp) step = 2; else if (!visionKey) step = 3;
+
+  let sheetOk = false;
+  try { ss_().getSheetByName(SHEETS.FX_SETTINGS).getRange('B2').getValue(); sheetOk = true; } catch (e) {}
+  L.push((sheetOk ? '✅' : '⬜') + ' 4. Таблица создана (createSpreadsheet)');
+  if (sheetOk && !step) step = 4;
+
+  let hookOk = false;
+  try { hookOk = !!tgCall_('getWebhookInfo', {}).url; } catch (e) {}
+  L.push((hookOk ? '✅' : '⬜') + ' 5. Webhook привязан (деплой + setupWebhook)');
+  if (hookOk && !step) step = 5;
+
+  const mini = String(CONFIG.MINI_APP_URL || getSetting_('MINI_APP_URL', ''));
+  L.push((mini ? '✅' : '⬜') + ' 6. Mini App подключён (ключ MINI_APP_URL)');
+  if (mini && !step) step = 6;
+
+  const next = {
+    1: '→ Получите токен у @BotFather и добавьте в Script Properties (SETUP.md, Шаг 1 и 3).',
+    2: '→ Узнайте chat_id у @userinfobot и добавьте TELEGRAM_CHAT_ID.',
+    3: '→ Создайте ключ на aistudio.google.com/apikey (или console.groq.com) и добавьте.',
+    4: '→ Выполните функцию createSpreadsheet в редакторе Apps Script.',
+    5: '→ Разверните Web App и выполните setupWebhook (SETUP.md, Шаг 5).',
+    6: '→ Всё готово! Дальше: /income 6200 eur, /plan, /fx. Проверка здоровья: /sync и securityAudit.',
+    0: '→ Начните с Шага 1 в SETUP.md.',
+  }[step];
+  L.push('\n<b>Следующий шаг:</b>\n' + next);
+  sendMessage_(chatId, L.join('\n'));
+}
+
+/** /metrics — продуктовые метрики (weekly response, vision, cascade, savings). */
+function cmdMetrics_(chatId) {
+  const wrr = MetricsEngine.weeklyResponseRate();
+  const va = MetricsEngine.visionAccuracy();
+  const L = ['📊 <b>Метрики продукта</b>\n'];
+  L.push('Воскресные опросы: ' + (wrr === null ? 'ещё не было' : fmtPct_(wrr, 0) + ' ответов (' +
+    MetricsEngine.byPrefix('weekly_ask:').length + ' нед.) — цель >80%'));
+  if (va) L.push('Vision: исправлений ' + va.fixes + ' из ' + (va.fixes + va.visionRows) + ' записей (' +
+    fmtPct_(va.fixRate, 0) + ') — цель <10%');
+  const sr = MetricsEngine.value('savings_rate:');
+  if (sr !== null) L.push('Savings rate (посл. месяц): ' + fmtPct_(Number(sr)));
+  const cascades = MetricsEngine.byPrefix('cascade_applied:');
+  if (cascades.length) {
+    const applied = cascades.filter(function (c) { return c.value === '1'; }).length;
+    L.push('Каскад применён: ' + applied + ' из ' + cascades.length + ' мес.');
+  }
+  sendMessage_(chatId, L.join('\n'));
+}
+
 function cmdCash_(chatId, args) {
   const parsed = parseTypedExpense_(args || '');
-  if (!parsed) throw new Error('Формат: /cash 12000 kgs');
-  const usd = InvestNetWorth.setCash(parsed.total_spent, parsed.currency);
-  sendMessage_(chatId, '💵 Кэш установлен: ' + fmtMoney_(parsed.total_spent, parsed.currency) +
-    ' = ' + fmtMoney_(usd, 'USD') + '\n\n' + InvestNetWorth.renderNetWorthText(InvestNetWorth.netWorth()));
+  if (!parsed) throw new Error('Формат: /cash 12000 kgs (валюта: usd/eur/rub/kgs)');
+  const totalUSD = InvestNetWorth.setCash(parsed.total_spent, parsed.currency);
+  sendMessage_(chatId, '💵 Кэш ' + parsed.currency + ' = ' + fmtMoney_(parsed.total_spent, parsed.currency) +
+    ' · всего кэша: ' + fmtMoney_(totalUSD, 'USD') + '\n\n' +
+    InvestNetWorth.renderNetWorthText(InvestNetWorth.netWorth()));
 }
 
 function cmdStatus_(chatId) {
@@ -295,11 +388,56 @@ function handleCallback_(cb) {
   if (data.indexOf('apply_month:') === 0) {
     const monthKey = data.split(':')[1];
     CashflowEngine.setMonthStatus(monthKey, 'applied');
+    MetricsEngine.logOnce('cascade_applied:' + monthKey, 1);
     answerCallback_(cb.id, 'Applied ✅');
     tgCall_('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id });
     sendMessage_(chatId, '✅ Месяц ' + escHtml_(monthKey) + ' применён: каскад зафиксирован в Monthly_Cycles.');
     return;
   }
+
+  // Сверка ипотек с банком (P1)
+  if (data.indexOf('recon_apply:') === 0) {
+    const parts = data.split(':'); // recon_apply:SBER:1234567
+    try {
+      const r = DebtEngine.reconcile(parts[1], parts[2]);
+      answerCallback_(cb.id, 'Применено ✅');
+      tgCall_('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id });
+      sendMessage_(
+        chatId,
+        r.unchanged
+          ? '✅ ' + escHtml_(r.name) + ': остатки уже совпадали.'
+          : '✅ ' + escHtml_(r.name) + ': остаток ' + fmtMoney_(r.before, 'RUB') + ' → <b>' + fmtMoney_(r.after, 'RUB') + '</b>' +
+            ' (Δ ' + (r.drift > 0 ? '+' : '') + fmtMoney_(r.drift, 'RUB') + ')\n' +
+            'Платёж не изменился; срок пересчитан: ~' + r.monthsLeft + ' мес (погашение к ' + r.payoffISO + ')'
+      );
+      MetricsEngine.logOnce('recon_ok:' + fmtMonthKey_(new Date()), parts[1]);
+    } catch (e) {
+      answerCallback_(cb.id, 'Ошибка');
+      sendMessage_(chatId, '❌ ' + escHtml_(e.message));
+    }
+    return;
+  }
+  if (data === 'recon_ok') {
+    MetricsEngine.logOnce('recon_ok:' + fmtMonthKey_(new Date()), 'manual');
+    answerCallback_(cb.id, 'Записано ✅');
+    tgCall_('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id });
+    sendMessage_(chatId, '✅ Сверка зафиксирована. Хорошего месяца!');
+    return;
+  }
+  if (data === 'recon_how') {
+    answerCallback_(cb.id, '');
+    sendMessage_(chatId,
+      '📸 Просто пришлите скриншот экрана ипотеки (остаток долга) прямо в чат — ' +
+      'бот распознает остаток, сравнит с движком и предложит применить.\n' +
+      'Или вручную: /balance sber 1234567');
+    return;
+  }
+  if (data === 'recon_cancel') {
+    answerCallback_(cb.id, 'Отменено');
+    tgCall_('editMessageReplyMarkup', { chat_id: chatId, message_id: cb.message.message_id });
+    return;
+  }
+
   answerCallback_(cb.id, '');
 }
 
@@ -311,8 +449,18 @@ function handlePhoto_(chatId, fileId, mime) {
     const file = downloadTelegramFile_(fileId); // валидирует, что это изображение
     const parsed = parseExpenseScreenshot_(file.base64, mime || file.mime);
 
-    const head = '🤖 <b>Gemini разобрал скриншот</b>\n' +
-      'Период: ' + escHtml_(parsed.period) + ' · Валюта: ' + parsed.currency + '\n' +
+    if (parsed.screen_type === 'debt_balance') return handleDebtBalancePhoto_(chatId, parsed);
+
+    if (parsed.screen_type === 'other' || !parsed.total_spent) {
+      sendMessage_(chatId,
+        '🤖 Не нашёл на скриншоте ни аналитики расходов, ни остатка долга (провайдер: ' + parsed.provider + ').\n' +
+        'Пришлите экран «Аналитика/Расходы за период» из MBANK или экран ипотеки с остатком долга.\n' +
+        'Или введите сумму: /spent 3200');
+      return;
+    }
+
+    const head = '🤖 <b>' + (parsed.provider === 'groq' ? 'Groq (резерв)' : 'Gemini') + ' разобрал скриншот</b>\n' +
+      'Период: ' + escHtml_(parsed.period || '—') + ' · Валюта: ' + parsed.currency + '\n' +
       'Сумма: <b>' + fmtMoney_(parsed.total_spent, parsed.currency) + '</b>' +
       (parsed.top_categories.length
         ? '\nКатегории: ' + parsed.top_categories.map(function (c) {
@@ -321,7 +469,6 @@ function handlePhoto_(chatId, fileId, mime) {
         : '');
 
     if (parsed.is_full_month_analytics) {
-      // месячная аналитика ≠ недельная тратa: не портим недельный бюджет
       sendMessage_(chatId, head + '\n\nℹ️ Это аналитика за <b>весь месяц</b> — не записываю её как недельную.' +
         ' Свежий месячный расход покажет /week.');
       return;
@@ -333,14 +480,56 @@ function handlePhoto_(chatId, fileId, mime) {
       currency: parsed.currency,
       cat1: c1 ? c1.category + ' ' + round2_(c1.amount) : '',
       cat2: c2 ? c2.category + ' ' + round2_(c2.amount) : '',
-      note: 'vision · file ' + fileId.slice(0, 12),
+      note: 'vision/' + parsed.provider + ' · file ' + fileId.slice(0, 12),
     });
+    MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), parsed.provider);
     sendMessage_(chatId, head + '\n\n' + CashflowEngine.renderWeeklyText(status));
   } catch (err) {
     console.error('photo: ' + err.message);
     sendMessage_(chatId, '😕 ' + escHtml_(err.message) +
       '\nПопробуйте переснять скриншот (полный экран аналитики) или введите сумму: /spent 3200');
   }
+}
+
+/** Скриншот остатка ипотеки → сверка Debt_Engine (P1: «просто пришли скрин»). */
+function handleDebtBalancePhoto_(chatId, parsed) {
+  if (!parsed.debt_balance_rub) {
+    sendMessage_(chatId, '🏦 Вижу экран ипотеки, но остаток долга не распознан.\n' +
+      'Введите вручную: /balance sber 1234567 (или tbank)');
+    return;
+  }
+  const debtId = debtIdFromBank_(parsed.bank);
+  if (!debtId) {
+    sendMessage_(
+      chatId,
+      '🏦 Остаток долга на скриншоте: <b>' + fmtMoney_(parsed.debt_balance_rub, 'RUB') + '</b>\n' +
+      'Банк не распознан — какая это ипотека?',
+      [
+        { text: 'Сбербанк', callback_data: 'recon_apply:SBER:' + parsed.debt_balance_rub },
+        { text: 'Т-Банк', callback_data: 'recon_apply:TBANK:' + parsed.debt_balance_rub },
+      ]
+    );
+    return;
+  }
+  proposeReconciliation_(chatId, debtId, parsed.debt_balance_rub);
+}
+
+/** Сравнить факт с движком и предложить применить. */
+function proposeReconciliation_(chatId, debtId, actualRUB) {
+  const debt = DebtEngine.getDebt(debtId);
+  const drift = actualRUB - debt.balance;
+  const text =
+    '🏦 <b>' + escHtml_(debt.name) + '</b>\n' +
+    'В движке: ' + fmtMoney_(debt.balance, 'RUB') + '\n' +
+    'На скриншоте: <b>' + fmtMoney_(actualRUB, 'RUB') + '</b>\n' +
+    (Math.abs(drift) < 1
+      ? '✅ Совпадает — ничего делать не нужно.'
+      : 'Δ ' + (drift > 0 ? '+' : '') + fmtMoney_(drift, 'RUB') + ' — применить фактический остаток?');
+  if (Math.abs(drift) < 1) { sendMessage_(chatId, text); return; }
+  sendMessage_(chatId, text, [
+    { text: '✅ Применить остаток', callback_data: 'recon_apply:' + debtId + ':' + Math.round(actualRUB) },
+    { text: 'Отмена', callback_data: 'recon_cancel' },
+  ]);
 }
 
 // ─────────────────────────── Свободный текст ───────────────────────────
@@ -361,6 +550,7 @@ function handleFreeText_(chatId, text) {
       const status = CashflowEngine.logWeeklyExpense({
         amount: parsed.total_spent, currency: parsed.currency, note: 'weekly reply', source: 'chat',
       });
+      MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), 'chat');
       sendMessage_(chatId, '🧾 Записано: ' + fmtMoney_(parsed.total_spent, parsed.currency) + '\n\n' +
         CashflowEngine.renderWeeklyText(status));
     } else {

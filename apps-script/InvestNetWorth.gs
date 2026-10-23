@@ -64,33 +64,88 @@ const InvestNetWorth = {
     return L.join('\n');
   },
 
+  /** Мультивалютный кэш: CASH_USD + CASH_EUR + CASH_RUB + CASH_KGS → USD. */
+  cashBreakdown_: function (fx) {
+    fx = fx || getFx_();
+    const raw = {
+      USD: getSettingNum_('CASH_USD', 0),
+      EUR: getSettingNum_('CASH_EUR', 0),
+      RUB: getSettingNum_('CASH_RUB', 0),
+      KGS: getSettingNum_('CASH_KGS', 0),
+    };
+    const usd = {
+      USD: raw.USD,
+      EUR: raw.EUR * fx.EURUSD,
+      RUB: raw.RUB / fx.USDRUB,
+      KGS: raw.KGS / fx.USDKGS,
+    };
+    return { raw: raw, usd: usd, totalUSD: usd.USD + usd.EUR + usd.RUB + usd.KGS };
+  },
+
+  /** Вклады как актив (лист Deposits): только Active. */
+  depositsSummary: function () {
+    const fx = getFx_();
+    let totalUSD = 0, weighted = 0, sumOriginal = 0, count = 0;
+    const names = [];
+    readRange_(SHEETS.DEPOSITS, 2).forEach(function (r) {
+      const active = r[6] === true || String(r[6]).toUpperCase() === 'TRUE';
+      if (!active) return;
+      const amount = Number(r[2]) || 0;
+      const cur = String(r[3] || 'RUB').toUpperCase();
+      const rate = Number(r[4]) || 0;
+      totalUSD += convert_(amount, cur, 'USD', fx);
+      weighted += amount * rate;
+      sumOriginal += amount;
+      count += 1;
+      if (names.length < 3) names.push(String(r[1] || 'Вклад'));
+    });
+    return {
+      count: count,
+      totalUSD: totalUSD,
+      avgRate: sumOriginal > 0 ? weighted / sumOriginal : 0,
+      names: names,
+    };
+  },
+
   netWorth: function () {
     const fx = getFx_();
-    const cash = getSettingNum_('CASH_USD', 0);
+    const cash = this.cashBreakdown_(fx);
+    const deposits = this.depositsSummary();
     const portfolio = this.getPortfolio().totalUSD;
     const debtRUB = DebtEngine.totalDebtRUB();
     const debtUSD = debtRUB / fx.USDRUB;
     return {
       date: fmtISO_(new Date()),
-      cashUSD: cash,
+      cashUSD: cash.totalUSD,
+      cashRaw: cash.raw,
+      depositsUSD: deposits.totalUSD,
       portfolioUSD: portfolio,
       debtRUB: debtRUB,
       debtUSD: debtUSD,
-      netWorthUSD: cash + portfolio - debtUSD,
+      netWorthUSD: cash.totalUSD + deposits.totalUSD + portfolio - debtUSD,
       fx: fx,
     };
   },
 
   renderNetWorthText: function (nw) {
+    const cash = this.cashBreakdown_(nw.fx);
+    const parts = [];
+    if (cash.raw.EUR) parts.push(fmtMoney_(cash.raw.EUR, 'EUR'));
+    if (cash.raw.RUB) parts.push(fmtMoney_(cash.raw.RUB, 'RUB'));
+    if (cash.raw.KGS) parts.push(fmtMoney_(cash.raw.KGS, 'KGS'));
+    if (cash.raw.USD) parts.push(fmtMoney_(cash.raw.USD, 'USD'));
+    const dep = this.depositsSummary();
     return '🧮 <b>Net Worth</b>\n' +
-      '💵 Cash: ' + fmtMoney_(nw.cashUSD, 'USD') + '\n' +
+      '💵 Cash: ' + fmtMoney_(nw.cashUSD, 'USD') +
+      (parts.length > 1 ? ' (' + parts.join(' · ') + ')' : '') + '\n' +
+      '🏦 Вклады: ' + (dep.count ? fmtMoney_(dep.totalUSD, 'USD') + ' (' + dep.count + ' шт.)' : 'нет — учтите в листе Deposits') + '\n' +
       '💼 Portfolio: ' + fmtMoney_(nw.portfolioUSD, 'USD') + '\n' +
-      '🏦 Долг: −' + fmtMoney_(nw.debtUSD, 'USD') + ' (' + fmtMoney_(nw.debtRUB, 'RUB') + ')\n' +
+      '🏚 Долг: −' + fmtMoney_(nw.debtUSD, 'USD') + ' (' + fmtMoney_(nw.debtRUB, 'RUB') + ')\n' +
       '➖➖➖➖➖➖➖➖➖➖\n' +
       (nw.netWorthUSD >= 0 ? '🟢' : '🔴') + ' <b>' + fmtMoney_(nw.netWorthUSD, 'USD') + '</b>';
   },
 
-  /** Ежедневный снапшот (upsert по дате). */
+  /** Ежедневный снапшот (upsert по дате). Колонки: Cash | Deposits | Portfolio | Debt ₽ | Debt $ | NetWorth. */
   takeSnapshot: function () {
     const self = this;
     return runWithLock_(function () {
@@ -104,15 +159,15 @@ const InvestNetWorth = {
           const d = dates[i][0];
           const iso = d instanceof Date ? fmtISO_(d) : String(d);
           if (iso === today) {
-            sh.getRange(2 + i, 2, 1, 5).setValues([[
-              round2_(nw.cashUSD), round2_(nw.portfolioUSD),
+            sh.getRange(2 + i, 2, 1, 6).setValues([[
+              round2_(nw.cashUSD), round2_(nw.depositsUSD), round2_(nw.portfolioUSD),
               round2_(nw.debtRUB), round2_(nw.debtUSD), round2_(nw.netWorthUSD),
             ]]);
             return nw;
           }
         }
       }
-      sh.appendRow([new Date(), round2_(nw.cashUSD), round2_(nw.portfolioUSD),
+      sh.appendRow([new Date(), round2_(nw.cashUSD), round2_(nw.depositsUSD), round2_(nw.portfolioUSD),
         round2_(nw.debtRUB), round2_(nw.debtUSD), round2_(nw.netWorthUSD)]);
       return nw;
     });
@@ -124,15 +179,18 @@ const InvestNetWorth = {
       .filter(function (r) { return r[0]; })
       .map(function (r) {
         const d = r[0] instanceof Date ? r[0] : new Date(String(r[0]));
-        return { date: fmtISO_(d), netWorthUSD: Number(r[5]) || 0 };
+        // NetWorth в колонке F (6); при новых 7-колоночных строках — G (7)
+        const net = Number(r[6]) || Number(r[5]) || 0;
+        return { date: fmtISO_(d), netWorthUSD: net };
       });
     return rows.slice(-(limit || 90));
   },
 
+  /** Кэш в конкретной валюте: /cash 12000 kgs → CASH_KGS = 12000 (перезапись). */
   setCash: function (amount, currency) {
-    const fx = getFx_();
-    const usd = convert_(Number(amount), currency || 'USD', 'USD', fx);
-    setSetting_('CASH_USD', round2_(usd));
-    return usd;
+    const cur = (currency || 'USD').toUpperCase();
+    if (['USD', 'EUR', 'RUB', 'KGS'].indexOf(cur) === -1) throw new Error('Валюта кэша: USD/EUR/RUB/KGS');
+    setSetting_('CASH_' + cur, round2_(Number(amount)));
+    return this.cashBreakdown_().totalUSD;
   },
 };
