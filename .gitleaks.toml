@@ -1,0 +1,19 @@
+title = "Budget Companion — правила поиска секретов"
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram Bot Token"
+regex = '''\b\d{8,10}:[A-Za-z0-9_-]{35}\b'''
+tags = ["telegram", "bot", "critical"]
+
+[[rules]]
+id = "google-api-key"
+description = "Google API key (AI Studio / Gemini)"
+regex = '''\bAIza[0-9A-Za-z_\-]{30,}\b'''
+tags = ["google", "gemini", "critical"]
+
+[[rules]]
+id = "script-property-secret"
+description = "Явно присвоенный секрет в коде/конфиге (значение содержит цифры)"
+regex = '''(WEBHOOK_SECRET|TMA_READ_TOKEN|BOT_TOKEN|API_KEY)\s*[:=]\s*["'][A-Za-z0-9_\-]*[0-9][A-Za-z0-9_\-]{15,}["']'''
+tags = ["secret-assignment"]

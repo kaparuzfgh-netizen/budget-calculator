@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Personal Finance Companion</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  [v-cloak]{display:none}
+  body{background:#0b1220;color:#e2e8f0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;
+       -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+  .card{background:#111a2e;border:1px solid #1e293b;border-radius:16px}
+  input[type=range]{-webkit-appearance:none;height:6px;border-radius:6px;background:#1e293b;outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;
+    background:#34d399;border:3px solid #0b1220;box-shadow:0 0 0 1px #34d399}
+  .tab-active{color:#34d399;border-color:#34d399}
+  ::-webkit-scrollbar{display:none}
+</style>
+</head>
+<body>
+<div id="app" v-cloak class="max-w-lg mx-auto px-4 pb-24 pt-3">
+
+  <!-- ── Валютный тикер ── -->
+  <div class="flex items-center gap-2 text-[11px] font-mono overflow-x-auto pb-2">
+    <span class="px-2 py-1 rounded-lg bg-slate-800/70 whitespace-nowrap">🇪🇺 EUR/USD <b class="text-emerald-400">{{ fmt(d.fx.EURUSD,4) }}</b></span>
+    <span class="px-2 py-1 rounded-lg bg-slate-800/70 whitespace-nowrap">🇷🇺 USD/RUB <b class="text-emerald-400">{{ fmt(d.fx.USDRUB,2) }}</b></span>
+    <span class="px-2 py-1 rounded-lg bg-slate-800/70 whitespace-nowrap">🇰🇬 USD/KGS <b class="text-emerald-400">{{ fmt(d.fx.USDKGS,2) }}</b></span>
+    <button @click="load" class="ml-auto px-2 py-1 rounded-lg bg-slate-800/70 whitespace-nowrap">⟳ {{ d.version }}</button>
+  </div>
+
+  <!-- ── Демо-баннер ── -->
+  <div v-if="!isTelegram" class="card px-4 py-2 mb-3 text-xs text-amber-300/90">
+    🌐 Демо-режим (браузер): данные только для чтения. Записи (ЧДП, траты) — из Telegram.
+  </div>
+
+  <!-- ── Ошибка / загрузка ── -->
+  <div v-if="error" class="card px-4 py-3 mb-3 text-sm text-rose-400">⚠️ {{ error }}</div>
+  <div v-if="loading" class="text-center text-slate-400 text-sm py-6">Загрузка данных…</div>
+
+  <template v-if="d.ok">
+
+    <!-- ════════ ОБЗОР ════════ -->
+    <div v-show="tab==='overview'" class="space-y-3">
+      <div class="card p-4">
+        <div class="text-xs text-slate-400">NET WORTH · (Cash + Portfolio) − Debt</div>
+        <div class="text-3xl font-bold mt-1" :class="nw.total_usd>=0?'text-emerald-400':'text-rose-400'">
+          ${{ fmt(nw.total_usd) }}
+        </div>
+        <div class="grid grid-cols-3 gap-2 mt-3 text-center text-xs">
+          <div class="bg-slate-800/50 rounded-xl py-2">
+            <div class="text-slate-400">💵 Cash</div><b>${{ fmt(nw.cash_usd) }}</b></div>
+          <div class="bg-slate-800/50 rounded-xl py-2">
+            <div class="text-slate-400">💼 Portfolio</div><b>${{ fmt(nw.portfolio_usd) }}</b></div>
+          <div class="bg-slate-800/50 rounded-xl py-2">
+            <div class="text-slate-400">🏦 Debt</div><b class="text-rose-400">−${{ fmt(nw.debt_usd) }}</b></div>
+        </div>
+        <div class="mt-3"><canvas id="c-gauge" height="110"></canvas></div>
+      </div>
+
+      <div class="card p-4">
+        <div class="flex justify-between items-baseline text-sm mb-2">
+          <b>📅 Неделя / месяц</b>
+          <span :class="d.weekly.week_rub > d.weekly.week_budget_rub ? 'text-rose-400' : 'text-emerald-400'">
+            {{ fmtR(d.weekly.week_rub) }} / {{ fmtR(d.weekly.week_budget_rub) }} ₽
+          </span>
+        </div>
+        <div class="h-2.5 rounded bg-slate-800 overflow-hidden">
+          <div class="h-full rounded" :class="d.weekly.week_rub > d.weekly.week_budget_rub ? 'bg-rose-500' : 'bg-emerald-500'"
+               :style="{width: Math.min(100, 100*d.weekly.week_rub/d.weekly.week_budget_rub)+'%'}"></div>
+        </div>
+        <div class="flex justify-between text-xs text-slate-400 mt-2">
+          <span>Месяц: {{ fmtR(d.weekly.month_rub) }} / {{ fmtR(d.weekly.month_cap_rub) }} ₽ · burn {{ Math.round(d.weekly.burn_rate*100) }}%</span>
+          <span>💳 {{ fmtR(d.weekly.daily_allowance_rub) }} ₽/день</span>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <b class="text-sm">📈 Динамика Net Worth</b>
+        <canvas id="c-nw" height="150" class="mt-2"></canvas>
+      </div>
+    </div>
+
+    <!-- ════════ ПЛАН (водопад + слайдеры) ════════ -->
+    <div v-show="tab==='plan'" class="space-y-3">
+      <div class="card p-4 space-y-4">
+        <div>
+          <div class="flex justify-between text-sm"><b>💵 Доход месяца</b>
+            <span class="text-emerald-400 font-mono">{{ fmt(s.income) }} € ≈ ${{ fmt(wf.income_usd) }}</span></div>
+          <input type="range" min="3000" max="12000" step="100" v-model.number="s.income" class="w-full mt-2">
+          <div class="flex justify-between text-[10px] text-slate-500"><span>3000 €</span><span>база ${{ fmt(d.settings.base_income_usd) }}</span><span>12000 €</span></div>
+        </div>
+        <div>
+          <div class="flex justify-between text-sm"><b>💸 Доп. досрочка / мес</b>
+            <span class="text-emerald-400 font-mono">{{ fmtR(s.prepay) }} ₽</span></div>
+          <input type="range" min="0" max="150000" step="1000" v-model.number="s.prepay" class="w-full mt-2">
+        </div>
+        <div>
+          <div class="flex justify-between text-sm"><b>📈 Доп. DCA / мес</b>
+            <span class="text-emerald-400 font-mono">${{ fmt(s.dca) }}</span></div>
+          <input type="range" min="0" max="3000" step="50" v-model.number="s.dca" class="w-full mt-2">
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <b class="text-sm">📊 Водопад {{ wf.month_key }}</b>
+        <canvas id="c-waterfall" height="200" class="mt-2"></canvas>
+        <div class="text-xs text-slate-400 mt-2 space-y-1">
+          <div>Обязательства −${{ fmt(wf.commitments_usd.total) }}
+            (ипотеки ${{ fmt(wf.commitments_usd.mortgages) }}) · жизнь −${{ fmt(wf.living_usd) }}</div>
+          <div :class="wf.surplus_usd>=0?'text-emerald-400':'text-rose-400'">
+            Свободный профицит <b>${{ fmt(wf.surplus_usd) }}</b></div>
+          <div v-if="wf.bonus_delta_usd>0">🎁 Дельта бонуса +${{ fmt(wf.bonus_delta_usd) }} →
+            досрочка/вклад <b>${{ fmt(wf.to_prepay_usd) }}</b> · DCA <b>${{ fmt(wf.to_dca_usd) }}</b></div>
+          <div>DCA: ETF ${{ fmt(wf.dca_split_usd.etf) }} · Акции ${{ fmt(wf.dca_split_usd.stocks) }} · Крипта ${{ fmt(wf.dca_split_usd.crypto) }}</div>
+          <div v-if="wf.arbitrage && wf.arbitrage.amountRUB>0" :class="wf.arbitrage.depositWins?'text-amber-300':'text-emerald-400'">
+            ⚖️ {{ wf.arbitrage.verdict }}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ ДОЛГИ ════════ -->
+    <div v-show="tab==='debts'" class="space-y-3">
+      <div v-for="debt in d.debts" :key="debt.id" class="card p-4">
+        <div class="flex justify-between items-baseline">
+          <b class="text-sm">🏦 {{ debt.name }}</b>
+          <span class="text-xs text-slate-400">{{ fmtPct(debt.rate_annual) }}</span>
+        </div>
+        <div class="text-2xl font-bold mt-1">{{ fmtR(debt.balance_rub) }} ₽</div>
+        <div class="text-xs text-slate-400 mt-1">
+          Платёж {{ fmtR(debt.payment_rub) }} ₽{{ debt.payment_type==='biweekly' ? ' / 2 нед (≈'+fmtR(debt.normalized_monthly_rub)+' ₽/мес)' : '/мес' }}
+          · погашение {{ debt.payoff_date }} ({{ debt.months_left }} мес)
+        </div>
+        <div class="h-2 rounded bg-slate-800 overflow-hidden mt-2">
+          <div class="h-full bg-emerald-500" :style="{width:(100*(1-debt.balance_rub/debt.initial_balance_rub))+'%'}"></div>
+        </div>
+        <div class="text-[10px] text-slate-500 mt-1">Погашено {{ fmtPct(1-debt.balance_rub/debt.initial_balance_rub) }} от стартового баланса</div>
+      </div>
+
+      <!-- ЧДП-симулятор Сбербанка -->
+      <div v-if="sber" class="card p-4">
+        <b class="text-sm">🧮 ЧДП-симулятор · {{ sber.name }}</b>
+        <div class="flex justify-between text-sm mt-3"><span>Досрочный платёж L</span>
+          <span class="font-mono text-amber-300">{{ fmtR(pp.L) }} ₽</span></div>
+        <input type="range" min="0" :max="Math.floor(sber.balance_rub)" step="5000" v-model.number="pp.L" class="w-full mt-2">
+        <div class="flex gap-2 mt-3 text-xs">
+          <button @click="pp.mode='payment'" :class="pp.mode==='payment'?'bg-emerald-600':'bg-slate-800'" class="flex-1 py-2 rounded-xl">Платёж ↓ (срок прежний)</button>
+          <button @click="pp.mode='term'" :class="pp.mode==='term'?'bg-emerald-600':'bg-slate-800'" class="flex-1 py-2 rounded-xl">Срок ↓ (платёж прежний)</button>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mt-3 text-center text-xs">
+          <div class="bg-slate-800/50 rounded-xl py-3">
+            <div class="text-slate-400">Платёж станет</div>
+            <b class="text-lg">{{ fmtR(ppNewPayment) }} ₽</b>
+            <div class="text-emerald-400" v-if="ppNewPayment<sber.payment_rub">−{{ fmtR(sber.payment_rub-ppNewPayment) }} ₽/мес</div>
+          </div>
+          <div class="bg-slate-800/50 rounded-xl py-3">
+            <div class="text-slate-400">Срок станет</div>
+            <b class="text-lg">{{ ppNewMonths }} мес</b>
+            <div class="text-emerald-400" v-if="ppNewMonths<sber.months_left">−{{ (sber.months_left-ppNewMonths).toFixed(1) }} мес</div>
+          </div>
+        </div>
+        <div v-if="arbOnL" class="text-xs mt-2" :class="arbOnL.depositWins?'text-amber-300':'text-slate-400'">⚖️ {{ arbOnL.verdict }}</div>
+        <button @click="applyPrepay" :disabled="pp.L<1000 || busy"
+                class="w-full mt-3 py-3 rounded-xl font-semibold text-slate-900 bg-emerald-500 disabled:opacity-40">
+          {{ busy ? 'Записываю…' : 'Записать ЧДП ' + fmtR(pp.L) + ' ₽' }}
+        </button>
+        <div v-if="msg" class="text-xs mt-2 text-slate-300">{{ msg }}</div>
+      </div>
+    </div>
+
+    <!-- ════════ ПОРТФЕЛЬ ════════ -->
+    <div v-show="tab==='portfolio'" class="space-y-3">
+      <div class="card p-4">
+        <div class="flex justify-between items-baseline"><b class="text-sm">💼 Портфель</b>
+          <b class="text-emerald-400">${{ fmt(d.portfolio.total_usd) }}</b></div>
+        <canvas id="c-alloc" height="170" class="mt-2"></canvas>
+      </div>
+      <div class="card p-4 space-y-3">
+        <div v-for="(row,k) in allocRows" :key="k">
+          <div class="flex justify-between text-xs mb-1">
+            <span>{{ row.label }} — цель {{ fmtPct(row.target) }}</span>
+            <span :class="row.delta>50?'text-amber-300':'text-slate-400'">
+              {{ fmtPct(row.current) }} ({{ row.delta>0 ? '+' : '' }}${{ fmt(row.delta) }})</span>
+          </div>
+          <div class="h-2 rounded bg-slate-800 overflow-hidden">
+            <div class="h-full rounded" :class="row.color" :style="{width: Math.min(100,row.current*100)+'%'}"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card p-2">
+        <table class="w-full text-xs">
+          <tr class="text-slate-400 text-left"><th class="px-2 py-1">Тикер</th><th>Кол-во</th><th>Цена</th><th class="text-right px-2">Стоимость</th></tr>
+          <tr v-for="h in d.portfolio.holdings" :key="h.ticker" class="border-t border-slate-800">
+            <td class="px-2 py-1.5 font-mono">{{ h.ticker }}</td>
+            <td>{{ fmt(h.units,3) }}</td><td>${{ fmt(h.price_usd) }}</td>
+            <td class="text-right px-2"><b>${{ fmt(h.value_usd) }}</b>
+              <span v-if="h.pnl_usd" :class="h.pnl_usd>=0?'text-emerald-400':'text-rose-400'"> ({{ h.pnl_usd>=0?'+':'' }}${{ fmt(h.pnl_usd) }})</span></td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+  </template>
+
+  <!-- ── Таб-бар ── -->
+  <nav class="fixed bottom-0 inset-x-0 border-t border-slate-800 bg-[#0b1220]/95 backdrop-blur">
+    <div class="max-w-lg mx-auto grid grid-cols-4 text-center text-[11px] py-2">
+      <button v-for="t in tabs" :key="t.id" @click="setTab(t.id)"
+              class="py-1 border-t-2" :class="tab===t.id?'tab-active':'border-transparent text-slate-400'">
+        <div class="text-lg leading-none">{{ t.icon }}</div>{{ t.label }}
+      </button>
+    </div>
+  </nav>
+</div>
+
+<script>
+// ═════════════════════════ КОНФИГУРАЦИЯ ═════════════════════════
+// Вставьте URL Web App из Шага 6 SETUP.md. Можно также открыть файл с ?api=<URL>.
+// Если задан TMA_READ_TOKEN (Script Properties) — добавьте его в ссылку: ?token=<значение>.
+const API_URL = new URLSearchParams(location.search).get('api') || 'REPLACE_WITH_WEBAPP_URL';
+const READ_TOKEN = new URLSearchParams(location.search).get('token') || '';
+
+const { createApp } = Vue;
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+createApp({
+  data() {
+    return {
+      tab: 'overview',
+      tabs: [
+        { id: 'overview',  icon: '🧮', label: 'Обзор' },
+        { id: 'plan',      icon: '📊', label: 'План' },
+        { id: 'debts',     icon: '🏦', label: 'Долги' },
+        { id: 'portfolio', icon: '💼', label: 'Портфель' },
+      ],
+      loading: true, error: '', msg: '', busy: false,
+      d: { ok: false, fx: {}, net_worth: {}, net_worth_history: [], weekly: {}, waterfall: {},
+           debts: [], portfolio: { holdings: [], by_class: {}, target: {} }, settings: {} },
+      s: { income: 6000, prepay: 0, dca: 0 },   // слайдеры сценария
+      wf: {},                                    // водопад сценария
+      pp: { L: 0, mode: 'payment' },             // ЧДП-симулятор
+      charts: {},
+      scenTimer: null,
+    };
+  },
+
+  computed: {
+    isTelegram() { return !!(tg && tg.initData); },
+    nw() { return this.d.net_worth || {}; },
+    sber() { return (this.d.debts || []).filter(x => x.id === 'SBER')[0] || null; },
+    arbOnL() {
+      const a = this.wf && this.wf.arbitrage;
+      if (!a || !this.pp.L) return null;
+      const dep = this.d.settings.deposit_rate || 0.16;
+      const rate = this.sber ? this.sber.rate_annual : 0.119;
+      const delta = this.pp.L * (dep - rate);
+      return {
+        depositWins: delta > 0,
+        verdict: delta > 0
+          ? 'Deposit arbitrage active: ' + (dep * 100).toFixed(1) + '% deposit yields +' +
+            this.fmtR(delta) + ' ₽/yr more than paying Sberbank early.'
+          : 'Досрочка выгоднее вклада на ' + this.fmtR(-delta) + ' ₽/yr.',
+      };
+    },
+    /** Результаты ЧДП-симулятора (аннуитет, тот же ±50 ₽ что в банке). */
+    ppResult() {
+      const d = this.sber;
+      if (!d) return { newPayment: 0, newMonths: 0 };
+      const r = d.rate_annual / 12;
+      const B = d.balance_rub - this.pp.L;
+      const n = Math.max(1, d.remaining_periods);
+      const P = d.payment_rub;
+      let newPayment, newPeriods;
+      if (this.pp.mode === 'payment') {
+        const k = Math.pow(1 + r, n);
+        newPayment = B > 0 ? B * r * k / (k - 1) : 0;
+        newPeriods = n;
+      } else {
+        newPayment = P;
+        newPeriods = B > 0 ? -Math.log(1 - (B * r) / P) / Math.log(1 + r) : 0;
+      }
+      return { newPayment, newMonths: Math.round(newPeriods * 10) / 10 };
+    },
+    ppNewPayment() { return this.ppResult.newPayment; },
+    ppNewMonths() { return this.ppResult.newMonths; },
+    allocRows() {
+      const p = this.d.portfolio, total = p.total_usd || 0;
+      const map = [
+        ['broad_market_etf', 'ETF (broad market)', 'bg-emerald-500'],
+        ['growth_stocks', 'Акции роста', 'bg-sky-500'],
+        ['crypto_assets', 'Крипта', 'bg-amber-500'],
+      ];
+      return map.map(([k, label, color]) => {
+        const value = (p.by_class || {})[k] || 0;
+        const target = (p.target || {})[k] || 0;
+        return { label, color, target, current: total > 0 ? value / total : 0, delta: target * total - value };
+      });
+    },
+  },
+
+  watch: {
+    's.income': 'scheduleScenario',
+    's.prepay': 'scheduleScenario',
+    's.dca': 'scheduleScenario',
+  },
+
+  methods: {
+    fmt(n, digits) {
+      const v = Number(n) || 0;
+      return v.toLocaleString('ru-RU', { maximumFractionDigits: digits === undefined ? 0 : digits });
+    },
+    fmtR(n) { return this.fmt(n, 0); },
+    fmtPct(x) { return ((Number(x) || 0) * 100).toFixed(1) + '%'; },
+
+    // Общие параметры GET: read_token для доступа из браузера + подпись initData из Telegram
+    apiParams(obj) {
+      const base = { read_token: READ_TOKEN, init_data: (tg && tg.initData) || '' };
+      return new URLSearchParams(Object.assign(base, obj || {})).toString();
+    },
+
+    setTab(id) {
+      this.tab = id;
+      this.$nextTick(() => this.renderCharts());
+    },
+
+    async load() {
+      this.loading = true; this.error = '';
+      try {
+        const resp = await fetch(API_URL + '?' + this.apiParams({ action: 'overview' }));
+        const j = await resp.json();
+        if (!j.ok) throw new Error(j.error || 'неверный ответ сервера');
+        this.d = j;
+        if (!this.wf.month_key) {
+          this.wf = j.waterfall;
+          this.s.income = Math.round(j.settings.base_income_usd / (j.fx.EURUSD || 1) / 100) * 100;
+        }
+        this.$nextTick(() => this.renderCharts());
+      } catch (e) {
+        this.error = 'Не удалось получить данные: ' + e.message + '. Проверьте API_URL в начале файла.';
+      } finally { this.loading = false; }
+    },
+
+    // ── Сценарий (debounce, GET) ──
+    scheduleScenario() {
+      clearTimeout(this.scenTimer);
+      this.scenTimer = setTimeout(this.fetchScenario, 600);
+    },
+    async fetchScenario() {
+      try {
+        const q = this.apiParams({
+          action: 'scenario', income: this.s.income, cur: 'EUR',
+          extra_prepay_rub: this.s.prepay, extra_dca_usd: this.s.dca,
+        });
+        const j = await (await fetch(API_URL + '?' + q)).json();
+        if (j.ok) { this.wf = j; this.renderCharts(); }
+      } catch (e) { /* тихо: слайдер не критичен */ }
+    },
+
+    // ── Запись ЧДП (POST, только из Telegram) ──
+    async applyPrepay() {
+      if (!this.isTelegram) { this.msg = 'Запись доступна только из Telegram (нужна подпись initData).'; return; }
+      if (this.pp.L < 1000 || !this.sber) return;
+      this.busy = true; this.msg = '';
+      try {
+        const j = await (await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // без CORS-preflight
+          body: JSON.stringify({ action: 'apply_prepay', init_data: tg.initData, debt_id: 'SBER', amount_rub: this.pp.L }),
+        })).json();
+        if (!j.ok) throw new Error(j.error);
+        this.msg = '✅ ЧДП ' + this.fmtR(j.prepay.amount) + ' ₽ записан: платёж ' +
+          this.fmtR(j.prepay.paymentAfter) + ' ₽/мес, остаток ' + this.fmtR(j.prepay.balanceAfter) + ' ₽';
+        this.pp.L = 0;
+        await this.load();
+      } catch (e) {
+        this.msg = '❌ ' + e.message;
+      } finally { this.busy = false; }
+    },
+
+    // ── Графики ──
+    chart(id) {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      if (this.charts[id]) this.charts[id].destroy();
+      const c = el.getContext('2d');
+      Chart.defaults.color = '#94a3b8';
+      Chart.defaults.borderColor = '#1e293b';
+      return c;
+    },
+    renderCharts() {
+      if (!this.d.ok) return;
+      this.renderGauge(); this.renderNW(); this.renderWaterfall(); this.renderAlloc();
+    },
+    renderGauge() {
+      const ctx = this.chart('c-gauge'); if (!ctx) return;
+      const assets = (this.nw.cash_usd || 0) + (this.nw.portfolio_usd || 0);
+      const net = Math.max(0, this.nw.total_usd || 0);
+      const debt = Math.max(0, this.nw.debt_usd || 0);
+      this.charts['c-gauge'] = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Net Worth', 'Долг'],
+          datasets: [{ data: [net, debt], backgroundColor: ['#34d399', '#f43f5e'], borderWidth: 0 }],
+        },
+        options: {
+          cutout: '72%',
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } },
+            title: { display: true, text: 'Доля чистой стоимости в активах: ' + this.fmtPct(assets > 0 ? net / assets : 0), font: { size: 11 } } },
+        },
+      });
+    },
+    renderNW() {
+      const ctx = this.chart('c-nw'); if (!ctx) return;
+      const h = this.d.net_worth_history || [];
+      this.charts['c-nw'] = new Chart(ctx, {
+        type: 'line',
+        data: { labels: h.map(x => x.date.slice(5)), datasets: [{ data: h.map(x => x.netWorthUSD), borderColor: '#34d399', backgroundColor: 'rgba(52,211,153,.12)', fill: true, tension: .3, pointRadius: 0 }] },
+        options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => '$' + (v / 1000) + 'k' } } } },
+      });
+    },
+    renderWaterfall() {
+      const ctx = this.chart('c-waterfall'); if (!ctx) return;
+      const w = this.wf; if (!w.month_key) return;
+      let y = w.income_usd;
+      const step = (label, v, color) => { const from = y; y -= v; return { label, from, to: y, color }; };
+      const rows = [
+        { label: 'Доход', from: 0, to: y, color: '#34d399' },
+        step('Обязательства', w.commitments_usd.total, '#f87171'),
+        step('Жизнь (лимит)', w.living_usd, '#fbbf24'),
+      ];
+      this.charts['c-waterfall'] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: rows.map(r => r.label),
+          datasets: [{ data: rows.map(r => [r.from, r.to]), backgroundColor: rows.map(r => r.color), borderRadius: 4, barPercentage: .6 }],
+        },
+        options: {
+          indexAxis: 'y',
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + this.fmt(Math.abs(c.raw[1] - c.raw[0])) } } },
+          scales: { x: { ticks: { callback: v => '$' + (v / 1000) + 'k' } } },
+        },
+      });
+    },
+    renderAlloc() {
+      const ctx = this.chart('c-alloc'); if (!ctx) return;
+      const p = this.d.portfolio;
+      this.charts['c-alloc'] = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['ETF', 'Акции', 'Крипта'],
+          datasets: [
+            { data: [p.by_class.broad_market_etf, p.by_class.growth_stocks, p.by_class.crypto_assets],
+              backgroundColor: ['#34d399', '#38bdf8', '#fbbf24'], borderWidth: 0 },
+          ],
+        },
+        options: { cutout: '60%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } } } },
+      });
+    },
+  },
+
+  mounted() { this.load(); },
+}).mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Pre-commit хук: блокирует коммит, если в индексе найден фрагмент,
+# похожий на секрет (токен Telegram / ключ Google / явное присваивание секрета).
+# Установка: bash scripts/install-hooks.sh
+set -uo pipefail
+
+# Значение секрета обязано содержать цифру — иначе ловим имена ключей (BOT_TOKEN: '...')
+PATTERNS='(AIza[0-9A-Za-z_\-]{30,}|[0-9]{8,10}:[A-Za-z0-9_-]{35}|(WEBHOOK_SECRET|TMA_READ_TOKEN|BOT_TOKEN|API_KEY)["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9_\-]*[0-9][A-Za-z0-9_\-]{15,})'
+
+DIFF=$(git diff --cached -U0 -- . \
+  ':(exclude)apps-script/secrets.example.json' \
+  ':(exclude).gitleaks.toml' \
+  ':(exclude)SECURITY.md')
+if echo "$DIFF" | grep -nE "$PATTERNS"; then
+  echo ""
+  echo "❌ Похоже на секрет в коммите. Секреты хранятся в secrets.json (он в .gitignore)"
+  echo "   и переносятся в Script Properties Apps Script. Подробнее: SECURITY.md"
+  exit 1
+fi
+
+# Если установлен gitleaks — прогоняем и его (правила в .gitleaks.toml)
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact -c .gitleaks.toml || exit 1
+fi
+
+exit 0

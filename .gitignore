@@ -1,0 +1,16 @@
+# ── Секреты: никогда не коммитим (шаблон secrets.example.json — можно) ──
+secrets.json
+secrets.local.json
+secrets.*.local.json
+.env
+.env.*
+
+# ── clasp (реальные креды/ID проекта) ─────────────────────────
+.clasp.json
+.clasprc.json
+
+# ── Прочее ────────────────────────────────────────────────────
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
