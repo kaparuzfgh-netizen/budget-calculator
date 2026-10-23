@@ -90,7 +90,9 @@ const CONFIG = {
 
   // Резервный vision-провайдер: Groq (console.groq.com, free tier).
   // Ключ GROQ_API_KEY в Script Properties — опционален; используется,
-  // если Gemini недоступен или его ключ не задан.
+  // если Gemini недоступен или его ключ не задан. Vision-модели Groq:
+  // llama-4-scout (по умолчанию — быстрее и лимиты больше) и
+  // llama-4-maverick (переопределяется свойством GROQ_MODEL).
   GROQ: {
     URL: 'https://api.groq.com/openai/v1/chat/completions',
     MODEL: 'meta-llama/llama-4-scout-17b-16e-instruct',
@@ -128,6 +130,7 @@ const PROP = {
   CHAT_ID: 'TELEGRAM_CHAT_ID',
   GEMINI_KEY: 'GEMINI_API_KEY',
   GROQ_KEY: 'GROQ_API_KEY',
+  GROQ_MODEL: 'GROQ_MODEL', // опционально: переопределить модель Groq (напр. meta-llama/llama-4-maverick-17b-128e-instruct)
   WEBHOOK_SECRET: 'WEBHOOK_SECRET',
   SHEET_ID: 'SHEET_ID', // опционально, если скрипт не привязан к таблице
 };

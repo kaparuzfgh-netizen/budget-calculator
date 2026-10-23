@@ -161,8 +161,10 @@ function parseWithGemini_(base64, mime, key) {
 // ─────────────────────────── Groq (резерв) ───────────────────────────
 
 function parseWithGroq_(base64, mime, key) {
+  // Модель переопределяется свойством GROQ_MODEL (напр., на maverick) без правки кода
+  const model = getProp_(PROP.GROQ_MODEL, '') || CONFIG.GROQ.MODEL;
   const body = {
-    model: CONFIG.GROQ.MODEL,
+    model: model,
     temperature: 0,
     response_format: { type: 'json_object' },
     messages: [{

@@ -44,6 +44,7 @@
 | `TELEGRAM_CHAT_ID` | ваш chat_id из Шага 1 |
 | `GEMINI_API_KEY` | ключ с [aistudio.google.com/apikey](https://aistudio.google.com/apikey): войти личным аккаунтом → принять условия → **Create API key** → скопировать `AIza...` |
 | `GROQ_API_KEY` | *(опционально)* резервный AI-провайдер: [console.groq.com](https://console.groq.com) → API Keys → Create. Если Gemini недоступен, скриншоты разбирает Groq (Llama 4 Scout, free tier) |
+| `GROQ_MODEL` | *(опционально)* переопределить модель Groq, если хотите `meta-llama/llama-4-maverick-17b-128e-instruct` вместо Scout по умолчанию. Важно: только vision-модели (Scout/Maverick) — текстовые модели Groq картинки не принимают |
 
 `WEBHOOK_SECRET` и `TMA_READ_TOKEN` **создадутся сами** при первом запуске — вручную их добавлять не надо.
 
