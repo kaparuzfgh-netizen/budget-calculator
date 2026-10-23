@@ -268,12 +268,15 @@ function cmdSync_(chatId) {
 }
 
 function cmdApp_(chatId) {
-  const url = String(CONFIG.MINI_APP_URL || getSetting_('MINI_APP_URL', ''));
-  if (!url) {
-    sendMessage_(chatId, 'Mini App ещё не подключён: укажите URL хостинга в Config.gs → MINI_APP_URL (см. SETUP.md, Шаг 8).');
+  const base = String(CONFIG.MINI_APP_URL || getSetting_('MINI_APP_URL', ''));
+  if (!base) {
+    sendMessage_(chatId, 'Mini App ещё не подключён: укажите URL хостинга в листе FX_and_Settings (ключ MINI_APP_URL) — см. SETUP.md, Шаг 7.');
     return;
   }
-  sendMessage_(chatId, '📊 <b>Дашборд</b> — слайдеры сценариев, ЧДП-калькулятор, портфель и Net Worth.', [
+  // токен доступа подставляется автоматически — владелец его даже не видит
+  const rt = getProp_('TMA_READ_TOKEN', '');
+  const url = base + (base.indexOf('?') > -1 ? '&' : '?') + 'token=' + encodeURIComponent(rt);
+  sendMessage_(chatId, '📊 <b>Дашборд</b> — слайдеры сценариев, валютные сигналы, ЧДП-калькулятор, портфель и Net Worth.', [
     { text: ' Открыть дашборд', web_app: { url: url } },
   ]);
 }

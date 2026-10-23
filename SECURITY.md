@@ -19,7 +19,7 @@
 | # | Находка | Severity | Статус |
 |---|---------|----------|--------|
 | F1 | **Formula-injection**: заметки пользователя (`/spent ... =cmd()`) попадали в ячейки и могли исполниться как формулы Sheets | High | ✅ Исправлено: `safeCellText_()` экранирует текст, начинающийся с `= + - @` |
-| F2 | **Публичное чтение**: `doGet?action=overview` отдавал Net Worth/долги/портфель любому, знающему URL развёртывания | High | ✅ Исправлено: свойство `TMA_READ_TOKEN` — при его наличии чтение требует токен или подпись initData; без него остаётся открытый демо-режим (⚠️ осознанно, аудит предупреждает) |
+| F2 | **Публичное чтение**: `doGet?action=overview` отдавал Net Worth/долги/портфель любому, знающему URL развёртывания | High | ✅ Исправлено: `TMA_READ_TOKEN` — **генерируется автоматически** при `setup()`; чтение требует токен или подпись initData (открытый демо-режим — только если удалить токен вручную) |
 | F3 | Отсутствие лимита на размер файла → расход квоты Gemini и трафика | Medium | ✅ Исправлено: проверка `file_size` + фактического размера, лимит 8 МБ |
 | F4 | Подделка webhook | High | ✅ Контроль: случайный `WEBHOOK_SECRET` в query URL + `secret_token` при `setWebhook`. Остаточный риск: GAS не отдаёт заголовки запроса в `doPost`, поэтому проверяется query-параметр; URL с секретом не публикуется (в `debugWebhook` маскируется) |
 | F5 | Чужие чаты | Medium | ✅ Whitelist `TELEGRAM_CHAT_ID`; до его настройки бот лишь отвечает просившему его chat_id, данные не отдаёт |
@@ -30,7 +30,7 @@
 | F10 | Гонки записи (webhook + триггеры) | Medium | ✅ `runWithLock_()` (LockService) на все мутации |
 | F11 | XSS в Mini App | Medium | ✅ Vue экранирует интерполяцию, `v-html` не используется |
 | F12 | SSRF через внешний URL | Low | ✅ Не применимо: все UrlFetch идут на фиксированные домены (`api.telegram.org`, `generativelanguage.googleapis.com`) |
-| R1 | **Остаточный риск**: при незаданном `TMA_READ_TOKEN` чтение открыто | Medium | ⚠️ Рекомендация: задать токен и открыть Mini App как `...index.html?token=<значение>` |
+| R1 | **Остаточный риск**: при незаданном `TMA_READ_TOKEN` чтение открыто | Medium | ✅ Решено: токен создаётся автоматически при первом `setup()`/`createSpreadsheet`; ссылку с токеном возвращает `getAccessInfo()`, команда `/app` подставляет его сама |
 | R2 | **Остаточный риск**: URL развёртывания GAS — сам по себе секрет (bearer) | Low | Не переиспользовать развёртывание в публичных местах; перевыпускать при компрометации (Управление развёртываниями → новое) |
 | R3 | Права на таблицу в Drive | Info | Доступ к редактированию — только аккаунту владельца; не включать «все по ссылке» на запись |
 
@@ -60,7 +60,7 @@ cd budget-calculator
 git init
 bash scripts/install-hooks.sh        # поставить pre-commit хук
 cp apps-script/secrets.example.json apps-script/secrets.json   # локально, НЕ коммитить
-# заполните secrets.json, перенесите значения в Script Properties (SETUP.md Шаг 4)
+# заполните secrets.json, перенесите значения в Script Properties (SETUP.md, Шаг 3)
 ```
 
 ### Вариант с git-secrets (awslabs)
@@ -95,8 +95,8 @@ gitleaks protect --staged --redact -c .gitleaks.toml   # по индексу
 
 ## 6. Чек-лист перед продакшеном
 
-- [ ] Все 4 секрета в Script Properties, `WEBHOOK_SECRET` ≥ 32 символов
-- [ ] `TMA_READ_TOKEN` задан, Mini App открывается с `?token=...`
+- [ ] 3 секрета в Script Properties (токен бота, chat_id, ключ Gemini); `WEBHOOK_SECRET` и `TMA_READ_TOKEN` сгенерированы автоматически при `setup()` (проверка: `securityAudit()`)
+- [ ] Mini App открывается из Telegram (`/app`); ссылка для браузера — `getAccessInfo()`
 - [ ] `securityAudit()` — все ✅, отчёт пришёл в Telegram
 - [ ] Таблица в Drive: доступ по ссылке — выключен (или только просмотр для себя)
 - [ ] Репозиторий: `bash scripts/install-hooks.sh` выполнен, `git status` не видит `secrets.json`

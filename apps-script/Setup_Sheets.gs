@@ -8,6 +8,11 @@
  */
 
 function setup() {
+  // WEBHOOK_SECRET и TMA_READ_TOKEN генерируются автоматически при первом запуске —
+  // вручную в Script Properties добавлять нужно только токен бота, chat_id и ключ Gemini.
+  ensureSecret_(PROP.WEBHOOK_SECRET, 32);
+  ensureSecret_(PROP.TMA_READ_TOKEN, 24);
+
   const built = runWithLock_(function () {
     return {
       fx: buildOnce_(SHEETS.FX_SETTINGS, buildFxSettings_),
@@ -21,10 +26,29 @@ function setup() {
       triggers: installTriggers_(),
     };
   });
-  const msg = 'Готово: ' + JSON.stringify(built) +
+  let msg = 'Готово: ' + JSON.stringify(built) +
     '\nЛисты: ' + ss_().getSheets().map(function (s) { return s.getName(); }).join(', ');
+  // Триггеры срабатывают по часовому поясу ПРОЕКТА — расхождение с таблицей ломает час опроса
+  try {
+    const stz = Session.getScriptTimeZone();
+    const shz = ss_().getSpreadsheetTimeZone();
+    if (stz && shz && stz !== shz) {
+      msg += '\n⚠️ Часовой пояс проекта (' + stz + ') отличается от таблицы (' + shz +
+        '). Установите пояс проекта: ⚙ Настройки проекта → Часовой пояс.';
+    }
+  } catch (e) { /* non-critical */ }
   console.log(msg);
   return msg;
+}
+
+/** Генерирует секрет, если его ещё нет в Script Properties. */
+function ensureSecret_(key, length) {
+  const p = PropertiesService.getScriptProperties();
+  if (!p.getProperty(key)) {
+    let v = Utilities.getUuid().replace(/-/g, '');
+    while (v.length < (length || 32)) v += Utilities.getUuid().replace(/-/g, '');
+    p.setProperty(key, v.slice(0, length || 32));
+  }
 }
 
 /**
@@ -85,6 +109,7 @@ function buildFxSettings_(sh) {
     ['TARGET_CRYPTO', CONFIG.INVEST_SPLIT.crypto_assets],
     ['BONUS_PREPAY_SHARE', CONFIG.SURPLUS.BONUS_PREPAY_SHARE],
     ['BONUS_DCA_SHARE', CONFIG.SURPLUS.BONUS_DCA_SHARE],
+    ['MINI_APP_URL', CONFIG.MINI_APP_URL],
   ]);
   sh.getRange('B8').setNumberFormat('#,##0.00');
   sh.getRange('B10:B12').setNumberFormat('#,##0.00');
@@ -305,6 +330,7 @@ function buildFxHistory_(sh) {
 
 /** Привязка Telegram Webhook к Web App. Запускать после деплоя. */
 function setupWebhook(url) {
+  ensureSecret_(PROP.WEBHOOK_SECRET, 32); // страховка, если setup() ещё не выполнялся
   url = url || ScriptApp.getService().getUrl();
   if (!url || url.indexOf('script.google.com') === -1) {
     throw new Error('Разверните Web App и вызовите: setupWebhook("https://script.google.com/macros/s/.../exec")');
@@ -320,6 +346,21 @@ function setupWebhook(url) {
   const me = tgCall_('getMe', {});
   console.log('Webhook: ' + JSON.stringify(res) + ' | bot @' + me.username);
   return 'Webhook привязан к @' + me.username;
+}
+
+/** Готовые ссылки доступа: API + Mini App с уже подставленным токеном чтения. */
+function getAccessInfo() {
+  const base = String(CONFIG.MINI_APP_URL || getSetting_('MINI_APP_URL', ''));
+  const rt = getProp_('TMA_READ_TOKEN', '');
+  const api = ScriptApp.getService().getUrl() || '(сначала разверните Web App)';
+  const mini = base
+    ? base + (base.indexOf('?') > -1 ? '&' : '?') + 'token=' + encodeURIComponent(rt)
+    : '(заполните MINI_APP_URL в листе FX_and_Settings после хостинга Mini App)';
+  const msg = '🔗 <b>Доступ</b>\nAPI: <code>' + escHtml_(api) + '</code>\nMini App: <code>' + escHtml_(mini) + '</code>';
+  console.log(msg.replace(/<[^>]+>/g, ''));
+  const chatId = getProp_(PROP.CHAT_ID, '');
+  if (chatId) { try { sendMessage_(chatId, msg); } catch (e) { /* уже в логе */ } }
+  return msg;
 }
 
 /** Диагностика: куда смотрит webhook и были ли ошибки доставки (секрет маскируется). */

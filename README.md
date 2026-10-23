@@ -53,7 +53,8 @@ budget-calculator/
 ├── .gitignore                 секреты и креды не попадают в репозиторий
 ├── .gitleaks.toml             правила сканера секретов (gitleaks)
 ├── apps-script/               бэкенд — вставить в редактор Apps Script
-│   ├── appsscript.json        манифест: часовой пояс, права, web app
+│   ├── BUNDLE.gs              🚀 ВСЁ В ОДНОМ ФАЙЛЕ для быстрой установки (генерируется scripts/build-bundle.sh)
+│   ├── appsscript.json        манифест (нужен только для пути разработчика)
 │   ├── Config.gs              финансовый профиль: доход, обязательства, ипотеки
 │   ├── Setup_Sheets.gs        setup() / createSpreadsheet(): автосоздание файла и листов
 │   ├── SheetService.gs        слой данных + чтение FX/настроек + санитайзер ячеек
@@ -70,6 +71,7 @@ budget-calculator/
 │   ├── secrets.example.json   шаблон секретов (без значений; реальный secrets.json в .gitignore)
 │   └── .clasp.json.example    опционально для разработки через clasp
 ├── scripts/
+│   ├── build-bundle.sh        сборка BUNDLE.gs из модулей (после правок кода)
 │   ├── install-hooks.sh       установка pre-commit хука защиты секретов
 │   └── hooks/pre-commit       блокирует коммит с токенами/ключами
 └── mini-app/
@@ -138,5 +140,8 @@ GOOGLEFINANCE для каждой конвертации пользовател�
 
 ## Установка
 
-Полный пошаговый гайд — [SETUP.md](SETUP.md) (~15 минут, нужны только Google-аккаунт и Telegram).
-Таблицу можно не создавать руками: см. «Быстрый путь» через `createSpreadsheet()`.
+Полный пошаговый гайд — [SETUP.md](SETUP.md). Быстрый путь: **один файл**
+`apps-script/BUNDLE.gs` вставляется в пустой Code.gs нового проекта Apps Script —
+никакие другие файлы создавать не нужно; таблица, листы, триггеры и два секрета
+создаются автоматически функцией `createSpreadsheet()` (манифест и отдельные
+модули нужны только для разработки).
