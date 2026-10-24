@@ -393,6 +393,31 @@ function setupWebhook(url) {
   return 'Webhook привязан к @' + me.username;
 }
 
+/**
+ * Резервная копия всей таблицы в Google Drive (бизнес-непрерывность):
+ * полная копия с формулами и графиками. Ручной запуск — backupNow();
+ * автоматически 1-го числа из monthlyPlanLog. Копии старше ~6 месяцев
+ * удаляются в корзину, чтобы Drive не зарастал.
+ */
+function backupNow() {
+  const src = ss_();
+  const name = 'Backup ' + src.getName() + ' ' + fmtISO_(new Date());
+  DriveApp.getFileById(src.getId()).makeCopy(name);
+  logOps_('INFO', 'backup', name);
+
+  // ротация: бэкапы старше ~6 месяцев — в корзину
+  try {
+    const cutoff = new Date(Date.now() - 190 * 86400000);
+    const all = DriveApp.searchFiles(
+      'title contains "Backup ' + src.getName() + '" and mimeType = "' + MimeType.GOOGLE_SHEETS + '"');
+    while (all.hasNext()) {
+      const f = all.next();
+      if (f.getDateCreated() < cutoff) f.setTrashed(true);
+    }
+  } catch (e) { console.warn('backup rotation: ' + e.message); }
+  return name;
+}
+
 /** Готовые ссылки доступа: API + Mini App с уже подставленным токеном чтения. */
 function getAccessInfo() {
   const base = String(CONFIG.MINI_APP_URL || getSetting_('MINI_APP_URL', ''));

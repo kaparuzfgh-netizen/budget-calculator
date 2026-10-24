@@ -183,10 +183,11 @@ function maybeSendMonthDigest_() {
   return true;
 }
 
-/** 1-го числа: план месяца + сверка ипотек с банком (P1). */
+/** 1-го числа: план месяца + сверка ипотек с банком (P1) + автобэкап. */
 function monthlyPlanLog() {
   const chatId = getProp_(PROP.CHAT_ID, '');
   try {
+    try { backupNow(); } catch (bErr) { console.warn('backup: ' + bErr.message); }
     const w = CashflowEngine.computeWaterfall({});
     CashflowEngine.upsertMonth(w, 'proposal');
     if (chatId) {
