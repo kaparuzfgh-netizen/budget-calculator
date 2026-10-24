@@ -633,18 +633,9 @@ function boldHeader_(sh, cols) {
 
 // ─────────────────────── FX_and_Settings ───────────────────────
 
-function buildFxSettings_(sh) {
-  sh.getRange('A1:B1').setValues([['Rate', 'Value']]).setFontWeight('bold');
-  sh.getRange('A2:B5').setValues([
-    ['EUR/USD', '=GOOGLEFINANCE("CURRENCY:EURUSD")'],
-    ['USD/RUB', '=GOOGLEFINANCE("CURRENCY:USDRUB")'],
-    ['USD/KGS', '=GOOGLEFINANCE("CURRENCY:USDKGS")'],
-    ['EUR/RUB', '=B2*B3'],
-  ]);
-  sh.getRange('B2:B5').setNumberFormat('0.0000');
-
-  sh.getRange('A7:B7').setValues([['Key', 'Value']]).setFontWeight('bold');
-  sh.getRange('A8:B19').setValues([
+/** Единственный источник строк конфигурации (используется сборкой и починкой). */
+function fxSettingsRows_() {
+  return [
     ['BASE_INCOME_USD', CONFIG.PROFILE.BASE_INCOME_USD],
     ['INCOME_CURRENCY', CONFIG.PROFILE.INCOME_CURRENCY],
     ['LIVING_CURRENCY', CONFIG.PROFILE.LIVING_CURRENCY],
@@ -658,13 +649,49 @@ function buildFxSettings_(sh) {
     ['BONUS_PREPAY_SHARE', CONFIG.SURPLUS.BONUS_PREPAY_SHARE],
     ['BONUS_DCA_SHARE', CONFIG.SURPLUS.BONUS_DCA_SHARE],
     ['MINI_APP_URL', CONFIG.MINI_APP_URL],
+  ];
+}
+
+function buildFxSettings_(sh) {
+  sh.getRange('A1:B1').setValues([['Rate', 'Value']]).setFontWeight('bold');
+  sh.getRange('A2:B5').setValues([
+    ['EUR/USD', '=GOOGLEFINANCE("CURRENCY:EURUSD")'],
+    ['USD/RUB', '=GOOGLEFINANCE("CURRENCY:USDRUB")'],
+    ['USD/KGS', '=GOOGLEFINANCE("CURRENCY:USDKGS")'],
+    ['EUR/RUB', '=B2*B3'],
   ]);
+  sh.getRange('B2:B5').setNumberFormat('0.0000');
+
+  sh.getRange('A7:B7').setValues([['Key', 'Value']]).setFontWeight('bold');
+  const rows = fxSettingsRows_();
+  sh.getRange(8, 1, rows.length, 2).setValues(rows); // размер всегда по массиву — рассинхрон невозможен
   sh.getRange('B8').setNumberFormat('#,##0.00');
   sh.getRange('B10:B12').setNumberFormat('#,##0.00');
   sh.getRange('B13').setNumberFormat('0.00%');
-  sh.getRange('B14:B19').setNumberFormat('0.00');
+  sh.getRange('B14:B' + (7 + rows.length)).setNumberFormat('0.00');
   sh.setColumnWidth(1, 190);
   sh.setColumnWidth(2, 110);
+}
+
+/**
+ * Починка FX_and_Settings, если setup() упал на полпути (например, старая
+ * версия бандла с жёстким диапазоном): восстанавливает формулы курсов
+ * и добавляет только НЕДОСТАЮЩИЕ ключи — существующие значения не трогает.
+ */
+function repairSettings() {
+  const sh = sheet_(SHEETS.FX_SETTINGS);
+  sh.getRange('B2').setFormula('=GOOGLEFINANCE("CURRENCY:EURUSD")');
+  sh.getRange('B3').setFormula('=GOOGLEFINANCE("CURRENCY:USDRUB")');
+  sh.getRange('B4').setFormula('=GOOGLEFINANCE("CURRENCY:USDKGS")');
+  sh.getRange('B5').setFormula('=B2*B3');
+  const have = getSettings_();
+  let added = 0;
+  fxSettingsRows_().forEach(function (r) {
+    if (have[r[0]] === undefined) { setSetting_(r[0], r[1]); added += 1; }
+  });
+  const msg = 'Формулы курсов восстановлены; добавлено недостающих ключей: ' + added;
+  console.log(msg);
+  return msg;
 }
 
 // ─────────────────────── Commitments_Registry ───────────────────────
