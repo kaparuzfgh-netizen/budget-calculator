@@ -115,6 +115,33 @@ function securityAudit() {
     add('❌', 'Таблица недоступна: ' + e.message);
   }
 
+  // 9. Математика: лист ↔ код (формулы аннуитета и кросс-курса дублируются
+  //    намеренно — аудит ловит расхождение, если что-то рассинхронизировалось)
+  try {
+    const dsh = sheet_(SHEETS.DEBTS);
+    const L = Number(dsh.getRange('B6').getValue()) || 0;
+    const sheetNewPmt = Number(dsh.getRange('B8').getValue());
+    const balance = Number(dsh.getRange('C2').getValue());
+    const rate = Number(dsh.getRange('E2').getValue());
+    const n = Number(dsh.getRange('B7').getValue());
+    if (L > 0 && balance > 0 && n > 0 && isFinite(sheetNewPmt)) {
+      const codeNewPmt = DebtEngine.annuityPayment_(balance - L, rate, 12, n);
+      add(Math.abs(codeNewPmt - sheetNewPmt) <= 1 ? '✅' : '❌',
+        'Математика ЧДП (лист B8 vs код): ' + Math.round(sheetNewPmt) + ' ₽ vs ' +
+        Math.round(codeNewPmt) + ' ₽' + (Math.abs(codeNewPmt - sheetNewPmt) <= 1 ? ' — совпадают' : ' — РАСХОЖДЕНИЕ формулы'));
+    }
+    const fsh = sheet_(SHEETS.FX_SETTINGS);
+    const cross = Number(fsh.getRange('B5').getValue());
+    const fx = getFx_();
+    if (isFinite(cross) && cross > 0) {
+      const ok = Math.abs(cross - fx.EURUSD * fx.USDRUB) / cross < 0.005;
+      add(ok ? '✅' : '⚠️', 'Кросс EUR/RUB (лист B5 vs код): ' + cross.toFixed(2) + ' vs ' +
+        (fx.EURUSD * fx.USDRUB).toFixed(2) + (ok ? '' : ' — расхождение >0.5%'));
+    }
+  } catch (e) {
+    add('⚠️', 'Математика не сверена: ' + e.message);
+  }
+
   const report = '🔐 <b>Аудит безопасности и здоровья</b>\n' + nowTz_() + '\n\n' + L.join('\n');
   console.log(report.replace(/<[^>]+>/g, ''));
   if (chatId) {

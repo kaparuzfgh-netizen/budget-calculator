@@ -2969,17 +2969,23 @@ const MetricsEngine = {
       L.push('⚠️ Строка месяца не найдена в Monthly_Cycles — доход не был записан через /income.');
     } else {
       const livingActualUSD = livingRUB / fx.USDRUB;
+      const livingPlannedUSD = getSettingNum_('MONTHLY_CAP_RUB', 60000) / fx.USDRUB;
+      // В листе Free Surplus = доход − обязательства (без лимита жизни).
+      // Сравниваем «профицит после жизни» с планом «после жизни» — иначе
+      // дайджест каждый месяц показывал бы ложное отставание на весь лимит.
       const surplusActual = plan.incomeUSD - plan.mandatoryUSD - livingActualUSD;
-      const surplusDelta = surplusActual - plan.surplusUSD;
+      const plannedAfterLiving = plan.surplusUSD - livingPlannedUSD;
+      const surplusDelta = surplusActual - plannedAfterLiving;
       const savingsRate = plan.incomeUSD > 0 ? surplusActual / plan.incomeUSD : 0;
 
       L.push('💵 Доход: ' + fmtMoney_(plan.incomeUSD, 'USD') + (plan.status === 'applied' ? ' · каскад применён ✅' : ' · каскад НЕ применён ⚠️'));
       L.push('🧾 Обязательства (план): ' + fmtMoney_(plan.mandatoryUSD, 'USD'));
-      L.push('🍽 Жизнь: план ' + fmtMoney_(getSettingNum_('MONTHLY_CAP_RUB', 60000) / fx.USDRUB, 'USD') +
+      L.push('🍽 Жизнь: план ' + fmtMoney_(livingPlannedUSD, 'USD') +
         ' → факт ' + fmtMoney_(livingActualUSD, 'USD') + ' (' + fmtMoney_(livingRUB, 'RUB') + ')' +
         (livingRUB > getSettingNum_('MONTHLY_CAP_RUB', 60000) ? ' ⚠️ перерасход' : ' ✅'));
       L.push('🏦 Ипотеки выплачено: ' + fmtMoney_(mortgagesRUB, 'RUB') + ' (' + fmtMoney_(mortgagesRUB / fx.USDRUB, 'USD') + ')');
-      L.push('💚 Профицит: план ' + fmtMoney_(plan.surplusUSD, 'USD') + ' → факт <b>' + fmtMoney_(surplusActual, 'USD') + '</b>' +
+      L.push('💚 Профицит (после жизни): план ' + fmtMoney_(plannedAfterLiving, 'USD') +
+        ' → факт <b>' + fmtMoney_(surplusActual, 'USD') + '</b>' +
         ' (' + (surplusDelta >= 0 ? '+' : '') + fmtMoney_(surplusDelta, 'USD') + ')');
       L.push('📉 <b>Savings rate: ' + fmtPct_(savingsRate) + '</b>');
 
@@ -3597,6 +3603,33 @@ function securityAudit() {
     add('✅', 'Таблица: «' + ss.getName() + '» (доступ из скрипта есть)');
   } catch (e) {
     add('❌', 'Таблица недоступна: ' + e.message);
+  }
+
+  // 9. Математика: лист ↔ код (формулы аннуитета и кросс-курса дублируются
+  //    намеренно — аудит ловит расхождение, если что-то рассинхронизировалось)
+  try {
+    const dsh = sheet_(SHEETS.DEBTS);
+    const L = Number(dsh.getRange('B6').getValue()) || 0;
+    const sheetNewPmt = Number(dsh.getRange('B8').getValue());
+    const balance = Number(dsh.getRange('C2').getValue());
+    const rate = Number(dsh.getRange('E2').getValue());
+    const n = Number(dsh.getRange('B7').getValue());
+    if (L > 0 && balance > 0 && n > 0 && isFinite(sheetNewPmt)) {
+      const codeNewPmt = DebtEngine.annuityPayment_(balance - L, rate, 12, n);
+      add(Math.abs(codeNewPmt - sheetNewPmt) <= 1 ? '✅' : '❌',
+        'Математика ЧДП (лист B8 vs код): ' + Math.round(sheetNewPmt) + ' ₽ vs ' +
+        Math.round(codeNewPmt) + ' ₽' + (Math.abs(codeNewPmt - sheetNewPmt) <= 1 ? ' — совпадают' : ' — РАСХОЖДЕНИЕ формулы'));
+    }
+    const fsh = sheet_(SHEETS.FX_SETTINGS);
+    const cross = Number(fsh.getRange('B5').getValue());
+    const fx = getFx_();
+    if (isFinite(cross) && cross > 0) {
+      const ok = Math.abs(cross - fx.EURUSD * fx.USDRUB) / cross < 0.005;
+      add(ok ? '✅' : '⚠️', 'Кросс EUR/RUB (лист B5 vs код): ' + cross.toFixed(2) + ' vs ' +
+        (fx.EURUSD * fx.USDRUB).toFixed(2) + (ok ? '' : ' — расхождение >0.5%'));
+    }
+  } catch (e) {
+    add('⚠️', 'Математика не сверена: ' + e.message);
   }
 
   const report = '🔐 <b>Аудит безопасности и здоровья</b>\n' + nowTz_() + '\n\n' + L.join('\n');

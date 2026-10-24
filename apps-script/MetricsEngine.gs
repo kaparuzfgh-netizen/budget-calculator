@@ -112,17 +112,23 @@ const MetricsEngine = {
       L.push('⚠️ Строка месяца не найдена в Monthly_Cycles — доход не был записан через /income.');
     } else {
       const livingActualUSD = livingRUB / fx.USDRUB;
+      const livingPlannedUSD = getSettingNum_('MONTHLY_CAP_RUB', 60000) / fx.USDRUB;
+      // В листе Free Surplus = доход − обязательства (без лимита жизни).
+      // Сравниваем «профицит после жизни» с планом «после жизни» — иначе
+      // дайджест каждый месяц показывал бы ложное отставание на весь лимит.
       const surplusActual = plan.incomeUSD - plan.mandatoryUSD - livingActualUSD;
-      const surplusDelta = surplusActual - plan.surplusUSD;
+      const plannedAfterLiving = plan.surplusUSD - livingPlannedUSD;
+      const surplusDelta = surplusActual - plannedAfterLiving;
       const savingsRate = plan.incomeUSD > 0 ? surplusActual / plan.incomeUSD : 0;
 
       L.push('💵 Доход: ' + fmtMoney_(plan.incomeUSD, 'USD') + (plan.status === 'applied' ? ' · каскад применён ✅' : ' · каскад НЕ применён ⚠️'));
       L.push('🧾 Обязательства (план): ' + fmtMoney_(plan.mandatoryUSD, 'USD'));
-      L.push('🍽 Жизнь: план ' + fmtMoney_(getSettingNum_('MONTHLY_CAP_RUB', 60000) / fx.USDRUB, 'USD') +
+      L.push('🍽 Жизнь: план ' + fmtMoney_(livingPlannedUSD, 'USD') +
         ' → факт ' + fmtMoney_(livingActualUSD, 'USD') + ' (' + fmtMoney_(livingRUB, 'RUB') + ')' +
         (livingRUB > getSettingNum_('MONTHLY_CAP_RUB', 60000) ? ' ⚠️ перерасход' : ' ✅'));
       L.push('🏦 Ипотеки выплачено: ' + fmtMoney_(mortgagesRUB, 'RUB') + ' (' + fmtMoney_(mortgagesRUB / fx.USDRUB, 'USD') + ')');
-      L.push('💚 Профицит: план ' + fmtMoney_(plan.surplusUSD, 'USD') + ' → факт <b>' + fmtMoney_(surplusActual, 'USD') + '</b>' +
+      L.push('💚 Профицит (после жизни): план ' + fmtMoney_(plannedAfterLiving, 'USD') +
+        ' → факт <b>' + fmtMoney_(surplusActual, 'USD') + '</b>' +
         ' (' + (surplusDelta >= 0 ? '+' : '') + fmtMoney_(surplusDelta, 'USD') + ')');
       L.push('📉 <b>Savings rate: ' + fmtPct_(savingsRate) + '</b>');
 
