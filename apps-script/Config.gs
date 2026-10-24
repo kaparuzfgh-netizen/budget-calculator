@@ -134,4 +134,6 @@ const PROP = {
   GROQ_MODEL: 'GROQ_MODEL', // опционально: переопределить модель Groq (напр. meta-llama/llama-4-maverick-17b-128e-instruct)
   WEBHOOK_SECRET: 'WEBHOOK_SECRET',
   SHEET_ID: 'SHEET_ID', // опционально, если скрипт не привязан к таблице
+  GH_BACKUP_TOKEN: 'GH_BACKUP_TOKEN', // опционально: GitHub PAT (contents) для бэкап-копии
+  GH_BACKUP_REPO: 'GH_BACKUP_REPO',   // опционально: 'user/private-repo'
 };

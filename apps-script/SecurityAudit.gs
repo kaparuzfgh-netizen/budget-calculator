@@ -154,21 +154,20 @@ function securityAudit() {
     add('⚠️', 'Аномалии не проверены: ' + e.message);
   }
 
-  // 11. Свежесть бэкапа (бизнес-непрерывность)
+  // 11. Свежесть бэкапа (вне Google: zip в Telegram-чат / GitHub, запись в Ops_Log)
   try {
-    const files = DriveApp.searchFiles(
-      'title contains "Backup ' + ss_().getName() + '" and mimeType = "' + MimeType.GOOGLE_SHEETS + '"');
-    let newest = null;
-    while (files.hasNext()) {
-      const d = files.next().getDateCreated();
-      if (!newest || d > newest) newest = d;
-    }
-    if (!newest) {
-      add('⚠️', 'Бэкапов ещё нет — выполните backupNow() (дальше автоматически 1-го числа)');
+    let last = null, where = '';
+    readRange_(SHEETS.OPS_LOG, 2).forEach(function (r) {
+      if (String(r[2]) !== 'backup') return;
+      const d = r[0] instanceof Date ? r[0] : new Date(String(r[0]));
+      if (!isNaN(d) && (!last || d > last)) { last = d; where = String(r[3] || ''); }
+    });
+    if (!last) {
+      add('⚠️', 'Бэкапов ещё нет — выполните backupNow() (zip придёт в чат, дальше автоматически 1-го числа)');
     } else {
-      const age = Math.round((new Date() - newest) / 86400000);
-      add(age <= 40 ? '✅' : '❌', 'Бэкап: последний ' + fmtISO_(newest) + ' (' + age + ' дн. назад)' +
-        (age > 40 ? ' — месячный триггер не сработал? выполните backupNow()' : ''));
+      const age = Math.round((new Date() - last) / 86400000);
+      add(age <= 35 ? '✅' : '❌', 'Бэкап: ' + fmtISO_(last) + ' (' + age + ' дн. назад) · ' + where +
+        (age > 35 ? ' — месячный бэкап не сработал? выполните backupNow()' : ''));
     }
   } catch (e) {
     add('⚠️', 'Бэкап не проверен: ' + e.message);

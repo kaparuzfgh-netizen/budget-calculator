@@ -53,6 +53,25 @@ function answerCallback_(callbackQueryId, text) {
   }
 }
 
+/** Отправка файла-документа в чат (multipart; Telegram хранит у себя). */
+function tgSendDocument_(chatId, blob, caption) {
+  const resp = UrlFetchApp.fetch(TG_API + '/bot' + tgToken_() + '/sendDocument', {
+    method: 'post',
+    payload: {
+      chat_id: String(chatId),
+      caption: caption || '',
+      document: blob,
+    },
+    muteHttpExceptions: true,
+    deadline: CONFIG.HTTP_TIMEOUT_MS / 1000,
+  });
+  const body = resp.getContentText();
+  let json;
+  try { json = JSON.parse(body); } catch (e) { throw new Error('sendDocument: невалидный ответ'); }
+  if (!json.ok) throw new Error('sendDocument: ' + (json.description || resp.getResponseCode()));
+  return json.result;
+}
+
 /** Скачивает файл из Telegram CDN → { base64, mime } для Gemini. */
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // лимит против DoS и сжигания квоты Gemini
 

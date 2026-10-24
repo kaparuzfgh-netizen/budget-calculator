@@ -148,6 +148,8 @@ const PROP = {
   GROQ_MODEL: 'GROQ_MODEL', // опционально: переопределить модель Groq (напр. meta-llama/llama-4-maverick-17b-128e-instruct)
   WEBHOOK_SECRET: 'WEBHOOK_SECRET',
   SHEET_ID: 'SHEET_ID', // опционально, если скрипт не привязан к таблице
+  GH_BACKUP_TOKEN: 'GH_BACKUP_TOKEN', // опционально: GitHub PAT (contents) для бэкап-копии
+  GH_BACKUP_REPO: 'GH_BACKUP_REPO',   // опционально: 'user/private-repo'
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -464,6 +466,25 @@ function answerCallback_(callbackQueryId, text) {
   } catch (e) {
     console.warn('answerCallback: ' + e.message);
   }
+}
+
+/** Отправка файла-документа в чат (multipart; Telegram хранит у себя). */
+function tgSendDocument_(chatId, blob, caption) {
+  const resp = UrlFetchApp.fetch(TG_API + '/bot' + tgToken_() + '/sendDocument', {
+    method: 'post',
+    payload: {
+      chat_id: String(chatId),
+      caption: caption || '',
+      document: blob,
+    },
+    muteHttpExceptions: true,
+    deadline: CONFIG.HTTP_TIMEOUT_MS / 1000,
+  });
+  const body = resp.getContentText();
+  let json;
+  try { json = JSON.parse(body); } catch (e) { throw new Error('sendDocument: невалидный ответ'); }
+  if (!json.ok) throw new Error('sendDocument: ' + (json.description || resp.getResponseCode()));
+  return json.result;
 }
 
 /** Скачивает файл из Telegram CDN → { base64, mime } для Gemini. */
@@ -954,28 +975,92 @@ function setupWebhook(url) {
 }
 
 /**
- * Резервная копия всей таблицы в Google Drive (бизнес-непрерывность):
- * полная копия с формулами и графиками. Ручной запуск — backupNow();
- * автоматически 1-го числа из monthlyPlanLog. Копии старше ~6 месяцев
- * удаляются в корзину, чтобы Drive не зарастал.
+ * Внешний бэкап (вне Google!): CSV всех данных листов → zip →
+ * 1) документом в Telegram-чат владельца (хранится в облаке Telegram);
+ * 2) опционально в приватный репозиторий GitHub (GH_BACKUP_TOKEN + GH_BACKUP_REPO).
+ * Автоматически 1-го числа из monthlyPlanLog; вручную — backupNow().
+ * FX_History не выгружается: 180 дней курсов заново собирает GOOGLEFINANCE.
  */
 function backupNow() {
-  const src = ss_();
-  const name = 'Backup ' + src.getName() + ' ' + fmtISO_(new Date());
-  DriveApp.getFileById(src.getId()).makeCopy(name);
-  logOps_('INFO', 'backup', name);
+  const exportSheets = [
+    SHEETS.FX_SETTINGS, SHEETS.COMMITMENTS, SHEETS.MONTHLY, SHEETS.WEEKLY,
+    SHEETS.DEBTS, SHEETS.PORTFOLIO, SHEETS.NETWORTH, SHEETS.DEPOSITS,
+    SHEETS.METRICS, SHEETS.OPS_LOG,
+  ];
+  const files = [];
+  exportSheets.forEach(function (code) {
+    const csv = sheetToCsv_(sheet_(code));
+    if (csv) files.push(Utilities.newBlob(csv, 'text/csv', SHEETS[code] + '.csv'));
+  });
+  files.push(Utilities.newBlob(BACKUP_README_(), 'text/plain', 'RESTORE.txt'));
+  const zipName = 'budget-backup-' + fmtISO_(new Date()) + '.zip';
+  const zip = Utilities.zip(files, zipName);
 
-  // ротация: бэкапы старше ~6 месяцев — в корзину
-  try {
-    const cutoff = new Date(Date.now() - 190 * 86400000);
-    const all = DriveApp.searchFiles(
-      'title contains "Backup ' + src.getName() + '" and mimeType = "' + MimeType.GOOGLE_SHEETS + '"');
-    while (all.hasNext()) {
-      const f = all.next();
-      if (f.getDateCreated() < cutoff) f.setTrashed(true);
-    }
-  } catch (e) { console.warn('backup rotation: ' + e.message); }
-  return name;
+  const chatId = getProp_(PROP.CHAT_ID, '');
+  if (chatId) {
+    tgSendDocument_(chatId, zip,
+      '📦 Бэкап вне Google · ' + fmtISO_(new Date()) + '\n' +
+      files.length + ' CSV (долги с журналом, траты, план, net worth, вклады, метрики)\n' +
+      'Хранится в Telegram. Инструкция восстановления — RESTORE.txt внутри.');
+  }
+  const gh = ghBackup_(zip);
+  logOps_('INFO', 'backup', zipName + ' → Telegram' + (gh ? ' + GitHub' : ''));
+  return zipName + ' → Telegram' + (gh ? ' + GitHub' : '');
+}
+
+/** Значения листа → CSV (даты в ISO, кавычки экранированы). */
+function sheetToCsv_(sh) {
+  const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return '';
+  return sh.getRange(1, 1, lastRow, lastCol).getValues().map(function (row) {
+    return row.map(function (v) {
+      let s = (v instanceof Date) ? fmtISO_(v) : (v === null || v === undefined ? '' : String(v));
+      if (/[",;\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }).join(',');
+  }).join('\r\n');
+}
+
+/** Инструкция по восстановлению — кладётся в zip. */
+function BACKUP_README_() {
+  return 'RESTORE — Personal Finance Companion\n' +
+    '====================================\n' +
+    'Внутри: CSV всех листов данных (значения, включая журнал Debt_Engine —\n' +
+    'он полностью восстанавливает состояние ипотек через replay).\n\n' +
+    'Как восстановиться (на новом Google-аккаунте):\n' +
+    '1. Новый проект Apps Script → вставить BUNDLE.gs → секреты (SETUP.md).\n' +
+    '2. createSpreadsheet() — создаст структуру листов.\n' +
+    '3. Распаковать zip. Для каждого CSV: открыть соответствующий лист →\n' +
+    '   Файл → Импорт → Загрузить → вставить в новый лист → заменить значения\n' +
+    '   (строку заголовков пропустить, она уже есть).\n' +
+    '4. Debt_Engine.csv — самый важный: строки 19+ (Event Log) вернут долги.\n' +
+    '5. Выполнить setup() и /sync — движок пересчитает балансы replay-ом.\n\n' +
+    'FX_History не выгружается: 180 дней курсов соберёт GOOGLEFINANCE.\n' +
+    'Сгенерировано: ' + nowTz_();
+}
+
+/** Опциональная копия в приватный репозиторий GitHub (Contents API). */
+function ghBackup_(zipBlob) {
+  const token = getProp_('GH_BACKUP_TOKEN', '');
+  const repo = getProp_('GH_BACKUP_REPO', '');
+  if (!token || !repo) return false;
+  const url = 'https://api.github.com/repos/' + repo + '/contents/backups/' + zipBlob.getName();
+  const resp = UrlFetchApp.fetch(url, {
+    method: 'put',
+    contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' },
+    payload: JSON.stringify({
+      message: 'backup ' + fmtISO_(new Date()),
+      content: Utilities.base64Encode(zipBlob.getBytes()),
+    }),
+    muteHttpExceptions: true,
+    deadline: CONFIG.HTTP_TIMEOUT_MS / 1000,
+  });
+  if (resp.getResponseCode() >= 300) {
+    logOps_('WARN', 'backup', 'GitHub: HTTP ' + resp.getResponseCode() + ' ' + resp.getContentText().slice(0, 120));
+    return false;
+  }
+  return true;
 }
 
 /** Готовые ссылки доступа: API + Mini App с уже подставленным токеном чтения. */
@@ -3976,21 +4061,20 @@ function securityAudit() {
     add('⚠️', 'Аномалии не проверены: ' + e.message);
   }
 
-  // 11. Свежесть бэкапа (бизнес-непрерывность)
+  // 11. Свежесть бэкапа (вне Google: zip в Telegram-чат / GitHub, запись в Ops_Log)
   try {
-    const files = DriveApp.searchFiles(
-      'title contains "Backup ' + ss_().getName() + '" and mimeType = "' + MimeType.GOOGLE_SHEETS + '"');
-    let newest = null;
-    while (files.hasNext()) {
-      const d = files.next().getDateCreated();
-      if (!newest || d > newest) newest = d;
-    }
-    if (!newest) {
-      add('⚠️', 'Бэкапов ещё нет — выполните backupNow() (дальше автоматически 1-го числа)');
+    let last = null, where = '';
+    readRange_(SHEETS.OPS_LOG, 2).forEach(function (r) {
+      if (String(r[2]) !== 'backup') return;
+      const d = r[0] instanceof Date ? r[0] : new Date(String(r[0]));
+      if (!isNaN(d) && (!last || d > last)) { last = d; where = String(r[3] || ''); }
+    });
+    if (!last) {
+      add('⚠️', 'Бэкапов ещё нет — выполните backupNow() (zip придёт в чат, дальше автоматически 1-го числа)');
     } else {
-      const age = Math.round((new Date() - newest) / 86400000);
-      add(age <= 40 ? '✅' : '❌', 'Бэкап: последний ' + fmtISO_(newest) + ' (' + age + ' дн. назад)' +
-        (age > 40 ? ' — месячный триггер не сработал? выполните backupNow()' : ''));
+      const age = Math.round((new Date() - last) / 86400000);
+      add(age <= 35 ? '✅' : '❌', 'Бэкап: ' + fmtISO_(last) + ' (' + age + ' дн. назад) · ' + where +
+        (age > 35 ? ' — месячный бэкап не сработал? выполните backupNow()' : ''));
     }
   } catch (e) {
     add('⚠️', 'Бэкап не проверен: ' + e.message);
