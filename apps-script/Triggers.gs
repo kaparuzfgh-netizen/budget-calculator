@@ -60,6 +60,7 @@ function weeklySundayAsk() {
   try {
     setBotState_({ mode: 'await_week', asked_at: nowTz_() });
     MetricsEngine.logOnce('weekly_ask:' + weekKey_(new Date()), 'sent');
+    logOps_('INFO', 'weekly', 'воскресный опрос отправлен');
     sendMessage_(
       chatId,
       '📅 <b>Неделя заканчивается</b>\n' +
@@ -179,14 +180,16 @@ function maybeSendMonthDigest_() {
   const chatId = getProp_(PROP.CHAT_ID, '');
   const text = MetricsEngine.buildMonthDigest();
   console.log(text.replace(/<[^>]+>/g, ''));
+  logOps_('INFO', 'digest', 'месячный digest отправлен');
   if (chatId) sendMessage_(chatId, text);
   return true;
 }
 
-/** 1-го числа: план месяца + сверка ипотек с банком (P1) + автобэкап. */
+/** 1-го числа: план месяца + сверка ипотек с банком (P1) + автобэкап + ротация логов. */
 function monthlyPlanLog() {
   const chatId = getProp_(PROP.CHAT_ID, '');
   try {
+    try { trimOpsLog_(3000); } catch (tErr) { console.warn('trim opslog: ' + tErr.message); }
     try { backupNow(); } catch (bErr) { console.warn('backup: ' + bErr.message); }
     const w = CashflowEngine.computeWaterfall({});
     CashflowEngine.upsertMonth(w, 'proposal');

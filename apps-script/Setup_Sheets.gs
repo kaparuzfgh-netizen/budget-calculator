@@ -26,6 +26,7 @@ function setup() {
       deposits: buildOnce_(SHEETS.DEPOSITS, buildDeposits_),
       metrics: buildOnce_(SHEETS.METRICS, buildMetrics_),
       opslog: buildOnce_(SHEETS.OPS_LOG, buildOpsLog_),
+      opslogFmt: (function () { try { applyOpsLogFormatting_(sheet_(SHEETS.OPS_LOG)); return 'ok'; } catch (e) { return 'skip'; } })(),
       networthMigrated: migrateNetWorthSheet_(),
       triggers: installTriggers_(),
     };
@@ -396,6 +397,20 @@ function buildOpsLog_(sh) {
   boldHeader_(sh, headers.length);
   sh.getRange('A2:A20000').setNumberFormat('yyyy-mm-dd hh:mm');
   sh.setColumnWidth(4, 420);
+  applyOpsLogFormatting_(sh);
+}
+
+/** Подсветка уровней: ERROR — красным, WARN — янтарным. Идемпотентно. */
+function applyOpsLogFormatting_(sh) {
+  const range = sh.getRange('B2:B5000');
+  sh.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('ERROR').setBackground('#7f1d1d').setFontColor('#fecaca')
+      .setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('WARN').setBackground('#78350f').setFontColor('#fde68a')
+      .setRanges([range]).build(),
+  ]);
 }
 
 // ─────────────────────── Webhook ───────────────────────

@@ -240,6 +240,18 @@ function logOps_(level, source, message) {
   }
 }
 
+/** Ротация журнала: держим последние keep строк (по умолчанию 3000). */
+function trimOpsLog_(keep) {
+  keep = keep || 3000;
+  const sh = sheet_(SHEETS.OPS_LOG);
+  const last = sh.getLastRow();
+  if (last <= keep) return 0;
+  const excess = last - keep;
+  sh.deleteRows(2, excess);
+  logOps_('INFO', 'ops', 'ротация журнала: удалено старых строк — ' + excess);
+  return excess;
+}
+
 // ─────────────────────────── Lock ───────────────────────────
 
 /** Сериализация конкурентных записей (webhook + триггеры). */

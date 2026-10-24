@@ -397,6 +397,18 @@ function logOps_(level, source, message) {
   }
 }
 
+/** Ротация журнала: держим последние keep строк (по умолчанию 3000). */
+function trimOpsLog_(keep) {
+  keep = keep || 3000;
+  const sh = sheet_(SHEETS.OPS_LOG);
+  const last = sh.getLastRow();
+  if (last <= keep) return 0;
+  const excess = last - keep;
+  sh.deleteRows(2, excess);
+  logOps_('INFO', 'ops', 'ротация журнала: удалено старых строк — ' + excess);
+  return excess;
+}
+
 // ─────────────────────────── Lock ───────────────────────────
 
 /** Сериализация конкурентных записей (webhook + триггеры). */
@@ -570,6 +582,7 @@ function setup() {
       deposits: buildOnce_(SHEETS.DEPOSITS, buildDeposits_),
       metrics: buildOnce_(SHEETS.METRICS, buildMetrics_),
       opslog: buildOnce_(SHEETS.OPS_LOG, buildOpsLog_),
+      opslogFmt: (function () { try { applyOpsLogFormatting_(sheet_(SHEETS.OPS_LOG)); return 'ok'; } catch (e) { return 'skip'; } })(),
       networthMigrated: migrateNetWorthSheet_(),
       triggers: installTriggers_(),
     };
@@ -940,6 +953,20 @@ function buildOpsLog_(sh) {
   boldHeader_(sh, headers.length);
   sh.getRange('A2:A20000').setNumberFormat('yyyy-mm-dd hh:mm');
   sh.setColumnWidth(4, 420);
+  applyOpsLogFormatting_(sh);
+}
+
+/** Подсветка уровней: ERROR — красным, WARN — янтарным. Идемпотентно. */
+function applyOpsLogFormatting_(sh) {
+  const range = sh.getRange('B2:B5000');
+  sh.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('ERROR').setBackground('#7f1d1d').setFontColor('#fecaca')
+      .setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('WARN').setBackground('#78350f').setFontColor('#fde68a')
+      .setRanges([range]).build(),
+  ]);
 }
 
 // ─────────────────────── Webhook ───────────────────────
@@ -1189,6 +1216,7 @@ const CMD_ALIAS = {
   'валюта': 'fx', 'курс': 'fx', 'курсы': 'fx', 'валютаанализ': 'fx',
   'баланс': 'balance', 'остаток': 'balance', 'алиас': 'alias', 'категория': 'alias',
   'гайд': 'guide', 'метрики': 'metrics', 'аномалии': 'anomalies', 'аномалия': 'anomalies',
+  'логи': 'logs', 'лог': 'logs', 'журнал': 'logs',
 };
 
 function routeCommand_(chatId, text) {
@@ -1215,6 +1243,7 @@ function routeCommand_(chatId, text) {
       case 'guide': cmdGuide_(chatId); break;
       case 'metrics': cmdMetrics_(chatId); break;
       case 'anomalies': cmdAnomalies_(chatId); break;
+      case 'logs': cmdLogs_(chatId, args); break;
       case 'cash': cmdCash_(chatId, args); break;
       case 'status': cmdStatus_(chatId); break;
       case 'sync': cmdSync_(chatId); break;
@@ -1276,6 +1305,7 @@ function sendHelp_(chatId, prefix) {
     '/status — Net Worth (кэш + вклады + портфель − долг)\n' +
     '/metrics — продуктовые метрики (ответы недели, savings rate, vision)\n' +
     '/anomalies — проверка невозможных цифр (остатки, курсы, суммы, Net Worth)\n' +
+    '/logs [error|warn|info] [N] — журнал операций и ошибок прямо в чате\n' +
     '/sync — roll-forward долгов + снапшот Net Worth\n' +
     '/guide — гид установки: что готово и следующий шаг\n' +
     '/app — открыть Mini App (дашборд со слайдерами)'
@@ -1297,6 +1327,7 @@ function cmdIncome_(chatId, args) {
   }
   const w = CashflowEngine.computeWaterfall(income);
   CashflowEngine.upsertMonth(w, 'proposal');
+  logOps_('INFO', 'bot', '/income: ' + income.incomeAmount + ' ' + income.incomeCurrency + ' → ' + Math.round(w.incomeUSD) + ' USD');
   sendMessage_(
     chatId,
     CashflowEngine.renderText(w) + '\n\n📄 Строка месяца записана в Monthly_Cycles со статусом <b>proposal</b>.',
@@ -1327,6 +1358,7 @@ function cmdSpent_(chatId, args) {
   if (!args) throw new Error('Формат: /spent 3200 [₽/kgs/$] [заметка]');
   const parsed = parseTypedExpense_(args);
   if (!parsed) throw new Error('Не понял сумму. Пример: /spent 3200 или /spent 500 kgs');
+  logOps_('INFO', 'bot', '/spent: ' + parsed.total_spent + ' ' + parsed.currency);
   const status = CashflowEngine.logWeeklyExpense({
     amount: parsed.total_spent, currency: parsed.currency, note: args, source: 'manual',
   });
@@ -1348,6 +1380,7 @@ function cmdPrepay_(chatId, args) {
   const amount = parseAmount_(parts[1]);
   if (!amount) throw new Error('Не понял сумму: ' + escHtml_(parts[1]));
   const r = DebtEngine.registerPrepay(debtId, amount);
+  logOps_('INFO', 'bot', '/prepay: ' + debtId + ' ' + amount + ' ₽ → платёж ' + Math.round(r.paymentAfter) + ' ₽');
   const arb = DebtEngine.arbitrage(r.amount);
   const dep = InvestNetWorth.depositsSummary();
   sendMessage_(
@@ -1385,6 +1418,33 @@ function cmdFx_(chatId) {
 /** /anomalies — проверка невозможных/подозрительных цифр. */
 function cmdAnomalies_(chatId) {
   sendMessage_(chatId, AnomalyEngine.renderText());
+}
+
+/** /logs [error|warn|info] [N] — журнал Ops_Log прямо в чате. */
+function cmdLogs_(chatId, args) {
+  const parts = String(args || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let level = null, limit = 15;
+  parts.forEach(function (p) {
+    if (['error', 'warn', 'info'].indexOf(p) >= 0) level = p.toUpperCase();
+    else { const n = parseInt(p, 10); if (n > 0 && n <= 50) limit = n; }
+  });
+  const rows = readRange_(SHEETS.OPS_LOG, 2)
+    .filter(function (r) { return r[0]; })
+    .map(function (r) {
+      return {
+        d: r[0] instanceof Date ? r[0] : new Date(String(r[0])),
+        lvl: String(r[1] || ''), src: String(r[2] || ''), msg: String(r[3] || ''),
+      };
+    })
+    .filter(function (r) { return !level || r.lvl === level; });
+  const last = rows.slice(-limit);
+  if (!last.length) { sendMessage_(chatId, '📖 Журнал пуст (фильтр: ' + (level || 'все') + ').'); return; }
+  const icon = { ERROR: '🔴', WARN: '🟡', INFO: '🔵' };
+  sendMessage_(chatId, '📖 <b>Ops_Log</b> · последние ' + last.length + ' (фильтр: ' + (level || 'все') + ')\n' +
+    last.map(function (r) {
+      return (icon[r.lvl] || '⚪️') + ' <code>' + Utilities.formatDate(r.d, tz_(), 'MM-dd HH:mm') + '</code> ' +
+        escHtml_(r.src) + ': ' + escHtml_(r.msg.slice(0, 120));
+    }).join('\n'));
 }
 
 /** /balance sber|tbank <остаток ₽> — сверка ипотеки с банком вручную. */
@@ -3759,6 +3819,7 @@ function weeklySundayAsk() {
   try {
     setBotState_({ mode: 'await_week', asked_at: nowTz_() });
     MetricsEngine.logOnce('weekly_ask:' + weekKey_(new Date()), 'sent');
+    logOps_('INFO', 'weekly', 'воскресный опрос отправлен');
     sendMessage_(
       chatId,
       '📅 <b>Неделя заканчивается</b>\n' +
@@ -3878,14 +3939,16 @@ function maybeSendMonthDigest_() {
   const chatId = getProp_(PROP.CHAT_ID, '');
   const text = MetricsEngine.buildMonthDigest();
   console.log(text.replace(/<[^>]+>/g, ''));
+  logOps_('INFO', 'digest', 'месячный digest отправлен');
   if (chatId) sendMessage_(chatId, text);
   return true;
 }
 
-/** 1-го числа: план месяца + сверка ипотек с банком (P1) + автобэкап. */
+/** 1-го числа: план месяца + сверка ипотек с банком (P1) + автобэкап + ротация логов. */
 function monthlyPlanLog() {
   const chatId = getProp_(PROP.CHAT_ID, '');
   try {
+    try { trimOpsLog_(3000); } catch (tErr) { console.warn('trim opslog: ' + tErr.message); }
     try { backupNow(); } catch (bErr) { console.warn('backup: ' + bErr.message); }
     const w = CashflowEngine.computeWaterfall({});
     CashflowEngine.upsertMonth(w, 'proposal');

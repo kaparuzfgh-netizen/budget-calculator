@@ -71,6 +71,7 @@ const CMD_ALIAS = {
   'валюта': 'fx', 'курс': 'fx', 'курсы': 'fx', 'валютаанализ': 'fx',
   'баланс': 'balance', 'остаток': 'balance', 'алиас': 'alias', 'категория': 'alias',
   'гайд': 'guide', 'метрики': 'metrics', 'аномалии': 'anomalies', 'аномалия': 'anomalies',
+  'логи': 'logs', 'лог': 'logs', 'журнал': 'logs',
 };
 
 function routeCommand_(chatId, text) {
@@ -97,6 +98,7 @@ function routeCommand_(chatId, text) {
       case 'guide': cmdGuide_(chatId); break;
       case 'metrics': cmdMetrics_(chatId); break;
       case 'anomalies': cmdAnomalies_(chatId); break;
+      case 'logs': cmdLogs_(chatId, args); break;
       case 'cash': cmdCash_(chatId, args); break;
       case 'status': cmdStatus_(chatId); break;
       case 'sync': cmdSync_(chatId); break;
@@ -158,6 +160,7 @@ function sendHelp_(chatId, prefix) {
     '/status — Net Worth (кэш + вклады + портфель − долг)\n' +
     '/metrics — продуктовые метрики (ответы недели, savings rate, vision)\n' +
     '/anomalies — проверка невозможных цифр (остатки, курсы, суммы, Net Worth)\n' +
+    '/logs [error|warn|info] [N] — журнал операций и ошибок прямо в чате\n' +
     '/sync — roll-forward долгов + снапшот Net Worth\n' +
     '/guide — гид установки: что готово и следующий шаг\n' +
     '/app — открыть Mini App (дашборд со слайдерами)'
@@ -179,6 +182,7 @@ function cmdIncome_(chatId, args) {
   }
   const w = CashflowEngine.computeWaterfall(income);
   CashflowEngine.upsertMonth(w, 'proposal');
+  logOps_('INFO', 'bot', '/income: ' + income.incomeAmount + ' ' + income.incomeCurrency + ' → ' + Math.round(w.incomeUSD) + ' USD');
   sendMessage_(
     chatId,
     CashflowEngine.renderText(w) + '\n\n📄 Строка месяца записана в Monthly_Cycles со статусом <b>proposal</b>.',
@@ -209,6 +213,7 @@ function cmdSpent_(chatId, args) {
   if (!args) throw new Error('Формат: /spent 3200 [₽/kgs/$] [заметка]');
   const parsed = parseTypedExpense_(args);
   if (!parsed) throw new Error('Не понял сумму. Пример: /spent 3200 или /spent 500 kgs');
+  logOps_('INFO', 'bot', '/spent: ' + parsed.total_spent + ' ' + parsed.currency);
   const status = CashflowEngine.logWeeklyExpense({
     amount: parsed.total_spent, currency: parsed.currency, note: args, source: 'manual',
   });
@@ -230,6 +235,7 @@ function cmdPrepay_(chatId, args) {
   const amount = parseAmount_(parts[1]);
   if (!amount) throw new Error('Не понял сумму: ' + escHtml_(parts[1]));
   const r = DebtEngine.registerPrepay(debtId, amount);
+  logOps_('INFO', 'bot', '/prepay: ' + debtId + ' ' + amount + ' ₽ → платёж ' + Math.round(r.paymentAfter) + ' ₽');
   const arb = DebtEngine.arbitrage(r.amount);
   const dep = InvestNetWorth.depositsSummary();
   sendMessage_(
@@ -267,6 +273,33 @@ function cmdFx_(chatId) {
 /** /anomalies — проверка невозможных/подозрительных цифр. */
 function cmdAnomalies_(chatId) {
   sendMessage_(chatId, AnomalyEngine.renderText());
+}
+
+/** /logs [error|warn|info] [N] — журнал Ops_Log прямо в чате. */
+function cmdLogs_(chatId, args) {
+  const parts = String(args || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let level = null, limit = 15;
+  parts.forEach(function (p) {
+    if (['error', 'warn', 'info'].indexOf(p) >= 0) level = p.toUpperCase();
+    else { const n = parseInt(p, 10); if (n > 0 && n <= 50) limit = n; }
+  });
+  const rows = readRange_(SHEETS.OPS_LOG, 2)
+    .filter(function (r) { return r[0]; })
+    .map(function (r) {
+      return {
+        d: r[0] instanceof Date ? r[0] : new Date(String(r[0])),
+        lvl: String(r[1] || ''), src: String(r[2] || ''), msg: String(r[3] || ''),
+      };
+    })
+    .filter(function (r) { return !level || r.lvl === level; });
+  const last = rows.slice(-limit);
+  if (!last.length) { sendMessage_(chatId, '📖 Журнал пуст (фильтр: ' + (level || 'все') + ').'); return; }
+  const icon = { ERROR: '🔴', WARN: '🟡', INFO: '🔵' };
+  sendMessage_(chatId, '📖 <b>Ops_Log</b> · последние ' + last.length + ' (фильтр: ' + (level || 'все') + ')\n' +
+    last.map(function (r) {
+      return (icon[r.lvl] || '⚪️') + ' <code>' + Utilities.formatDate(r.d, tz_(), 'MM-dd HH:mm') + '</code> ' +
+        escHtml_(r.src) + ': ' + escHtml_(r.msg.slice(0, 120));
+    }).join('\n'));
 }
 
 /** /balance sber|tbank <остаток ₽> — сверка ипотеки с банком вручную. */
