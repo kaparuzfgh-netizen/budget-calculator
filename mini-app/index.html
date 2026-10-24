@@ -11,12 +11,17 @@
 <style>
   [v-cloak]{display:none}
   body{background:#0b1220;color:#e2e8f0;font-family:-apple-system,'Segoe UI',Roboto,sans-serif;
-       -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+       -webkit-tap-highlight-color:transparent;overscroll-behavior:none;font-variant-numeric:tabular-nums}
   .card{background:#111a2e;border:1px solid #1e293b;border-radius:16px}
   input[type=range]{-webkit-appearance:none;height:6px;border-radius:6px;background:#1e293b;outline:none}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;
     background:#34d399;border:3px solid #0b1220;box-shadow:0 0 0 1px #34d399}
   .tab-active{color:#34d399;border-color:#34d399}
+  .tabpane{animation:fadein .25s ease}
+  @keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .sk{background:linear-gradient(90deg,#1e293b 25%,#273449 50%,#1e293b 75%);background-size:200% 100%;
+      animation:shimmer 1.2s infinite;border-radius:8px}
+  @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
   ::-webkit-scrollbar{display:none}
 </style>
 </head>
@@ -36,14 +41,25 @@
     🌐 Демо-режим (браузер): данные только для чтения. Записи (ЧДП, траты) — из Telegram.
   </div>
 
-  <!-- ── Ошибка / загрузка ── -->
+  <!-- ── Ошибка / загрузка (скелетон) ── -->
   <div v-if="error" class="card px-4 py-3 mb-3 text-sm text-rose-400">⚠️ {{ error }}</div>
-  <div v-if="loading" class="text-center text-slate-400 text-sm py-6">Загрузка данных…</div>
+  <div v-if="loading" class="space-y-3">
+    <div class="card p-4">
+      <div class="sk h-3 w-28"></div>
+      <div class="sk h-8 w-40 mt-3"></div>
+      <div class="grid grid-cols-4 gap-2 mt-4">
+        <div class="sk h-12 !rounded-xl"></div><div class="sk h-12 !rounded-xl"></div>
+        <div class="sk h-12 !rounded-xl"></div><div class="sk h-12 !rounded-xl"></div>
+      </div>
+    </div>
+    <div class="card p-4"><div class="sk h-3 w-32"></div><div class="sk h-24 mt-3"></div></div>
+    <div class="card p-4"><div class="sk h-3 w-36"></div><div class="sk h-16 mt-3"></div></div>
+  </div>
 
   <template v-if="d.ok">
 
     <!-- ════════ ОБЗОР ════════ -->
-    <div v-show="tab==='overview'" class="space-y-3">
+    <div v-show="tab==='overview'" class="space-y-3 tabpane">
       <div class="card p-4">
         <div class="text-xs text-slate-400">NET WORTH · (Cash + Portfolio) − Debt</div>
         <div class="text-3xl font-bold mt-1" :class="nw.total_usd>=0?'text-emerald-400':'text-rose-400'">
@@ -86,23 +102,23 @@
     </div>
 
     <!-- ════════ ПЛАН (водопад + слайдеры) ════════ -->
-    <div v-show="tab==='plan'" class="space-y-3">
+    <div v-show="tab==='plan'" class="space-y-3 tabpane">
       <div class="card p-4 space-y-4">
         <div>
           <div class="flex justify-between text-sm"><b>💵 Доход месяца</b>
             <span class="text-emerald-400 font-mono">{{ fmt(s.income) }} € ≈ ${{ fmt(wf.income_usd) }}</span></div>
-          <input type="range" min="3000" max="12000" step="100" v-model.number="s.income" class="w-full mt-2">
+          <input type="range" min="3000" max="12000" step="100" v-model.number="s.income" @change="haptic('light')" class="w-full mt-2">
           <div class="flex justify-between text-[10px] text-slate-500"><span>3000 €</span><span>база ${{ fmt(d.settings.base_income_usd) }}</span><span>12000 €</span></div>
         </div>
         <div>
           <div class="flex justify-between text-sm"><b>💸 Доп. досрочка / мес</b>
             <span class="text-emerald-400 font-mono">{{ fmtR(s.prepay) }} ₽</span></div>
-          <input type="range" min="0" max="150000" step="1000" v-model.number="s.prepay" class="w-full mt-2">
+          <input type="range" min="0" max="150000" step="1000" v-model.number="s.prepay" @change="haptic('light')" class="w-full mt-2">
         </div>
         <div>
           <div class="flex justify-between text-sm"><b>📈 Доп. DCA / мес</b>
             <span class="text-emerald-400 font-mono">${{ fmt(s.dca) }}</span></div>
-          <input type="range" min="0" max="3000" step="50" v-model.number="s.dca" class="w-full mt-2">
+          <input type="range" min="0" max="3000" step="50" v-model.number="s.dca" @change="haptic('light')" class="w-full mt-2">
         </div>
       </div>
 
@@ -124,7 +140,7 @@
     </div>
 
     <!-- ════════ ДОЛГИ ════════ -->
-    <div v-show="tab==='debts'" class="space-y-3">
+    <div v-show="tab==='debts'" class="space-y-3 tabpane">
       <div v-for="debt in d.debts" :key="debt.id" class="card p-4">
         <div class="flex justify-between items-baseline">
           <b class="text-sm">🏦 {{ debt.name }}</b>
@@ -146,7 +162,7 @@
         <b class="text-sm">🧮 ЧДП-симулятор · {{ sber.name }}</b>
         <div class="flex justify-between text-sm mt-3"><span>Досрочный платёж L</span>
           <span class="font-mono text-amber-300">{{ fmtR(pp.L) }} ₽</span></div>
-        <input type="range" min="0" :max="Math.floor(sber.balance_rub)" step="5000" v-model.number="pp.L" class="w-full mt-2">
+        <input type="range" min="0" :max="Math.floor(sber.balance_rub)" step="5000" v-model.number="pp.L" @change="haptic('light')" class="w-full mt-2">
         <div class="flex gap-2 mt-3 text-xs">
           <button @click="pp.mode='payment'" :class="pp.mode==='payment'?'bg-emerald-600':'bg-slate-800'" class="flex-1 py-2 rounded-xl">Платёж ↓ (срок прежний)</button>
           <button @click="pp.mode='term'" :class="pp.mode==='term'?'bg-emerald-600':'bg-slate-800'" class="flex-1 py-2 rounded-xl">Срок ↓ (платёж прежний)</button>
@@ -165,7 +181,7 @@
         </div>
         <div v-if="arbOnL" class="text-xs mt-2" :class="arbOnL.depositWins?'text-amber-300':'text-slate-400'">⚖️ {{ arbOnL.verdict }}</div>
         <button @click="applyPrepay" :disabled="pp.L<1000 || busy"
-                class="w-full mt-3 py-3 rounded-xl font-semibold text-slate-900 bg-emerald-500 disabled:opacity-40">
+                class="w-full mt-3 py-3 rounded-xl font-semibold text-slate-900 bg-emerald-500 disabled:opacity-40 active:scale-95 transition">
           {{ busy ? 'Записываю…' : 'Записать ЧДП ' + fmtR(pp.L) + ' ₽' }}
         </button>
         <div v-if="msg" class="text-xs mt-2 text-slate-300">{{ msg }}</div>
@@ -173,7 +189,7 @@
     </div>
 
     <!-- ════════ ВАЛЮТЫ ════════ -->
-    <div v-show="tab==='fx'" class="space-y-3">
+    <div v-show="tab==='fx'" class="space-y-3 tabpane">
       <div v-if="!d.fx_analytics || !d.fx_analytics.ok" class="card px-4 py-3 text-sm text-slate-400">
         💱 История курсов ещё не собрана. Откройте лист <b>FX_History</b> в таблице — GOOGLEFINANCE заполнит 180 дней, затем обновите этот экран.
       </div>
@@ -218,7 +234,7 @@
     </div>
 
     <!-- ════════ ПОРТФЕЛЬ ════════ -->
-    <div v-show="tab==='portfolio'" class="space-y-3">
+    <div v-show="tab==='portfolio'" class="space-y-3 tabpane">
       <div class="card p-4">
         <div class="flex justify-between items-baseline"><b class="text-sm">💼 Портфель</b>
           <b class="text-emerald-400">${{ fmt(d.portfolio.total_usd) }}</b></div>
@@ -356,6 +372,16 @@ createApp({
   },
 
   methods: {
+    // Тактильный отклик Telegram (безопасно вне Telegram)
+    haptic(kind) {
+      try {
+        const h = tg && tg.HapticFeedback;
+        if (!h) return;
+        if (kind === 'success' || kind === 'error') h.notificationOccurred(kind);
+        else h.impactOccurred(kind || 'light');
+      } catch (e) { /* no-op */ }
+    },
+
     fmt(n, digits) {
       const v = Number(n) || 0;
       return v.toLocaleString('ru-RU', { maximumFractionDigits: digits === undefined ? 0 : digits });
@@ -371,6 +397,7 @@ createApp({
 
     setTab(id) {
       this.tab = id;
+      this.haptic('light');
       this.$nextTick(() => this.renderCharts());
     },
 
@@ -422,9 +449,11 @@ createApp({
         this.msg = '✅ ЧДП ' + this.fmtR(j.prepay.amount) + ' ₽ записан: платёж ' +
           this.fmtR(j.prepay.paymentAfter) + ' ₽/мес, остаток ' + this.fmtR(j.prepay.balanceAfter) + ' ₽';
         this.pp.L = 0;
+        this.haptic('success');
         await this.load();
       } catch (e) {
         this.msg = '❌ ' + e.message;
+        this.haptic('error');
       } finally { this.busy = false; }
     },
 
@@ -530,7 +559,15 @@ createApp({
     },
   },
 
-  mounted() { this.load(); },
+  mounted() {
+    if (tg) {
+      try {
+        if (tg.setHeaderColor) tg.setHeaderColor('#0b1220');
+        if (tg.setBackgroundColor) tg.setBackgroundColor('#0b1220');
+      } catch (e) { /* старые клиенты */ }
+    }
+    this.load();
+  },
 }).mount('#app');
 </script>
 </body>

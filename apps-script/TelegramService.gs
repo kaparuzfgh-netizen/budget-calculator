@@ -41,6 +41,7 @@ function sendMessage_(chatId, html, opts) {
     disable_web_page_preview: true,
   };
   if (opts.buttons && opts.buttons.length) payload.reply_markup = { inline_keyboard: [opts.buttons] };
+  else if (opts.menu) payload.reply_markup = { keyboard: opts.menu, resize_keyboard: true, is_persistent: true };
   return tgCall_('sendMessage', payload);
 }
 

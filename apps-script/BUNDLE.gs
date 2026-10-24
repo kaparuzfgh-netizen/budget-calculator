@@ -454,6 +454,7 @@ function sendMessage_(chatId, html, opts) {
     disable_web_page_preview: true,
   };
   if (opts.buttons && opts.buttons.length) payload.reply_markup = { inline_keyboard: [opts.buttons] };
+  else if (opts.menu) payload.reply_markup = { keyboard: opts.menu, resize_keyboard: true, is_persistent: true };
   return tgCall_('sendMessage', payload);
 }
 
@@ -895,6 +896,43 @@ function buildOpsLog_(sh) {
 
 // ─────────────────────── Webhook ───────────────────────
 
+/** Командное меню бота (автокомплит «/» в Telegram) — ставится setupBotProfile(). */
+const BOT_COMMANDS = [
+  { command: 'plan', description: 'Водопад месяца: доход → обязательства → каскад' },
+  { command: 'income', description: 'Записать доход месяца, напр. 6200 eur' },
+  { command: 'spent', description: 'Быстрая трата в недельный учёт' },
+  { command: 'week', description: 'Бюджет недели/месяца и дневной лимит' },
+  { command: 'fx', description: 'Валюты: прогноз и когда выгодно менять' },
+  { command: 'prepay', description: 'ЧДП ипотеки, напр. sber 50000' },
+  { command: 'balance', description: 'Сверка остатка ипотеки с банком' },
+  { command: 'invest', description: 'Портфель и дрейф от целей 58/23/19' },
+  { command: 'cash', description: 'Остаток кэша в валюте, напр. 12000 kgs' },
+  { command: 'status', description: 'Net Worth: кэш + вклады + портфель − долг' },
+  { command: 'anomalies', description: 'Проверка невозможных цифр' },
+  { command: 'metrics', description: 'Метрики и savings rate' },
+  { command: 'alias', description: 'Исправить категорию Vision' },
+  { command: 'sync', description: 'Пересчёт долгов + снапшот Net Worth' },
+  { command: 'guide', description: 'Гид установки: что готово и что дальше' },
+  { command: 'help', description: 'Все команды' },
+];
+
+/**
+ * Настройка профиля бота через Bot API (вместо ручного ввода в @BotFather):
+ * командное меню, описание пустого чата и «О боте». Запускать один раз
+ * после деплоя (картинка и кнопка Mini App — вручную, см. docs/BOT_SETUP.md).
+ */
+function setupBotProfile() {
+  tgCall_('setMyCommands', { commands: BOT_COMMANDS });
+  tgCall_('setMyDescription', {
+    description: 'Личный финансовый движок: план месяца и каскад профицита, две ипотеки с ЧДП-калькулятором, траты по скриншоту MBANK (Gemini), валютные сигналы EUR→₽/сом/$, Net Worth и аномалии.\n\nНачните с /start — или просто пришлите скриншот.',
+  });
+  tgCall_('setMyShortDescription', {
+    description: 'Личный финанс-компаньон: план → каскад → контроль. Google Sheets + Gemini, $0/мес',
+  });
+  logOps_('INFO', 'setup', 'bot profile updated (commands, description, about)');
+  return '✅ Командное меню, описание пустого чата и «О боте» обновлены. Осталось вручную: иконка и кнопка Mini App (docs/BOT_SETUP.md).';
+}
+
 /** Привязка Telegram Webhook к Web App. Запускать после деплоя. */
 function setupWebhook(url) {
   ensureSecret_(PROP.WEBHOOK_SECRET, 32); // страховка, если setup() ещё не выполнялся
@@ -1077,17 +1115,32 @@ function routeCommand_(chatId, text) {
   }
 }
 
+/** Постоянное меню бота (reply keyboard): главные действия в один тап. */
+const MAIN_MENU_ = [
+  ['📊 План', '💱 Курсы'],
+  ['📅 Неделя', '🧮 Статус'],
+  ['❓ Помощь'],
+];
+
+const MENU_LABEL_TO_CMD_ = {
+  '📊 План': '/plan',
+  '💱 Курсы': '/fx',
+  '📅 Неделя': '/week',
+  '🧮 Статус': '/status',
+  '❓ Помощь': '/help',
+};
+
 function sendStart_(chatId) {
   sendMessage_(
     chatId,
     '👋 <b>Personal Finance Companion</b>\n' +
     'База — Google Sheets, курсы и цены — GOOGLEFINANCE, скриншоты чеков разбирает Gemini.\n\n' +
-    '/plan — водопад месяца: доход → обязательства → профицит → каскад\n' +
+    'Главное — на кнопках под сообщением. Также:\n' +
     '/income 6200 eur — записать доход и применить каскад\n' +
-    '/spent 3200 — быстрая трата · или просто пришлите скриншот MBANK\n' +
-    '/week — недельный бюджет и допустимый дневной расход\n' +
-    '/prepay sber 50000 — ЧДП: пересчёт платежа с сохранением срока\n' +
-    '/invest · /status · /cash · /sync · /app — остальное в /help'
+    '/spent 3200 — быстрая трата · или скриншот MBANK / ипотеки прямо в чат\n' +
+    '/prepay sber 50000 — ЧДП · /anomalies — проверка цифр\n\n' +
+    'Полный список — /help',
+    { menu: MAIN_MENU_ }
   );
 }
 
@@ -1519,6 +1572,10 @@ function proposeReconciliation_(chatId, debtId, actualRUB) {
 // ─────────────────────────── Свободный текст ───────────────────────────
 
 function handleFreeText_(chatId, text) {
+  // Кнопки постоянного меню → соответствующие команды
+  const menuCmd = MENU_LABEL_TO_CMD_[text.trim()];
+  if (menuCmd) { routeCommand_(chatId, menuCmd); return; }
+
   const state = getBotState_();
 
   if (state.mode === 'await_week') {

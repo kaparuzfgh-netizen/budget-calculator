@@ -109,17 +109,32 @@ function routeCommand_(chatId, text) {
   }
 }
 
+/** Постоянное меню бота (reply keyboard): главные действия в один тап. */
+const MAIN_MENU_ = [
+  ['📊 План', '💱 Курсы'],
+  ['📅 Неделя', '🧮 Статус'],
+  ['❓ Помощь'],
+];
+
+const MENU_LABEL_TO_CMD_ = {
+  '📊 План': '/plan',
+  '💱 Курсы': '/fx',
+  '📅 Неделя': '/week',
+  '🧮 Статус': '/status',
+  '❓ Помощь': '/help',
+};
+
 function sendStart_(chatId) {
   sendMessage_(
     chatId,
     '👋 <b>Personal Finance Companion</b>\n' +
     'База — Google Sheets, курсы и цены — GOOGLEFINANCE, скриншоты чеков разбирает Gemini.\n\n' +
-    '/plan — водопад месяца: доход → обязательства → профицит → каскад\n' +
+    'Главное — на кнопках под сообщением. Также:\n' +
     '/income 6200 eur — записать доход и применить каскад\n' +
-    '/spent 3200 — быстрая трата · или просто пришлите скриншот MBANK\n' +
-    '/week — недельный бюджет и допустимый дневной расход\n' +
-    '/prepay sber 50000 — ЧДП: пересчёт платежа с сохранением срока\n' +
-    '/invest · /status · /cash · /sync · /app — остальное в /help'
+    '/spent 3200 — быстрая трата · или скриншот MBANK / ипотеки прямо в чат\n' +
+    '/prepay sber 50000 — ЧДП · /anomalies — проверка цифр\n\n' +
+    'Полный список — /help',
+    { menu: MAIN_MENU_ }
   );
 }
 
@@ -551,6 +566,10 @@ function proposeReconciliation_(chatId, debtId, actualRUB) {
 // ─────────────────────────── Свободный текст ───────────────────────────
 
 function handleFreeText_(chatId, text) {
+  // Кнопки постоянного меню → соответствующие команды
+  const menuCmd = MENU_LABEL_TO_CMD_[text.trim()];
+  if (menuCmd) { routeCommand_(chatId, menuCmd); return; }
+
   const state = getBotState_();
 
   if (state.mode === 'await_week') {
