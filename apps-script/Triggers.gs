@@ -59,7 +59,7 @@ function weeklySundayAsk() {
   if (!chatId) { console.warn('TELEGRAM_CHAT_ID не задан — воскресный опрос пропущен'); return; }
   try {
     setBotState_({ mode: 'await_week', asked_at: nowTz_() });
-    MetricsEngine.logOnce('weekly_ask:' + fmtISO_(new Date()), 'sent');
+    MetricsEngine.logOnce('weekly_ask:' + weekKey_(new Date()), 'sent');
     sendMessage_(
       chatId,
       '📅 <b>Неделя заканчивается</b>\n' +

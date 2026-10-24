@@ -163,6 +163,15 @@ function mondayOf_(d) {
   return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
 }
 
+/** Ключ недельного цикла: ISO-дата воскресенья, открывшего цикл.
+ *  Опрос уходит в вс 20:00; ответы с вс по сб (включая пн-надж)
+ *  относятся к этому воскресенью — так ключи вопроса и ответа совпадают. */
+function weekKey_(d) {
+  const dt = new Date((d || new Date()).getTime());
+  dt.setDate(dt.getDate() - dt.getDay()); // откат к воскресенью (getDay: вс=0)
+  return fmtISO_(new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+}
+
 /** ISO-номер недели. */
 function isoWeek_(d) {
   const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));

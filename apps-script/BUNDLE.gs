@@ -317,6 +317,15 @@ function mondayOf_(d) {
   return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
 }
 
+/** Ключ недельного цикла: ISO-дата воскресенья, открывшего цикл.
+ *  Опрос уходит в вс 20:00; ответы с вс по сб (включая пн-надж)
+ *  относятся к этому воскресенью — так ключи вопроса и ответа совпадают. */
+function weekKey_(d) {
+  const dt = new Date((d || new Date()).getTime());
+  dt.setDate(dt.getDate() - dt.getDay()); // откат к воскресенью (getDay: вс=0)
+  return fmtISO_(new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+}
+
 /** ISO-номер недели. */
 function isoWeek_(d) {
   const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -1105,7 +1114,7 @@ function cmdSpent_(chatId, args) {
   const status = CashflowEngine.logWeeklyExpense({
     amount: parsed.total_spent, currency: parsed.currency, note: args, source: 'manual',
   });
-  MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), 'manual');
+  MetricsEngine.logOnce('weekly_answer:' + weekKey_(new Date()), 'manual');
   sendMessage_(chatId,
     '🧾 Записано: ' + fmtMoney_(parsed.total_spent, parsed.currency) + '\n\n' +
     CashflowEngine.renderWeeklyText(status));
@@ -1171,6 +1180,11 @@ function cmdAlias_(chatId, args) {
   const m = String(args || '').match(/^"?([^"]+?)"?\s+"?([^"]+?)"?$/);
   if (!m || !m[1] || !m[2]) throw new Error('Формат: /alias "как распознал" "как правильно"');
   const from = m[1].trim(), to = m[2].trim();
+  // защита от formula-injection: значения попадают в ячейки Settings
+  if (/^[=+\-@\t\r]/.test(from) || /^[=+\-@\t\r]/.test(to)) {
+    throw new Error('Значения не могут начинаться с = + - @');
+  }
+  if (from.length > 40 || to.length > 40) throw new Error('Слишком длинно (макс. 40 символов)');
   setSetting_('CAT_ALIAS_' + from.toLowerCase(), to);
   MetricsEngine.log('vision_fix:' + fmtISO_(new Date()), from + '→' + to);
   sendMessage_(chatId, '✅ Категория «' + escHtml_(from) + '» теперь записывается как «' + escHtml_(to) + '».');
@@ -1227,7 +1241,9 @@ function cmdMetrics_(chatId) {
     fmtPct_(va.fixRate, 0) + ') — цель <10%');
   const sr = MetricsEngine.value('savings_rate:');
   if (sr !== null) L.push('Savings rate (посл. месяц): ' + fmtPct_(Number(sr)));
-  const cascades = MetricsEngine.byPrefix('cascade_applied:');
+  const cascades = MetricsEngine.byPrefix('cascade_applied:').filter(function (c) {
+    return c.key.indexOf(':observed') === -1; // наблюдения digest не считаем применениями
+  });
   if (cascades.length) {
     const applied = cascades.filter(function (c) { return c.value === '1'; }).length;
     L.push('Каскад применён: ' + applied + ' из ' + cascades.length + ' мес.');
@@ -1393,7 +1409,7 @@ function handlePhoto_(chatId, fileId, mime) {
       cat2: c2 ? c2.category + ' ' + round2_(c2.amount) : '',
       note: 'vision/' + parsed.provider + ' · file ' + fileId.slice(0, 12),
     });
-    MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), parsed.provider);
+    MetricsEngine.logOnce('weekly_answer:' + weekKey_(new Date()), parsed.provider);
     sendMessage_(chatId, head + '\n\n' + CashflowEngine.renderWeeklyText(status));
   } catch (err) {
     console.error('photo: ' + err.message);
@@ -1461,7 +1477,7 @@ function handleFreeText_(chatId, text) {
       const status = CashflowEngine.logWeeklyExpense({
         amount: parsed.total_spent, currency: parsed.currency, note: 'weekly reply', source: 'chat',
       });
-      MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), 'chat');
+      MetricsEngine.logOnce('weekly_answer:' + weekKey_(new Date()), 'chat');
       sendMessage_(chatId, '🧾 Записано: ' + fmtMoney_(parsed.total_spent, parsed.currency) + '\n\n' +
         CashflowEngine.renderWeeklyText(status));
     } else {
@@ -3296,7 +3312,7 @@ function weeklySundayAsk() {
   if (!chatId) { console.warn('TELEGRAM_CHAT_ID не задан — воскресный опрос пропущен'); return; }
   try {
     setBotState_({ mode: 'await_week', asked_at: nowTz_() });
-    MetricsEngine.logOnce('weekly_ask:' + fmtISO_(new Date()), 'sent');
+    MetricsEngine.logOnce('weekly_ask:' + weekKey_(new Date()), 'sent');
     sendMessage_(
       chatId,
       '📅 <b>Неделя заканчивается</b>\n' +
@@ -3489,12 +3505,16 @@ function securityAudit() {
   const token = props[PROP.BOT_TOKEN] || '';
   const chatId = props[PROP.CHAT_ID] || '';
   const gemini = props[PROP.GEMINI_KEY] || '';
+  const groq = props[PROP.GROQ_KEY] || '';
   const secret = props[PROP.WEBHOOK_SECRET] || '';
   const readToken = props[PROP.TMA_READ_TOKEN] || '';
 
   add(token ? '✅' : '❌', 'TELEGRAM_BOT_TOKEN: ' + (token ? 'задан' : 'ОТСУТСТВУЕТ'));
   add(chatId ? '✅' : '❌', 'TELEGRAM_CHAT_ID (whitelist): ' + (chatId ? 'задан' : 'ОТСУТСТВУЕТ — бот будет отвечать подсказкой любому'));
-  add(gemini ? '✅' : '❌', 'GEMINI_API_KEY: ' + (gemini ? 'задан' : 'ОТСУТСТВУЕТ (Vision не будет работать)'));
+  if (gemini && groq) add('✅', 'Vision: Gemini + резерв Groq (двойное покрытие)');
+  else if (gemini) add('✅', 'GEMINI_API_KEY: задан (резерв Groq не настроен — опционально)');
+  else if (groq) add('⚠️', 'Vision: только Groq (GEMINI_API_KEY не задан — скриншоты пойдут через резервный провайдер)');
+  else add('❌', 'Vision: нет ни GEMINI_API_KEY, ни GROQ_API_KEY — разбор скриншотов работать не будет');
   add(secret.length >= 32 ? '✅' : '⚠️', 'WEBHOOK_SECRET: ' + (secret ? secret.length + ' симв. (рекомендуется 32+)' : 'ОТСУТСТВУЕТ — webhook открыт для подделки'));
   add(readToken ? '✅' : '⚠️', 'TMA_READ_TOKEN: ' + (readToken ? 'чтение API защищено токеном' : 'не задан — чтение финансовых данных по URL Web App открыто (запустите setup(), он создаст токен)'));
 
@@ -3533,9 +3553,9 @@ function securityAudit() {
     add('⚠️', 'Webhook не проверен: ' + e.message);
   }
 
-  // 5. Cron-триггеры: воскресный опрос, ежедневный roll-forward, месячный план
+  // 5. Cron-триггеры: воскресный опрос, пн-надж, ежедневный roll-forward, месячный план
   try {
-    const need = ['weeklySundayAsk', 'dailyMaintenance', 'monthlyPlanLog'];
+    const need = ['weeklySundayAsk', 'mondayNudge', 'dailyMaintenance', 'monthlyPlanLog'];
     const installed = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
     need.forEach(function (h) {
       add(installed.indexOf(h) >= 0 ? '✅' : '❌',

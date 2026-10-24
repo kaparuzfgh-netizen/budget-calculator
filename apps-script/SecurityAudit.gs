@@ -21,12 +21,16 @@ function securityAudit() {
   const token = props[PROP.BOT_TOKEN] || '';
   const chatId = props[PROP.CHAT_ID] || '';
   const gemini = props[PROP.GEMINI_KEY] || '';
+  const groq = props[PROP.GROQ_KEY] || '';
   const secret = props[PROP.WEBHOOK_SECRET] || '';
   const readToken = props[PROP.TMA_READ_TOKEN] || '';
 
   add(token ? '✅' : '❌', 'TELEGRAM_BOT_TOKEN: ' + (token ? 'задан' : 'ОТСУТСТВУЕТ'));
   add(chatId ? '✅' : '❌', 'TELEGRAM_CHAT_ID (whitelist): ' + (chatId ? 'задан' : 'ОТСУТСТВУЕТ — бот будет отвечать подсказкой любому'));
-  add(gemini ? '✅' : '❌', 'GEMINI_API_KEY: ' + (gemini ? 'задан' : 'ОТСУТСТВУЕТ (Vision не будет работать)'));
+  if (gemini && groq) add('✅', 'Vision: Gemini + резерв Groq (двойное покрытие)');
+  else if (gemini) add('✅', 'GEMINI_API_KEY: задан (резерв Groq не настроен — опционально)');
+  else if (groq) add('⚠️', 'Vision: только Groq (GEMINI_API_KEY не задан — скриншоты пойдут через резервный провайдер)');
+  else add('❌', 'Vision: нет ни GEMINI_API_KEY, ни GROQ_API_KEY — разбор скриншотов работать не будет');
   add(secret.length >= 32 ? '✅' : '⚠️', 'WEBHOOK_SECRET: ' + (secret ? secret.length + ' симв. (рекомендуется 32+)' : 'ОТСУТСТВУЕТ — webhook открыт для подделки'));
   add(readToken ? '✅' : '⚠️', 'TMA_READ_TOKEN: ' + (readToken ? 'чтение API защищено токеном' : 'не задан — чтение финансовых данных по URL Web App открыто (запустите setup(), он создаст токен)'));
 
@@ -65,9 +69,9 @@ function securityAudit() {
     add('⚠️', 'Webhook не проверен: ' + e.message);
   }
 
-  // 5. Cron-триггеры: воскресный опрос, ежедневный roll-forward, месячный план
+  // 5. Cron-триггеры: воскресный опрос, пн-надж, ежедневный roll-forward, месячный план
   try {
-    const need = ['weeklySundayAsk', 'dailyMaintenance', 'monthlyPlanLog'];
+    const need = ['weeklySundayAsk', 'mondayNudge', 'dailyMaintenance', 'monthlyPlanLog'];
     const installed = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
     need.forEach(function (h) {
       add(installed.indexOf(h) >= 0 ? '✅' : '❌',

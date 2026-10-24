@@ -194,7 +194,7 @@ function cmdSpent_(chatId, args) {
   const status = CashflowEngine.logWeeklyExpense({
     amount: parsed.total_spent, currency: parsed.currency, note: args, source: 'manual',
   });
-  MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), 'manual');
+  MetricsEngine.logOnce('weekly_answer:' + weekKey_(new Date()), 'manual');
   sendMessage_(chatId,
     '🧾 Записано: ' + fmtMoney_(parsed.total_spent, parsed.currency) + '\n\n' +
     CashflowEngine.renderWeeklyText(status));
@@ -260,6 +260,11 @@ function cmdAlias_(chatId, args) {
   const m = String(args || '').match(/^"?([^"]+?)"?\s+"?([^"]+?)"?$/);
   if (!m || !m[1] || !m[2]) throw new Error('Формат: /alias "как распознал" "как правильно"');
   const from = m[1].trim(), to = m[2].trim();
+  // защита от formula-injection: значения попадают в ячейки Settings
+  if (/^[=+\-@\t\r]/.test(from) || /^[=+\-@\t\r]/.test(to)) {
+    throw new Error('Значения не могут начинаться с = + - @');
+  }
+  if (from.length > 40 || to.length > 40) throw new Error('Слишком длинно (макс. 40 символов)');
   setSetting_('CAT_ALIAS_' + from.toLowerCase(), to);
   MetricsEngine.log('vision_fix:' + fmtISO_(new Date()), from + '→' + to);
   sendMessage_(chatId, '✅ Категория «' + escHtml_(from) + '» теперь записывается как «' + escHtml_(to) + '».');
@@ -316,7 +321,9 @@ function cmdMetrics_(chatId) {
     fmtPct_(va.fixRate, 0) + ') — цель <10%');
   const sr = MetricsEngine.value('savings_rate:');
   if (sr !== null) L.push('Savings rate (посл. месяц): ' + fmtPct_(Number(sr)));
-  const cascades = MetricsEngine.byPrefix('cascade_applied:');
+  const cascades = MetricsEngine.byPrefix('cascade_applied:').filter(function (c) {
+    return c.key.indexOf(':observed') === -1; // наблюдения digest не считаем применениями
+  });
   if (cascades.length) {
     const applied = cascades.filter(function (c) { return c.value === '1'; }).length;
     L.push('Каскад применён: ' + applied + ' из ' + cascades.length + ' мес.');
@@ -482,7 +489,7 @@ function handlePhoto_(chatId, fileId, mime) {
       cat2: c2 ? c2.category + ' ' + round2_(c2.amount) : '',
       note: 'vision/' + parsed.provider + ' · file ' + fileId.slice(0, 12),
     });
-    MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), parsed.provider);
+    MetricsEngine.logOnce('weekly_answer:' + weekKey_(new Date()), parsed.provider);
     sendMessage_(chatId, head + '\n\n' + CashflowEngine.renderWeeklyText(status));
   } catch (err) {
     console.error('photo: ' + err.message);
@@ -550,7 +557,7 @@ function handleFreeText_(chatId, text) {
       const status = CashflowEngine.logWeeklyExpense({
         amount: parsed.total_spent, currency: parsed.currency, note: 'weekly reply', source: 'chat',
       });
-      MetricsEngine.logOnce('weekly_answer:' + fmtISO_(new Date()), 'chat');
+      MetricsEngine.logOnce('weekly_answer:' + weekKey_(new Date()), 'chat');
       sendMessage_(chatId, '🧾 Записано: ' + fmtMoney_(parsed.total_spent, parsed.currency) + '\n\n' +
         CashflowEngine.renderWeeklyText(status));
     } else {
