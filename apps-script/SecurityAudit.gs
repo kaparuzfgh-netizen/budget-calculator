@@ -154,6 +154,43 @@ function securityAudit() {
     add('⚠️', 'Аномалии не проверены: ' + e.message);
   }
 
+  // 11. Свежесть бэкапа (бизнес-непрерывность)
+  try {
+    const files = DriveApp.searchFiles(
+      'title contains "Backup ' + ss_().getName() + '" and mimeType = "' + MimeType.GOOGLE_SHEETS + '"');
+    let newest = null;
+    while (files.hasNext()) {
+      const d = files.next().getDateCreated();
+      if (!newest || d > newest) newest = d;
+    }
+    if (!newest) {
+      add('⚠️', 'Бэкапов ещё нет — выполните backupNow() (дальше автоматически 1-го числа)');
+    } else {
+      const age = Math.round((new Date() - newest) / 86400000);
+      add(age <= 40 ? '✅' : '❌', 'Бэкап: последний ' + fmtISO_(newest) + ' (' + age + ' дн. назад)' +
+        (age > 40 ? ' — месячный триггер не сработал? выполните backupNow()' : ''));
+    }
+  } catch (e) {
+    add('⚠️', 'Бэкап не проверен: ' + e.message);
+  }
+
+  // 12. Ошибки в журнале Ops_Log за последние 3 дня
+  try {
+    const cutoff = Date.now() - 3 * 86400000;
+    let errors = 0, lastErr = '';
+    readRange_(SHEETS.OPS_LOG, 2).forEach(function (r) {
+      const d = r[0] instanceof Date ? r[0] : new Date(String(r[0]));
+      if (!isNaN(d) && d.getTime() >= cutoff && String(r[1]) === 'ERROR') {
+        errors += 1;
+        lastErr = String(r[3] || '');
+      }
+    });
+    add(errors === 0 ? '✅' : '⚠️', 'Ops_Log: ошибок за 3 дня — ' + errors +
+      (errors ? ' (последняя: ' + lastErr.slice(0, 80) + ')' : ''));
+  } catch (e) {
+    add('⚠️', 'Ops_Log не проверен: ' + e.message);
+  }
+
   const report = '🔐 <b>Аудит безопасности и здоровья</b>\n' + nowTz_() + '\n\n' + L.join('\n');
   console.log(report.replace(/<[^>]+>/g, ''));
   if (chatId) {

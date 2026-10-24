@@ -316,9 +316,14 @@ function cmdGuide_(chatId) {
   L.push((hookOk ? '✅' : '⬜') + ' 5. Webhook привязан (деплой + setupWebhook)');
   if (hookOk && !step) step = 5;
 
+  let commandsOk = false;
+  try { commandsOk = (tgCall_('getMyCommands', {}) || []).length > 0; } catch (e) {}
+  L.push((commandsOk ? '✅' : '⬜') + ' 6. Профиль бота: меню команд и описание (setupBotProfile)');
+  if (commandsOk && !step) step = 6;
+
   const mini = String(CONFIG.MINI_APP_URL || getSetting_('MINI_APP_URL', ''));
-  L.push((mini ? '✅' : '⬜') + ' 6. Mini App подключён (ключ MINI_APP_URL)');
-  if (mini && !step) step = 6;
+  L.push((mini ? '✅' : '⬜') + ' 7. Mini App подключён (ключ MINI_APP_URL)');
+  if (mini && !step) step = 7;
 
   const next = {
     1: '→ Получите токен у @BotFather и добавьте в Script Properties (SETUP.md, Шаг 1 и 3).',
@@ -326,7 +331,8 @@ function cmdGuide_(chatId) {
     3: '→ Создайте ключ на aistudio.google.com/apikey (или console.groq.com) и добавьте.',
     4: '→ Выполните функцию createSpreadsheet в редакторе Apps Script.',
     5: '→ Разверните Web App и выполните setupWebhook (SETUP.md, Шаг 5).',
-    6: '→ Всё готово! Дальше: /income 6200 eur, /plan, /fx. Проверка здоровья: /sync и securityAudit.',
+    6: '→ Выполните setupBotProfile — появятся подсказки команд и описание бота.',
+    7: '→ Всё готово! Дальше: /income 6200 eur, /plan, /fx. Проверка здоровья: /sync и securityAudit.',
     0: '→ Начните с Шага 1 в SETUP.md.',
   }[step];
   L.push('\n<b>Следующий шаг:</b>\n' + next);

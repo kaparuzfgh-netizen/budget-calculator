@@ -1322,9 +1322,14 @@ function cmdGuide_(chatId) {
   L.push((hookOk ? '✅' : '⬜') + ' 5. Webhook привязан (деплой + setupWebhook)');
   if (hookOk && !step) step = 5;
 
+  let commandsOk = false;
+  try { commandsOk = (tgCall_('getMyCommands', {}) || []).length > 0; } catch (e) {}
+  L.push((commandsOk ? '✅' : '⬜') + ' 6. Профиль бота: меню команд и описание (setupBotProfile)');
+  if (commandsOk && !step) step = 6;
+
   const mini = String(CONFIG.MINI_APP_URL || getSetting_('MINI_APP_URL', ''));
-  L.push((mini ? '✅' : '⬜') + ' 6. Mini App подключён (ключ MINI_APP_URL)');
-  if (mini && !step) step = 6;
+  L.push((mini ? '✅' : '⬜') + ' 7. Mini App подключён (ключ MINI_APP_URL)');
+  if (mini && !step) step = 7;
 
   const next = {
     1: '→ Получите токен у @BotFather и добавьте в Script Properties (SETUP.md, Шаг 1 и 3).',
@@ -1332,7 +1337,8 @@ function cmdGuide_(chatId) {
     3: '→ Создайте ключ на aistudio.google.com/apikey (или console.groq.com) и добавьте.',
     4: '→ Выполните функцию createSpreadsheet в редакторе Apps Script.',
     5: '→ Разверните Web App и выполните setupWebhook (SETUP.md, Шаг 5).',
-    6: '→ Всё готово! Дальше: /income 6200 eur, /plan, /fx. Проверка здоровья: /sync и securityAudit.',
+    6: '→ Выполните setupBotProfile — появятся подсказки команд и описание бота.',
+    7: '→ Всё готово! Дальше: /income 6200 eur, /plan, /fx. Проверка здоровья: /sync и securityAudit.',
     0: '→ Начните с Шага 1 в SETUP.md.',
   }[step];
   L.push('\n<b>Следующий шаг:</b>\n' + next);
@@ -3968,6 +3974,43 @@ function securityAudit() {
     });
   } catch (e) {
     add('⚠️', 'Аномалии не проверены: ' + e.message);
+  }
+
+  // 11. Свежесть бэкапа (бизнес-непрерывность)
+  try {
+    const files = DriveApp.searchFiles(
+      'title contains "Backup ' + ss_().getName() + '" and mimeType = "' + MimeType.GOOGLE_SHEETS + '"');
+    let newest = null;
+    while (files.hasNext()) {
+      const d = files.next().getDateCreated();
+      if (!newest || d > newest) newest = d;
+    }
+    if (!newest) {
+      add('⚠️', 'Бэкапов ещё нет — выполните backupNow() (дальше автоматически 1-го числа)');
+    } else {
+      const age = Math.round((new Date() - newest) / 86400000);
+      add(age <= 40 ? '✅' : '❌', 'Бэкап: последний ' + fmtISO_(newest) + ' (' + age + ' дн. назад)' +
+        (age > 40 ? ' — месячный триггер не сработал? выполните backupNow()' : ''));
+    }
+  } catch (e) {
+    add('⚠️', 'Бэкап не проверен: ' + e.message);
+  }
+
+  // 12. Ошибки в журнале Ops_Log за последние 3 дня
+  try {
+    const cutoff = Date.now() - 3 * 86400000;
+    let errors = 0, lastErr = '';
+    readRange_(SHEETS.OPS_LOG, 2).forEach(function (r) {
+      const d = r[0] instanceof Date ? r[0] : new Date(String(r[0]));
+      if (!isNaN(d) && d.getTime() >= cutoff && String(r[1]) === 'ERROR') {
+        errors += 1;
+        lastErr = String(r[3] || '');
+      }
+    });
+    add(errors === 0 ? '✅' : '⚠️', 'Ops_Log: ошибок за 3 дня — ' + errors +
+      (errors ? ' (последняя: ' + lastErr.slice(0, 80) + ')' : ''));
+  } catch (e) {
+    add('⚠️', 'Ops_Log не проверен: ' + e.message);
   }
 
   const report = '🔐 <b>Аудит безопасности и здоровья</b>\n' + nowTz_() + '\n\n' + L.join('\n');
