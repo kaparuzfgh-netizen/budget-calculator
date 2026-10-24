@@ -122,6 +122,7 @@ const SHEETS = {
   FX_HISTORY: 'FX_History',
   DEPOSITS: 'Deposits',
   METRICS: 'Metrics',
+  OPS_LOG: 'Ops_Log',
 };
 
 /** Ключи Script Properties. */

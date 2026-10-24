@@ -184,6 +184,12 @@ const CashflowEngine = {
     return runWithLock_(function () {
       const fx = getFx_();
       const amountKGS = convert_(opts.amount, opts.currency || 'KGS', 'KGS', fx);
+      const rubEq = convert_(opts.amount, opts.currency || 'KGS', 'RUB', fx);
+      // защита от миспарса (месячная аналитика как неделя, лишний ноль):
+      if (rubEq > 1000000) {
+        throw new Error('Сумма ' + fmtMoney_(opts.amount, opts.currency) + ' (≈' + fmtMoney_(rubEq, 'RUB') +
+          ') выглядит нереально для недельной траты. Проверьте скриншот/сумму.');
+      }
       const budget = getSettingNum_('WEEKLY_BUDGET_RUB', CONFIG.LIVING.WEEKLY_BUDGET_RUB);
       const sh = sheet_(SHEETS.WEEKLY);
       sh.appendRow([

@@ -136,6 +136,7 @@ const SHEETS = {
   FX_HISTORY: 'FX_History',
   DEPOSITS: 'Deposits',
   METRICS: 'Metrics',
+  OPS_LOG: 'Ops_Log',
 };
 
 /** Ключи Script Properties. */
@@ -383,6 +384,17 @@ function safeCellText_(v) {
   return /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
 }
 
+/** Журнал операций/ошибок в таблице (Ops_Log): видно историю без консоли GAS. */
+function logOps_(level, source, message) {
+  try {
+    sheet_(SHEETS.OPS_LOG).appendRow([
+      new Date(), level, source, safeCellText_(String(message).slice(0, 300)),
+    ]);
+  } catch (e) {
+    console.warn('logOps: ' + e.message); // журнал не должен ломать вызывающего
+  }
+}
+
 // ─────────────────────────── Lock ───────────────────────────
 
 /** Сериализация конкурентных записей (webhook + триггеры). */
@@ -535,6 +547,7 @@ function setup() {
       fxhistory: buildOnce_(SHEETS.FX_HISTORY, buildFxHistory_),
       deposits: buildOnce_(SHEETS.DEPOSITS, buildDeposits_),
       metrics: buildOnce_(SHEETS.METRICS, buildMetrics_),
+      opslog: buildOnce_(SHEETS.OPS_LOG, buildOpsLog_),
       networthMigrated: migrateNetWorthSheet_(),
       triggers: installTriggers_(),
     };
@@ -870,6 +883,16 @@ function buildMetrics_(sh) {
   sh.setColumnWidth(2, 200);
 }
 
+// ─────────────────────── Ops_Log (журнал операций и ошибок) ───────────────────────
+
+function buildOpsLog_(sh) {
+  const headers = ['Date', 'Level', 'Source', 'Message'];
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  boldHeader_(sh, headers.length);
+  sh.getRange('A2:A20000').setNumberFormat('yyyy-mm-dd hh:mm');
+  sh.setColumnWidth(4, 420);
+}
+
 // ─────────────────────── Webhook ───────────────────────
 
 /** Привязка Telegram Webhook к Web App. Запускать после деплоя. */
@@ -945,15 +968,16 @@ function doPost(e) {
   }
 }
 
-/** Ошибка в работе — одно сообщение владельцу (не чаще раза в 10 минут). */
+/** Ошибка в работе — одно сообщение владельцу (не чаще раза в 10 минут) + Ops_Log. */
 function notifyOwnerError_(err) {
   try {
+    logOps_('ERROR', 'runtime', String(err.message || err).slice(0, 300));
     const cache = CacheService.getScriptCache();
     if (cache.get('lastErrNotify')) return;
     cache.put('lastErrNotify', '1', 600);
     const chatId = getProp_(PROP.CHAT_ID, '');
     if (chatId) {
-      sendMessage_(chatId, '⚠️ Ошибка: <code>' + escHtml_(err.message).slice(0, 300) + '</code>\nПодробности в логах Apps Script.');
+      sendMessage_(chatId, '⚠️ Ошибка: <code>' + escHtml_(err.message).slice(0, 300) + '</code>\nПодробности в логах Apps Script и листе Ops_Log.');
     }
   } catch (e) { /* best effort */ }
 }
@@ -989,7 +1013,7 @@ const CMD_ALIAS = {
   'кэш': 'cash', 'cash': 'cash', 'синк': 'sync', 'приложение': 'app',
   'валюта': 'fx', 'курс': 'fx', 'курсы': 'fx', 'валютаанализ': 'fx',
   'баланс': 'balance', 'остаток': 'balance', 'алиас': 'alias', 'категория': 'alias',
-  'гайд': 'guide', 'метрики': 'metrics',
+  'гайд': 'guide', 'метрики': 'metrics', 'аномалии': 'anomalies', 'аномалия': 'anomalies',
 };
 
 function routeCommand_(chatId, text) {
@@ -1015,6 +1039,7 @@ function routeCommand_(chatId, text) {
       case 'alias': cmdAlias_(chatId, args); break;
       case 'guide': cmdGuide_(chatId); break;
       case 'metrics': cmdMetrics_(chatId); break;
+      case 'anomalies': cmdAnomalies_(chatId); break;
       case 'cash': cmdCash_(chatId, args); break;
       case 'status': cmdStatus_(chatId); break;
       case 'sync': cmdSync_(chatId); break;
@@ -1060,6 +1085,7 @@ function sendHelp_(chatId, prefix) {
     '/alias "кафе" Питание — исправить категорию Vision на будущее\n' +
     '/status — Net Worth (кэш + вклады + портфель − долг)\n' +
     '/metrics — продуктовые метрики (ответы недели, savings rate, vision)\n' +
+    '/anomalies — проверка невозможных цифр (остатки, курсы, суммы, Net Worth)\n' +
     '/sync — roll-forward долгов + снапшот Net Worth\n' +
     '/guide — гид установки: что готово и следующий шаг\n' +
     '/app — открыть Mini App (дашборд со слайдерами)'
@@ -1164,6 +1190,11 @@ function cmdInvest_(chatId) {
 /** /fx — анализ валют: перцентили, RSI, прогноз и тайминг конвертаций. */
 function cmdFx_(chatId) {
   sendMessage_(chatId, FXAnalytics.renderText(FXAnalytics.build()));
+}
+
+/** /anomalies — проверка невозможных/подозрительных цифр. */
+function cmdAnomalies_(chatId) {
+  sendMessage_(chatId, AnomalyEngine.renderText());
 }
 
 /** /balance sber|tbank <остаток ₽> — сверка ипотеки с банком вручную. */
@@ -1333,7 +1364,8 @@ function handleCallback_(cb) {
         chatId,
         r.unchanged
           ? '✅ ' + escHtml_(r.name) + ': остатки уже совпадали.'
-          : '✅ ' + escHtml_(r.name) + ': остаток ' + fmtMoney_(r.before, 'RUB') + ' → <b>' + fmtMoney_(r.after, 'RUB') + '</b>' +
+          : (r.bigDrift ? '⚠️ <b>Большое расхождение (>20%)</b> — убедитесь, что это остаток ОСНОВНОГО долга, а не общая задолжённость с процентами.\n' : '') +
+            '✅ ' + escHtml_(r.name) + ': остаток ' + fmtMoney_(r.before, 'RUB') + ' → <b>' + fmtMoney_(r.after, 'RUB') + '</b>' +
             ' (Δ ' + (r.drift > 0 ? '+' : '') + fmtMoney_(r.drift, 'RUB') + ')\n' +
             'Платёж не изменился; срок пересчитан: ~' + r.monthsLeft + ' мес (погашение к ' + r.payoffISO + ')'
       );
@@ -1681,6 +1713,12 @@ const CashflowEngine = {
     return runWithLock_(function () {
       const fx = getFx_();
       const amountKGS = convert_(opts.amount, opts.currency || 'KGS', 'KGS', fx);
+      const rubEq = convert_(opts.amount, opts.currency || 'KGS', 'RUB', fx);
+      // защита от миспарса (месячная аналитика как неделя, лишний ноль):
+      if (rubEq > 1000000) {
+        throw new Error('Сумма ' + fmtMoney_(opts.amount, opts.currency) + ' (≈' + fmtMoney_(rubEq, 'RUB') +
+          ') выглядит нереально для недельной траты. Проверьте скриншот/сумму.');
+      }
       const budget = getSettingNum_('WEEKLY_BUDGET_RUB', CONFIG.LIVING.WEEKLY_BUDGET_RUB);
       const sh = sheet_(SHEETS.WEEKLY);
       sh.appendRow([
@@ -1998,7 +2036,10 @@ const DebtEngine = {
       const sh = sheet_(SHEETS.DEBTS);
       sh.getRange(sh.getLastRow(), 5, 1, 2).setValues([[after.balance, after.payment]]);
       const proj = self.projection(after, 0);
+      const bigDrift = Math.abs(actual - before) > before * 0.2; // >20% — подозрительно много
       MetricsEngine.log('recon_drift:' + debt.id + ':' + fmtMonthKey_(new Date()), Math.round(Math.abs(before - actual)));
+      logOps_(bigDrift ? 'WARN' : 'INFO', 'reconcile',
+        debt.id + ': ' + Math.round(before) + ' → ' + Math.round(actual) + ' ₽' + (bigDrift ? ' (расхождение >20%)' : ''));
       return {
         id: debt.id,
         name: debt.name,
@@ -2006,6 +2047,7 @@ const DebtEngine = {
         after: after.balance,
         drift: actual - before,
         unchanged: false,
+        bigDrift: bigDrift,
         monthsLeft: proj.monthsLeft,
         payoffISO: proj.payoffISO,
       };
@@ -2324,23 +2366,27 @@ function parseWithGroq_(base64, mime, key) {
 function sanitizeVision_(parsed, provider) {
   const screenType = ['expense_analytics', 'debt_balance', 'other'].indexOf(parsed.screen_type) >= 0
     ? parsed.screen_type : 'other';
-  const total = Number(parsed.total_spent);
+  let total = Number(parsed.total_spent);
+  // защита от миспарса: нереальные суммы (лишний ноль, копейки как рубли) → не trusting
+  if (!isFinite(total) || total <= 0 || total > 5000000) total = 0;
   const balance = Number(parsed.debt_balance_rub);
+  const cleanTotal = total;
+  const categories = Array.isArray(parsed.top_categories)
+    ? applyAliases_(parsed.top_categories
+          .filter(function (c) { return c && isFinite(Number(c.amount)) && Number(c.amount) > 0 && Number(c.amount) <= cleanTotal * 1.5; })
+          .slice(0, 5)
+          .map(function (c) { return { category: String(c.category || '—'), amount: Number(c.amount) }; }))
+      : [];
   return {
     provider: provider,
     screen_type: screenType,
     period: String(parsed.period || ''),
-    total_spent: isFinite(total) && total > 0 ? total : 0,
+    total_spent: total,
     currency: ['KGS', 'RUB', 'USD'].indexOf(parsed.currency) >= 0 ? parsed.currency : 'KGS',
-    top_categories: Array.isArray(parsed.top_categories)
-      ? applyAliases_(parsed.top_categories
-          .filter(function (c) { return c && isFinite(Number(c.amount)); })
-          .slice(0, 5)
-          .map(function (c) { return { category: String(c.category || '—'), amount: Number(c.amount) }; }))
-      : [],
+    top_categories: categories,
     is_full_month_analytics: parsed.is_full_month_analytics === true,
     bank: String(parsed.bank || ''),
-    debt_balance_rub: isFinite(balance) && balance > 1000 ? balance : 0,
+    debt_balance_rub: isFinite(balance) && balance > 1000 && balance < 100000000 ? balance : 0,
   };
 }
 
@@ -3016,6 +3062,200 @@ function testDigest() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// AnomalyEngine.gs
+// ════════════════════════════════════════════════════════════════════
+/**
+ * AnomalyEngine.gs — детектор невозможных/подозрительных цифр.
+ *
+ * Зачем: за месяцы работы накапливаются ручные правки, слипшиеся формулы,
+ * сбои GOOGLEFINANCE и опечатки в Quantity/суммах. Движок ежедневно проверяет
+ * бизнес-инварианты и присылает владельцу только НОВЫЕ аномалии (кулдаун —
+ * одни сутки на правило, чтобы не спамить), а всё пишет в Ops_Log.
+ *
+ * Правила:
+ *   D1 crit  остаток ипотеки < 0 или > начального баланса (replay сломан)
+ *   D2 crit  платёж Сбербанка вырос >5% без ЧДП/сверок (аннуитет «поплыл»)
+ *   D3 warn  |расхождение при сверке| > 20% остатка (возможно, взяли не тот остаток)
+ *   T1 warn  >3 событий Т-Банка за месяц (накопились авторолл-платежи)
+ *   W1 warn  недельная трата > 4× недельного бюджета (месячную аналитику записали как неделю)
+ *   W2 warn  расход жизни за месяц > 2× месячного лимита
+ *   M1 warn  доход месяца < 0.3× или > 3× базового (опечатка 62000)
+ *   M2 warn  профицит месяца (после жизни) хуже −$500 — дефицит
+ *   N1 warn  Net Worth прыгнул >40% между снапшотами (сбой курса/опечатка в Quantity)
+ *   P1 crit  позиция портфеля дороже $10 млн (опечатка в Units)
+ *   F1 crit  текущий курс отклоняется >25% от медианы 30 дней (глюк GOOGLEFINANCE/кэша)
+ *   X1 warn  история FX не обновлялась >5 дней (лист не открывали/формула мертва)
+ */
+
+const AnomalyEngine = {
+
+  median_: function (arr) {
+    if (!arr.length) return 0;
+    const s = arr.slice().sort(function (a, b) { return a - b; });
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  },
+
+  /** Все проверки: [{id, sev:'crit'|'warn', text}] */
+  run: function () {
+    const out = [];
+    const now = new Date();
+    const monthKey = fmtMonthKey_(now);
+    const push = function (id, sev, text) { out.push({ id: id, sev: sev, text: text }); };
+
+    // ── Ипотеки ──
+    try {
+      const events = DebtEngine.getEvents();
+      const hasAdjust = events.some(function (ev) {
+        return ev.event === 'prepay' || ev.event === 'reconcile';
+      });
+      DebtEngine.getDebts().forEach(function (d) {
+        if (d.balance < 0 || d.balance > d.initialBalance * 1.001) {
+          push('D1', 'crit', d.name + ': остаток ' + fmtMoney_(d.balance, 'RUB') +
+            ' вне диапазона [0; ' + fmtMoney_(d.initialBalance, 'RUB') + '] — проверьте журнал Debt_Engine');
+        }
+        const initialPmt = DebtEngine.initialPayment_(d.id);
+        if (d.payment > initialPmt * 1.05 && !hasAdjust) {
+          push('D2', 'crit', d.name + ': платёж ' + fmtMoney_(d.payment, 'RUB') +
+            ' вырос против исходного ' + fmtMoney_(initialPmt, 'RUB') + ' без событий ЧДП/сверки');
+        }
+      });
+      const tbankThisMonth = events.filter(function (ev) {
+        return ev.debt === 'TBANK' && ev.event === 'payment' &&
+          ev.date.getFullYear() === now.getFullYear() && ev.date.getMonth() === now.getMonth();
+      }).length;
+      if (tbankThisMonth > 3) {
+        push('T1', 'warn', 'Т-Банк: ' + tbankThisMonth + ' платежей за месяц (норма 2–3) — проверьте Epoch/журнал');
+      }
+    } catch (e) { push('DX', 'warn', 'Ипотеки не проверены: ' + e.message); }
+
+    // ── Расходы ──
+    try {
+      const weeklyBudget = getSettingNum_('WEEKLY_BUDGET_RUB', CONFIG.LIVING.WEEKLY_BUDGET_RUB);
+      const cap = getSettingNum_('MONTHLY_CAP_RUB', CONFIG.LIVING.MONTHLY_CAP_RUB);
+      let monthRUB = 0;
+      readRange_(SHEETS.WEEKLY, 2).forEach(function (r) {
+        const d = r[0] instanceof Date ? r[0] : new Date(String(r[0]));
+        if (isNaN(d)) return;
+        const rub = Number(r[3]) || 0;
+        if (rub > weeklyBudget * 4) {
+          push('W1', 'warn', 'Трата ' + fmtISO_(d) + ': ' + fmtMoney_(rub, 'RUB') +
+            ' > 4× недельного бюджета — похоже, месячную аналитику записали как недельную');
+        }
+        if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) monthRUB += rub;
+      });
+      if (monthRUB > cap * 2) {
+        push('W2', 'warn', 'Расход жизни за месяц ' + fmtMoney_(monthRUB, 'RUB') +
+          ' > 2× лимита (' + fmtMoney_(cap, 'RUB') + ') — проверьте записи Weekly_Expenses');
+      }
+    } catch (e) { push('WX', 'warn', 'Расходы не проверены: ' + e.message); }
+
+    // ── Месяц ──
+    try {
+      const base = getSettingNum_('BASE_INCOME_USD', CONFIG.PROFILE.BASE_INCOME_USD);
+      const cap = getSettingNum_('MONTHLY_CAP_RUB', CONFIG.LIVING.MONTHLY_CAP_RUB);
+      const fx = getFx_();
+      readRange_(SHEETS.MONTHLY, 2).forEach(function (r) {
+        if (String(r[0]) !== monthKey) return;
+        const incomeUSD = Number(r[3]) || 0;
+        const mandatory = Number(r[4]) || 0;
+        if (incomeUSD > 0 && (incomeUSD < base * 0.3 || incomeUSD > base * 3)) {
+          push('M1', 'warn', 'Доход месяца ' + fmtMoney_(incomeUSD, 'USD') +
+            ' вне диапазона 0.3–3× базы (' + fmtMoney_(base, 'USD') + ') — опечатка в /income?');
+        }
+        const surplusAfterLiving = incomeUSD - mandatory - cap / fx.USDRUB;
+        if (surplusAfterLiving < -500) {
+          push('M2', 'warn', 'Профицит месяца после жизни: ' + fmtMoney_(surplusAfterLiving, 'USD') +
+            ' (дефицит) — доход не покрывает обязательства');
+        }
+      });
+    } catch (e) { push('MX', 'warn', 'Месяц не проверен: ' + e.message); }
+
+    // ── Net Worth и портфель ──
+    try {
+      const hist = InvestNetWorth.history(2);
+      if (hist.length === 2) {
+        const prev = hist[0].netWorthUSD, last = hist[1].netWorthUSD;
+        if (Math.abs(prev) > 100 && Math.abs(last - prev) / Math.abs(prev) > 0.4) {
+          push('N1', 'warn', 'Net Worth прыгнул ' + fmtMoney_(prev, 'USD') + ' → ' + fmtMoney_(last, 'USD') +
+            ' (>40% за день) — сбой курса или опечатка в Quantity/CASH');
+        }
+      }
+      InvestNetWorth.getPortfolio().holdings.forEach(function (h) {
+        if (h.valueUSD > 1e7) {
+          push('P1', 'crit', 'Позиция ' + h.ticker + ': ' + fmtMoney_(h.valueUSD, 'USD') +
+            ' — похоже, опечатка в Units');
+        }
+      });
+    } catch (e) { push('NX', 'warn', 'Net Worth не проверен: ' + e.message); }
+
+    // ── Курсы ──
+    try {
+      const fx = getFx_();
+      const live = [
+        { name: 'EUR/USD', cur: fx.EURUSD, series: FXAnalytics.readSeries_(1) },
+        { name: 'USD/RUB', cur: fx.USDRUB, series: FXAnalytics.readSeries_(4) },
+        { name: 'USD/KGS', cur: fx.USDKGS, series: FXAnalytics.readSeries_(7) },
+      ];
+      live.forEach(function (p) {
+        if (p.series.length < 10) return;
+        const med = AnomalyEngine.median_(p.series.slice(-30).map(function (x) { return x.v; }));
+        if (med > 0 && Math.abs(p.cur - med) / med > 0.25) {
+          push('F1', 'crit', p.name + ': текущий ' + p.cur + ' отклоняется >25% от медианы 30д (' +
+            med.toFixed(p.cur > 20 ? 2 : 4) + ') — глюк GOOGLEFINANCE/резервных курсов, конвертации неверны');
+        }
+        const lastDate = new Date(p.series[p.series.length - 1].date);
+        if ((now - lastDate) / 86400000 > 5) {
+          push('X1', 'warn', p.name + ': история не обновлялась с ' + p.series[p.series.length - 1].date +
+            ' (>5 дней) — откройте лист FX_History / проверьте формулы');
+        }
+      });
+      if (fx.FALLBACK_USED) {
+        push('F1', 'crit', 'Курсы идут на резервных значениях (GOOGLEFINANCE недоступен) — все конвертации примерные');
+      }
+    } catch (e) { push('FX', 'warn', 'Курсы не проверены: ' + e.message); }
+
+    return out;
+  },
+
+  /** Проверить, записать в Ops_Log и уведомить о НОВЫХ (кулдаун 1 день на правило). */
+  runAndNotify: function () {
+    const chatId = getProp_(PROP.CHAT_ID, '');
+    const found = this.run();
+    const today = fmtISO_(new Date());
+    found.forEach(function (f) {
+      logOps_(f.sev === 'crit' ? 'ERROR' : 'WARN', 'anomaly', f.id + ': ' + f.text.replace(/<[^>]+>/g, ''));
+      const key = 'ANOM_' + f.id;
+      if (getSetting_(key, '') !== today) {
+        setSetting_(key, today);
+        if (chatId) {
+          sendMessage_(chatId,
+            (f.sev === 'crit' ? '🚫 <b>КРИТИЧНАЯ аномалия</b>' : '⚠️ <b>Аномалия</b>') + ' [' + f.id + ']\n' + f.text +
+            '\n\nДетали: /anomalies · журнал: лист Ops_Log');
+        }
+      }
+    });
+    return found;
+  },
+
+  renderText: function () {
+    const found = this.run();
+    if (!found.length) return '✅ <b>Аномалий нет</b> — все инварианты соблюдены (' + nowTz_() + ').';
+    return '🩺 <b>Проверка аномалий</b> · ' + nowTz_() + '\n\n' +
+      found.map(function (f) {
+        return (f.sev === 'crit' ? '🚫' : '⚠️') + ' <b>[' + f.id + ']</b> ' + f.text;
+      }).join('\n\n');
+  },
+};
+
+/** Ручной запуск проверки из редактора/бота. */
+function testAnomalies() {
+  const text = AnomalyEngine.renderText();
+  console.log(text.replace(/<[^>]+>/g, ''));
+  return text;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // TmaApi.gs
 // ════════════════════════════════════════════════════════════════════
 /**
@@ -3347,7 +3587,7 @@ function mondayNudge() {
   }
 }
 
-/** Ежедневно: roll-forward, снапшоты, FX-алерты, напоминания о списаниях, digest. */
+/** Ежедневно: roll-forward, снапшоты, FX-алерты, напоминания о списаниях, аномалии, digest. */
 function dailyMaintenance() {
   try {
     const posted = DebtEngine.checkDuePayments(); // roll-forward
@@ -3356,9 +3596,12 @@ function dailyMaintenance() {
     try { FXAnalytics.refreshFormulas(); } catch (fxErr) { console.warn('fx refresh: ' + fxErr.message); }
     try { FXAnalytics.checkAlerts(); } catch (alertErr) { console.warn('fx alerts: ' + alertErr.message); }
     try { checkBillReminders_(); } catch (billErr) { console.warn('bills: ' + billErr.message); }
+    try { AnomalyEngine.runAndNotify(); } catch (anomErr) { console.warn('anomalies: ' + anomErr.message); }
     try { maybeSendMonthDigest_(); } catch (dErr) { console.warn('digest: ' + dErr.message); }
+    logOps_('INFO', 'daily', 'maintenance ok; auto-posted: ' + (posted.length ? posted.join(',') : 'none'));
     console.log('dailyMaintenance ok; auto-posted: ' + JSON.stringify(posted));
   } catch (e) {
+    logOps_('ERROR', 'daily', e.message);
     console.error('dailyMaintenance: ' + e.message);
   }
 }
@@ -3630,6 +3873,18 @@ function securityAudit() {
     }
   } catch (e) {
     add('⚠️', 'Математика не сверена: ' + e.message);
+  }
+
+  // 10. Аномалии цифр (детектор невозможных значений)
+  try {
+    const anomalies = AnomalyEngine.run();
+    const crit = anomalies.filter(function (a) { return a.sev === 'crit'; }).length;
+    if (!anomalies.length) add('✅', 'Аномалии цифр: не обнаружены (инварианты D/W/M/N/P/F соблюдены)');
+    else anomalies.forEach(function (a) {
+      add(a.sev === 'crit' ? '❌' : '⚠️', 'Аномалия [' + a.id + ']: ' + a.text);
+    });
+  } catch (e) {
+    add('⚠️', 'Аномалии не проверены: ' + e.message);
   }
 
   const report = '🔐 <b>Аудит безопасности и здоровья</b>\n' + nowTz_() + '\n\n' + L.join('\n');

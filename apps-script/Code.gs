@@ -25,15 +25,16 @@ function doPost(e) {
   }
 }
 
-/** Ошибка в работе — одно сообщение владельцу (не чаще раза в 10 минут). */
+/** Ошибка в работе — одно сообщение владельцу (не чаще раза в 10 минут) + Ops_Log. */
 function notifyOwnerError_(err) {
   try {
+    logOps_('ERROR', 'runtime', String(err.message || err).slice(0, 300));
     const cache = CacheService.getScriptCache();
     if (cache.get('lastErrNotify')) return;
     cache.put('lastErrNotify', '1', 600);
     const chatId = getProp_(PROP.CHAT_ID, '');
     if (chatId) {
-      sendMessage_(chatId, '⚠️ Ошибка: <code>' + escHtml_(err.message).slice(0, 300) + '</code>\nПодробности в логах Apps Script.');
+      sendMessage_(chatId, '⚠️ Ошибка: <code>' + escHtml_(err.message).slice(0, 300) + '</code>\nПодробности в логах Apps Script и листе Ops_Log.');
     }
   } catch (e) { /* best effort */ }
 }
@@ -69,7 +70,7 @@ const CMD_ALIAS = {
   'кэш': 'cash', 'cash': 'cash', 'синк': 'sync', 'приложение': 'app',
   'валюта': 'fx', 'курс': 'fx', 'курсы': 'fx', 'валютаанализ': 'fx',
   'баланс': 'balance', 'остаток': 'balance', 'алиас': 'alias', 'категория': 'alias',
-  'гайд': 'guide', 'метрики': 'metrics',
+  'гайд': 'guide', 'метрики': 'metrics', 'аномалии': 'anomalies', 'аномалия': 'anomalies',
 };
 
 function routeCommand_(chatId, text) {
@@ -95,6 +96,7 @@ function routeCommand_(chatId, text) {
       case 'alias': cmdAlias_(chatId, args); break;
       case 'guide': cmdGuide_(chatId); break;
       case 'metrics': cmdMetrics_(chatId); break;
+      case 'anomalies': cmdAnomalies_(chatId); break;
       case 'cash': cmdCash_(chatId, args); break;
       case 'status': cmdStatus_(chatId); break;
       case 'sync': cmdSync_(chatId); break;
@@ -140,6 +142,7 @@ function sendHelp_(chatId, prefix) {
     '/alias "кафе" Питание — исправить категорию Vision на будущее\n' +
     '/status — Net Worth (кэш + вклады + портфель − долг)\n' +
     '/metrics — продуктовые метрики (ответы недели, savings rate, vision)\n' +
+    '/anomalies — проверка невозможных цифр (остатки, курсы, суммы, Net Worth)\n' +
     '/sync — roll-forward долгов + снапшот Net Worth\n' +
     '/guide — гид установки: что готово и следующий шаг\n' +
     '/app — открыть Mini App (дашборд со слайдерами)'
@@ -244,6 +247,11 @@ function cmdInvest_(chatId) {
 /** /fx — анализ валют: перцентили, RSI, прогноз и тайминг конвертаций. */
 function cmdFx_(chatId) {
   sendMessage_(chatId, FXAnalytics.renderText(FXAnalytics.build()));
+}
+
+/** /anomalies — проверка невозможных/подозрительных цифр. */
+function cmdAnomalies_(chatId) {
+  sendMessage_(chatId, AnomalyEngine.renderText());
 }
 
 /** /balance sber|tbank <остаток ₽> — сверка ипотеки с банком вручную. */
@@ -413,7 +421,8 @@ function handleCallback_(cb) {
         chatId,
         r.unchanged
           ? '✅ ' + escHtml_(r.name) + ': остатки уже совпадали.'
-          : '✅ ' + escHtml_(r.name) + ': остаток ' + fmtMoney_(r.before, 'RUB') + ' → <b>' + fmtMoney_(r.after, 'RUB') + '</b>' +
+          : (r.bigDrift ? '⚠️ <b>Большое расхождение (>20%)</b> — убедитесь, что это остаток ОСНОВНОГО долга, а не общая задолжённость с процентами.\n' : '') +
+            '✅ ' + escHtml_(r.name) + ': остаток ' + fmtMoney_(r.before, 'RUB') + ' → <b>' + fmtMoney_(r.after, 'RUB') + '</b>' +
             ' (Δ ' + (r.drift > 0 ? '+' : '') + fmtMoney_(r.drift, 'RUB') + ')\n' +
             'Платёж не изменился; срок пересчитан: ~' + r.monthsLeft + ' мес (погашение к ' + r.payoffISO + ')'
       );

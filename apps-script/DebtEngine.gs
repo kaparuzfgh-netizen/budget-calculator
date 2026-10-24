@@ -246,7 +246,10 @@ const DebtEngine = {
       const sh = sheet_(SHEETS.DEBTS);
       sh.getRange(sh.getLastRow(), 5, 1, 2).setValues([[after.balance, after.payment]]);
       const proj = self.projection(after, 0);
+      const bigDrift = Math.abs(actual - before) > before * 0.2; // >20% — подозрительно много
       MetricsEngine.log('recon_drift:' + debt.id + ':' + fmtMonthKey_(new Date()), Math.round(Math.abs(before - actual)));
+      logOps_(bigDrift ? 'WARN' : 'INFO', 'reconcile',
+        debt.id + ': ' + Math.round(before) + ' → ' + Math.round(actual) + ' ₽' + (bigDrift ? ' (расхождение >20%)' : ''));
       return {
         id: debt.id,
         name: debt.name,
@@ -254,6 +257,7 @@ const DebtEngine = {
         after: after.balance,
         drift: actual - before,
         unchanged: false,
+        bigDrift: bigDrift,
         monthsLeft: proj.monthsLeft,
         payoffISO: proj.payoffISO,
       };

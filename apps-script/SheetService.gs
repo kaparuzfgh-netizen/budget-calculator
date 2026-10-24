@@ -229,6 +229,17 @@ function safeCellText_(v) {
   return /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
 }
 
+/** Журнал операций/ошибок в таблице (Ops_Log): видно историю без консоли GAS. */
+function logOps_(level, source, message) {
+  try {
+    sheet_(SHEETS.OPS_LOG).appendRow([
+      new Date(), level, source, safeCellText_(String(message).slice(0, 300)),
+    ]);
+  } catch (e) {
+    console.warn('logOps: ' + e.message); // журнал не должен ломать вызывающего
+  }
+}
+
 // ─────────────────────────── Lock ───────────────────────────
 
 /** Сериализация конкурентных записей (webhook + триггеры). */

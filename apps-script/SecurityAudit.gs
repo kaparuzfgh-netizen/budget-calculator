@@ -142,6 +142,18 @@ function securityAudit() {
     add('⚠️', 'Математика не сверена: ' + e.message);
   }
 
+  // 10. Аномалии цифр (детектор невозможных значений)
+  try {
+    const anomalies = AnomalyEngine.run();
+    const crit = anomalies.filter(function (a) { return a.sev === 'crit'; }).length;
+    if (!anomalies.length) add('✅', 'Аномалии цифр: не обнаружены (инварианты D/W/M/N/P/F соблюдены)');
+    else anomalies.forEach(function (a) {
+      add(a.sev === 'crit' ? '❌' : '⚠️', 'Аномалия [' + a.id + ']: ' + a.text);
+    });
+  } catch (e) {
+    add('⚠️', 'Аномалии не проверены: ' + e.message);
+  }
+
   const report = '🔐 <b>Аудит безопасности и здоровья</b>\n' + nowTz_() + '\n\n' + L.join('\n');
   console.log(report.replace(/<[^>]+>/g, ''));
   if (chatId) {

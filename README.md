@@ -95,6 +95,7 @@ budget-calculator/
 | `FX_History` | 180-дневная история курсов GOOGLEFINANCE (EURUSD, USDRUB, USDKGS, EURRUB) — данные для `/fx`: перцентили, RSI, прогноз |
 | `Deposits` | Вклады как актив: `Date Opened \| Name \| Amount \| Currency \| Rate \| Maturity \| Active` → Net Worth и арбитраж «фактически размещено» |
 | `Metrics` | Продуктовые метрики: weekly-ответы, применённый каскад, сверки, исправления Vision, savings rate |
+| `Ops_Log` | Журнал операций и ошибок: `Date \| Level \| Source \| Message` — аномалии, сверки, алерты, автороллы, ошибки runtime |
 
 ## Команды бота
 
@@ -112,7 +113,8 @@ budget-calculator/
 | `/cash 12000 kgs` | `/кэш` | Кэш в конкретной валюте (usd/eur/rub/kgs) |
 | `/alias "кафе" Питание` | `/категория` | Обучение категорий Vision |
 | `/status` | `/статус` | Net Worth: кэш + вклады + портфель − долг |
-| `/metrics` | `/метрики` | Продуктовые метрики |
+| `/metrics` | `/метрики` | Продуктовые метрики (weekly-ответы, savings rate, каскад, Vision) |
+| `/anomalies` | `/аномалии` | Проверка невозможных цифр: остатки/платежи, суммы, Net Worth-прыжки, курсы против медианы |
 | `/guide` | `/гайд` | Гид установки: что готово и следующий шаг |
 | `/sync` | | Roll-forward долгов + снапшот Net Worth |
 | `/app` | | Открыть Mini App |

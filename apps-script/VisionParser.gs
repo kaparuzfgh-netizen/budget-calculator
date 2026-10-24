@@ -198,23 +198,27 @@ function parseWithGroq_(base64, mime, key) {
 function sanitizeVision_(parsed, provider) {
   const screenType = ['expense_analytics', 'debt_balance', 'other'].indexOf(parsed.screen_type) >= 0
     ? parsed.screen_type : 'other';
-  const total = Number(parsed.total_spent);
+  let total = Number(parsed.total_spent);
+  // защита от миспарса: нереальные суммы (лишний ноль, копейки как рубли) → не trusting
+  if (!isFinite(total) || total <= 0 || total > 5000000) total = 0;
   const balance = Number(parsed.debt_balance_rub);
+  const cleanTotal = total;
+  const categories = Array.isArray(parsed.top_categories)
+    ? applyAliases_(parsed.top_categories
+          .filter(function (c) { return c && isFinite(Number(c.amount)) && Number(c.amount) > 0 && Number(c.amount) <= cleanTotal * 1.5; })
+          .slice(0, 5)
+          .map(function (c) { return { category: String(c.category || '—'), amount: Number(c.amount) }; }))
+      : [];
   return {
     provider: provider,
     screen_type: screenType,
     period: String(parsed.period || ''),
-    total_spent: isFinite(total) && total > 0 ? total : 0,
+    total_spent: total,
     currency: ['KGS', 'RUB', 'USD'].indexOf(parsed.currency) >= 0 ? parsed.currency : 'KGS',
-    top_categories: Array.isArray(parsed.top_categories)
-      ? applyAliases_(parsed.top_categories
-          .filter(function (c) { return c && isFinite(Number(c.amount)); })
-          .slice(0, 5)
-          .map(function (c) { return { category: String(c.category || '—'), amount: Number(c.amount) }; }))
-      : [],
+    top_categories: categories,
     is_full_month_analytics: parsed.is_full_month_analytics === true,
     bank: String(parsed.bank || ''),
-    debt_balance_rub: isFinite(balance) && balance > 1000 ? balance : 0,
+    debt_balance_rub: isFinite(balance) && balance > 1000 && balance < 100000000 ? balance : 0,
   };
 }
 

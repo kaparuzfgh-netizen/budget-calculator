@@ -25,6 +25,7 @@ function setup() {
       fxhistory: buildOnce_(SHEETS.FX_HISTORY, buildFxHistory_),
       deposits: buildOnce_(SHEETS.DEPOSITS, buildDeposits_),
       metrics: buildOnce_(SHEETS.METRICS, buildMetrics_),
+      opslog: buildOnce_(SHEETS.OPS_LOG, buildOpsLog_),
       networthMigrated: migrateNetWorthSheet_(),
       triggers: installTriggers_(),
     };
@@ -358,6 +359,16 @@ function buildMetrics_(sh) {
   boldHeader_(sh, headers.length);
   sh.getRange('A2:A10000').setNumberFormat('yyyy-mm-dd');
   sh.setColumnWidth(2, 200);
+}
+
+// ─────────────────────── Ops_Log (журнал операций и ошибок) ───────────────────────
+
+function buildOpsLog_(sh) {
+  const headers = ['Date', 'Level', 'Source', 'Message'];
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  boldHeader_(sh, headers.length);
+  sh.getRange('A2:A20000').setNumberFormat('yyyy-mm-dd hh:mm');
+  sh.setColumnWidth(4, 420);
 }
 
 // ─────────────────────── Webhook ───────────────────────

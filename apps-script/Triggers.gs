@@ -88,7 +88,7 @@ function mondayNudge() {
   }
 }
 
-/** Ежедневно: roll-forward, снапшоты, FX-алерты, напоминания о списаниях, digest. */
+/** Ежедневно: roll-forward, снапшоты, FX-алерты, напоминания о списаниях, аномалии, digest. */
 function dailyMaintenance() {
   try {
     const posted = DebtEngine.checkDuePayments(); // roll-forward
@@ -97,9 +97,12 @@ function dailyMaintenance() {
     try { FXAnalytics.refreshFormulas(); } catch (fxErr) { console.warn('fx refresh: ' + fxErr.message); }
     try { FXAnalytics.checkAlerts(); } catch (alertErr) { console.warn('fx alerts: ' + alertErr.message); }
     try { checkBillReminders_(); } catch (billErr) { console.warn('bills: ' + billErr.message); }
+    try { AnomalyEngine.runAndNotify(); } catch (anomErr) { console.warn('anomalies: ' + anomErr.message); }
     try { maybeSendMonthDigest_(); } catch (dErr) { console.warn('digest: ' + dErr.message); }
+    logOps_('INFO', 'daily', 'maintenance ok; auto-posted: ' + (posted.length ? posted.join(',') : 'none'));
     console.log('dailyMaintenance ok; auto-posted: ' + JSON.stringify(posted));
   } catch (e) {
+    logOps_('ERROR', 'daily', e.message);
     console.error('dailyMaintenance: ' + e.message);
   }
 }

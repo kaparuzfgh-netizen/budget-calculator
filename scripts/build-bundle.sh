@@ -17,6 +17,7 @@ ORDER=(
   InvestNetWorth.gs
   FXAnalytics.gs
   MetricsEngine.gs
+  AnomalyEngine.gs
   TmaApi.gs
   Triggers.gs
   SecurityAudit.gs
