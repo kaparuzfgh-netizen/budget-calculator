@@ -124,32 +124,25 @@ My Profile → API Tokens → Create Custom Token. Минимальные пра
 
 Webhook живёт на `POST /telegram/webhook`. Всё ниже — действия владельца.
 
-1. **Узнай свой numeric Telegram ID.** Напиши боту `/id` — пока
-   `OWNER_TELEGRAM_ID` не задан, бот отвечает каждому отправителю его ID
-   (один раз на telegram_id; это осознанный компромисс bootstrap'а — после
-   шага 2 незнакомцы снова в тишине). Задай секрет:
-   `npm run wrangler -- secret put OWNER_TELEGRAM_ID` → введи число.
-   Альтернатива без бота: @userinfobot — это сторонний сервис, помни об этом.
-2. **Остальные секреты** (если ещё не заданы):
-   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET` —
-   через `npm run wrangler -- secret put <ИМЯ>`. ВАЖНО: `TELEGRAM_WEBHOOK_SECRET`
-   на шаге 6 должен быть тем же значением — держи его под рукой или ротируй
-   сразу на обеих сторонах.
-3. **Username бота** (без @) — в `apps/api/wrangler.toml` `[vars]` →
-   `TELEGRAM_BOT_USERNAME`. Без него `/invite` выдаёт текст `/start <code>`
-   вместо ссылки.
-4. `npm run wrangler -- d1 migrations apply DB --remote`
-5. `npm run deploy -w apps/api`
-6. **Зарегистрируй вебхук** (токен и секрет спросит скрытым вводом — ничего
-   не печатается и не сохраняется; можно задать через env TELEGRAM_BOT_TOKEN /
-   TELEGRAM_WEBHOOK_SECRET):
-   `npm run webhook:set -- https://<твой-воркер>.workers.dev/telegram/webhook`
+Порядок важен: сначала воркер и вебхук, потом узнаём свой ID.
+
+1. **Секреты** (если ещё не заданы): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET` —
+   `npm run wrangler -- secret put <ИМЯ>`. `TELEGRAM_WEBHOOK_SECRET` на шаге 4 должен быть
+   тем же значением: если ротируешь — сразу копируй новое значение.
+2. **Username бота** (без @) — в `apps/api/wrangler.toml` `[vars]` → `TELEGRAM_BOT_USERNAME`.
+   Без него `/invite` выдаёт текст `/start <code>` вместо ссылки.
+3. `npm run wrangler -- d1 migrations apply DB --remote`, затем `npm run deploy -w apps/api`.
+4. **Зарегистрируй вебхук** (токен и секрет спросит скрытым вводом — ничего не печатается
+   и не сохраняется): `npm run webhook:set -- https://<твой-воркер>.workers.dev/telegram/webhook`.
    Проверка: `npm run webhook:info`. Удаление: `npm run webhook:delete`.
-7. **Смоук:** напиши боту `/start` — ты владелец. `/invite` → ссылка →
-   открой со второго аккаунта (или попроси друга) → он участник.
-   Незнакомому аккаунту бот вообще не отвечает — это by design.
-8. **Диагностика:** `npm run webhook:info` (URL замаскирован, видны
-   `last_error_message` и `pending_update_count`), `npm run wrangler -- tail`.
+5. **Узнай свой numeric Telegram ID.** Напиши боту `/id` — пока `OWNER_TELEGRAM_ID` не задан,
+   бот отвечает каждому отправителю его ID (один раз на telegram_id; осознанный компромисс
+   bootstrap'а). Затем `npm run wrangler -- secret put OWNER_TELEGRAM_ID` → введи число.
+   Сразу после этого незнакомцы снова в тишине. Альтернатива: @userinfobot (сторонний сервис).
+6. **Смоук:** напиши боту `/start` — ты владелец. `/invite` → ссылка → открой со второго
+   аккаунта → он участник. Незнакомому аккаунту бот не отвечает — это by design.
+7. **Диагностика:** `npm run webhook:info` (URL замаскирован, видны `last_error_message` и
+   `pending_update_count`), `npm run wrangler -- tail`.
 
 ## Жёсткие правила (повтор из AGENTS.md)
 
