@@ -36,7 +36,7 @@ curl http://localhost:8787/health   # → {"ok":true,"app":"budget-companion-api
 Локальная D1 создаётся автоматически (miniflare). Применить миграции локально:
 
 ```bash
-cd apps/api && npx wrangler d1 migrations apply DB --local
+npm run wrangler -- d1 migrations apply DB --local
 ```
 
 ## Тесты и проверки
@@ -52,18 +52,54 @@ npm run check         # всё: legacy lint + smoke, typecheck, тесты API, 
 
 ## Деплой (владелец, один раз)
 
-```bash
-cd apps/api
-npx wrangler login                    # браузер, аккаунт Cloudflare
-npx wrangler d1 create budget-companion
-# → скопировать database_id в wrangler.toml вместо PLACEHOLDER_SET_BY_OWNER
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-npx wrangler secret put JWT_SECRET    # случайная строка 32+ символов
-```
+Все команды — **из корня репозитория** (`budget-calculator`), в PowerShell или Git Bash.
+Wrangler вызывается через `npm run wrangler -- <аргументы>` (напрямую `npx wrangler` из корня не работает: он установлен внутри `apps/api`).
 
-Дальше деплой делает CI (workflow `deploy-v2.yml`) при пуше в `main` по `apps/**`,
-либо вручную: `npm run deploy -w apps/api`.
+**Что нужно заранее:**
+1. Выполнить `npm ci` (один раз).
+2. Бесплатный аккаунт на [dash.cloudflare.com](https://dash.cloudflare.com).
+3. Токен бота от @BotFather (вид `123456789:AA...`). Никому не показывать и не вставлять в чаты.
+
+**Шаги:**
+
+1. Вход в Cloudflare (откроется браузер, нажмите Allow):
+   ```
+   npm run wrangler -- login
+   ```
+2. Создать базу данных:
+   ```
+   npm run wrangler -- d1 create budget-companion
+   ```
+   В выводе будет строка `database_id = "xxxxxxxx-xxxx-..."`. Скопируйте само значение
+   и вставьте в `apps/api/wrangler.toml` вместо `PLACEHOLDER_SET_BY_OWNER`.
+3. Применить миграции к удалённой базе:
+   ```
+   npm run wrangler -- d1 migrations apply DB --remote
+   ```
+   (на вопрос подтверждения ответьте `y`). Из корня команда возьмёт `wrangler.toml` из `apps/api`,
+   потому что `npm exec -w apps/api` запускается в этой папке.
+4. Первый деплой воркера:
+   ```
+   npm run deploy -w apps/api
+   ```
+   В конце напечатается адрес вида `https://budget-companion-api.<ваш-поддомен>.workers.dev`.
+   Проверьте: откройте `<адрес>/health` в браузере — должен вернуться JSON с `"ok":true`.
+5. Секреты (после деплоя; каждая команда спросит значение — вставьте и нажмите Enter, ввод не отображается):
+   ```
+   npm run wrangler -- secret put TELEGRAM_BOT_TOKEN
+   npm run wrangler -- secret put TELEGRAM_WEBHOOK_SECRET
+   npm run wrangler -- secret put JWT_SECRET
+   ```
+   Для двух последних сгенерируйте случайные значения:
+   ```
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+   Запускайте эту команду отдельно для каждого секрета (значения должны быть разные).
+6. Дальше деплой делает CI (`deploy-v2.yml`) при пуше в `main` по `apps/**`, если заданы секреты GitHub (ниже).
+   Этот шаг можно пока пропустить: ручной `npm run deploy -w apps/api` работает всегда.
+
+Webhook Telegram и вход пользователей появятся на шаге 3 миграции — сейчас бот ещё не подключён,
+поэтому на шагах 1–6 бот не отвечает: это нормально.
 
 ### CI/CD: секреты GitHub
 

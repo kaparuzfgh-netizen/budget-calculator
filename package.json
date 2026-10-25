@@ -12,6 +12,7 @@
   },
   "scripts": {
     "test": "node scripts/smoke-test.js",
+    "wrangler": "npm exec -w apps/api -- wrangler",
     "build:bundle": "node scripts/build-bundle.js",
     "lint": "node scripts/build-bundle.js --quiet && eslint scripts dist/BUNDLE.gs apps",
     "lint:sh": "node scripts/lint-sh.js",
