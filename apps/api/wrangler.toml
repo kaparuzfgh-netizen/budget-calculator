@@ -12,6 +12,11 @@ database_name = "budget-companion"
 database_id = "d886f0a1-de15-4880-a8be-dfff4a0a1c34"
 migrations_dir = "migrations"
 
+# ── Несекретные переменные ──────────────────────────────────────
+# Username бота без @ — для ссылок-приглашений https://t.me/<bot>?start=<code>.
+[vars]
+TELEGRAM_BOT_USERNAME = ""
+
 # ── Cron-триггеры (шаг 4 миграции: напоминания, валютные алерты) ─
 # Раскомментировать, когда появится handler scheduled() в src/index.ts.
 # [triggers]
@@ -20,4 +25,5 @@ migrations_dir = "migrations"
 # ── Секреты (НЕ в этом файле!) ──────────────────────────────────
 # Задаются через `wrangler secret put <NAME>` (и в CI через
 # CLOUDFLARE_* секреты GitHub):
-#   TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, JWT_SECRET
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, JWT_SECRET,
+#   OWNER_TELEGRAM_ID

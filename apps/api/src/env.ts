@@ -8,4 +8,11 @@ export interface Env {
   TELEGRAM_WEBHOOK_SECRET: string;
   /** Секрет: ключ подписи JWT сессий Mini App (HS256). */
   JWT_SECRET: string;
+  /**
+   * Секрет: numeric Telegram ID владельца (строка). Пусто/отсутствует →
+   * авто-бутстрап владельца отключён, есть команда /id для ручной привязки.
+   */
+  OWNER_TELEGRAM_ID?: string;
+  /** Переменная [vars]: username бота без @ (для ссылок-приглашений). */
+  TELEGRAM_BOT_USERNAME?: string;
 }

@@ -5,6 +5,17 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Webhook бота v2** (шаг 3 миграции): `POST /telegram/webhook` с проверкой
+  `X-Telegram-Bot-Api-Secret-Token` (fail-closed, константное сравнение через
+  SHA-256), дедуп `update_id` (миграция `0002_processed_updates.sql`),
+  авто-бутстрап владельца по `OWNER_TELEGRAM_ID`, одноразовые инвайты
+  `/invite` (в БД — только SHA-256 кода, TTL 48ч, лимит 10 активных),
+  `/start <code>` с атомарным погашением одним D1 batch, команды
+  `/start /help /id`, молчание для незнакомцев. Клиент Telegram
+  `sendMessage` с HTML-экранированием имён. Скрипт
+  `scripts/telegram-webhook.mjs` (`webhook:set|info|delete`, скрытый ввод
+  секретов). В тестах — гонка двух sender'ов на один код, отсутствие
+  открытого кода в БД, отсутствие секретов в логах ошибок.
 - **Каркас v2** (шаг 1 миграции, [ADR-0001](docs/adr/0001-platform-and-architecture.md)):
   npm-workspaces `apps/*`; `apps/api` — Cloudflare Worker (TypeScript strict,
   Hono, zod) с `GET /health`, биндингами D1 `DB` и секретами
