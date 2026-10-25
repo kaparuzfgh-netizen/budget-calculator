@@ -1,5 +1,10 @@
 title = "Budget Companion — правила поиска секретов"
 
+# Шаблон секретов с placeholder-значениями — не секреты.
+[allowlist]
+description = "Примеры конфигов без реальных значений"
+paths = ['''secrets\.example\.json''']
+
 [[rules]]
 id = "telegram-bot-token"
 description = "Telegram Bot Token"

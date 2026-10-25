@@ -1,5 +1,8 @@
 # 💰 Personal Finance Companion — Personal Finance Engine (Serverless)
 
+[![CI](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/ci.yml/badge.svg)](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/ci.yml)
+[![Deploy Apps Script](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/deploy-apps-script.yml/badge.svg)](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/deploy-apps-script.yml)
+
 Серверлесс-движок личных финансов для Telegram: Google Sheets как база данных и BI-слой,
 Google Apps Script как оркестратор, Gemini 2.0 Flash как vision-парсер чеков.
 **TCO: $0/мес.**
@@ -49,13 +52,22 @@ Google Apps Script как оркестратор, Gemini 2.0 Flash как vision
 ```
 budget-calculator/
 ├── README.md                  ← вы здесь (архитектура + математика)
-├── SETUP.md                   пошаговый деплой за 15 минут
+├── SETUP.md                   пошаговый деплой через clasp (~15 минут)
+├── CONTRIBUTING.md            команды и правила разработки
+├── AGENTS.md                  заметки для ИИ-агентов и автоматизации
+├── CHANGELOG.md               история изменений (Keep a Changelog)
 ├── SECURITY.md                🔐 аудит безопасности + политика секретов в git
+├── LICENSE                    все права защищены (частный проект)
+├── package.json               npm-скрипты: check / test / deploy / bootstrap
 ├── .gitignore                 секреты и креды не попадают в репозиторий
 ├── .gitleaks.toml             правила сканера секретов (gitleaks)
-├── apps-script/               бэкенд — вставить в редактор Apps Script
-│   ├── BUNDLE.gs              🚀 ВСЁ В ОДНОМ ФАЙЛЕ для быстрой установки (генерируется scripts/build-bundle.sh)
-│   ├── appsscript.json        манифест (нужен только для пути разработчика)
+├── .claspignore               в Apps Script пушатся только *.gs и appsscript.json
+├── .clasp.json.example        шаблон привязки к проекту (scriptId + rootDir)
+├── .deploy.json.example       шаблон id развёртывания для npm run deploy
+├── secrets.example.json       шаблон секретов (без значений; secrets.json в .gitignore)
+├── .github/workflows/         CI: lint+test+gitleaks; CD: clasp deploy + Pages
+├── apps-script/               бэкенд — пушится в Apps Script через clasp
+│   ├── appsscript.json        манифест (часовой пояс, oauthScopes, webapp)
 │   ├── Config.gs              финансовый профиль: доход, обязательства, ипотеки
 │   ├── Setup_Sheets.gs        setup() / createSpreadsheet(): автосоздание файла и листов
 │   ├── SheetService.gs        слой данных + чтение FX/настроек + санитайзер ячеек
@@ -69,16 +81,18 @@ budget-calculator/
 │   ├── InvestNetWorth.gs      портфель, вклады, мультивалютный кэш, net worth, снапшоты
 │   ├── TmaApi.gs              REST для Mini App (валидация initData + read-token)
 │   ├── Triggers.gs            Sunday 20:00 weekly ask, daily maintenance, monthly
-│   ├── SecurityAudit.gs       🔐 рантайм-аудит: секреты, токены, webhook, доступы
-│   ├── secrets.example.json   шаблон секретов (без значений; реальный secrets.json в .gitignore)
-│   └── .clasp.json.example    опционально для разработки через clasp
+│   └── SecurityAudit.gs       🔐 рантайм-аудит: секреты, токены, webhook, доступы
 ├── scripts/
-│   ├── build-bundle.sh        сборка BUNDLE.gs из модулей (после правок кода)
-│   ├── install-hooks.sh       установка pre-commit хука защиты секретов
-│   └── hooks/pre-commit       блокирует коммит с токенами/ключами
+│   ├── smoke-test.js          офлайн-тесты бэкенда (моки Apps Script)
+│   ├── build-bundle.js        опциональная сборка dist/BUNDLE.gs одним файлом
+│   ├── deploy.js              npm run deploy: check → push → версия → развёртывание
+│   ├── bootstrap.js           первичное создание проекта (clasp create + push)
+│   ├── install-hooks.js/.sh   установка pre-commit хука (авто при npm install)
+│   ├── lint-sh.js             опциональный shellcheck
+│   └── hooks/pre-commit       блокирует коммит с токенами/ключами + eslint
 └── mini-app/
     ├── index.html             Mini App: Vue 3 + Tailwind + Chart.js, один файл
-    └── README.md              хостинг на Cloudflare Pages / GitHub Pages
+    └── README.md              деплой на GitHub Pages через CI
 ```
 
 ## Схема Google Sheets
@@ -189,8 +203,7 @@ GOOGLEFINANCE для каждой конвертации пользовател�
 
 ## Установка
 
-Полный пошаговый гайд — [SETUP.md](SETUP.md). Быстрый путь: **один файл**
-`apps-script/BUNDLE.gs` вставляется в пустой Code.gs нового проекта Apps Script —
-никакие другие файлы создавать не нужно; таблица, листы, триггеры и два секрета
-создаются автоматически функцией `createSpreadsheet()` (манифест и отдельные
-модули нужны только для разработки).
+Полный пошаговый гайд — [SETUP.md](SETUP.md). Коротко: `npm ci` →
+`npx clasp login` → `npm run bootstrap` (создаст проект и запушит код) →
+Script Properties → `npm run deploy` → `setupWebhook`. Таблица, листы,
+триггеры и два секрета создаются автоматически функцией `createSpreadsheet()`.

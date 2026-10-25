@@ -54,7 +54,7 @@
 | Файл | Роль |
 |------|------|
 | `.gitignore` | исключает `secrets.json`, `.env`, `.clasp.json`, `.clasprc.json` |
-| `apps-script/secrets.example.json` | шаблон ключей без реальных значений |
+| `secrets.example.json` | шаблон ключей без реальных значений |
 | `scripts/hooks/pre-commit` + `scripts/install-hooks.sh` | хук, блокирующий коммит с похожим на секрет фрагментом |
 | `.gitleaks.toml` | правила для сканера [gitleaks](https://github.com/gitleaks/gitleaks): токен Telegram `\d{8,10}:[A-Za-z0-9_-]{35}`, ключ Google `AIza…`, явные присваивания `*_SECRET=...` |
 
@@ -64,7 +64,7 @@
 cd budget-calculator
 git init
 bash scripts/install-hooks.sh        # поставить pre-commit хук
-cp apps-script/secrets.example.json apps-script/secrets.json   # локально, НЕ коммитить
+cp secrets.example.json secrets.json   # локально, НЕ коммитить
 # заполните secrets.json, перенесите значения в Script Properties (SETUP.md, Шаг 3)
 ```
 

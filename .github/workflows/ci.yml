@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call: # переиспользуется деплойными workflow как обязательный первый шаг
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Lint · test · bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Node.js (.nvmrc)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: ESLint (scripts + собранный dist/BUNDLE.gs)
+        run: npm run lint
+
+      - name: Smoke-тесты бэкенда (офлайн)
+        run: npm test
+
+      - name: Prettier (tooling и конфиги)
+        run: npm run format:check
+
+      - name: Бандл собирается; BUNDLE.gs нет в apps-script
+        run: |
+          node scripts/build-bundle.js
+          test -s dist/BUNDLE.gs
+          if [ -e apps-script/BUNDLE.gs ]; then
+            echo "::error::apps-script/BUNDLE.gs не должен существовать — модули пушатся clasp'ом, бандл собирается в dist/ (npm run build:bundle)"
+            exit 1
+          fi
+
+      - name: shellcheck
+        run: |
+          command -v shellcheck >/dev/null || sudo apt-get install -y shellcheck
+          shopt -s globstar nullglob
+          files=(scripts/**/*.sh scripts/hooks/*)
+          [ "${#files[@]}" -gt 0 ] && shellcheck "${files[@]}" || echo "sh-скриптов нет"
+
+  secrets-scan:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks (правила .gitleaks.toml)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml

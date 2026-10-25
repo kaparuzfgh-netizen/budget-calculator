@@ -1,0 +1,7 @@
+# Prettier проверяет только tooling (scripts/, конфиги, workflow).
+# Исходники Apps Script и Mini App имеют свой стиль — не трогаем.
+apps-script/
+mini-app/
+dist/
+package-lock.json
+*.md

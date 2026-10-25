@@ -1,0 +1,5 @@
+{
+  "_comment": "Скопируйте в .clasp.json (в .gitignore) и впишите scriptId. filePushOrder не нужен: модули ссылаются друг на друга только внутри функций. Настраивается автоматически через npm run bootstrap.",
+  "scriptId": "PASTE_YOUR_SCRIPT_ID_HERE",
+  "rootDir": "./apps-script"
+}
