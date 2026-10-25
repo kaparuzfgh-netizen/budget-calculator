@@ -84,10 +84,7 @@ const COMM_KB: ReplyMarkup = {
   ],
 };
 export const MAIN_MENU: ReplyMarkup = {
-  keyboard: [
-    ['📊 План', '📅 Неделя'],
-    ['➕ Трата', '⚙️ Профиль'],
-  ],
+  keyboard: [['📊 План', '📅 Неделя'], ['➕ Трата', '💵 Доход'], ['⚙️ Профиль']],
   resize_keyboard: true,
   is_persistent: true,
 };
@@ -112,7 +109,11 @@ function askIncomeCcy(): ObEffect {
   return send('В какой валюте основной доход?', CCY_KB);
 }
 function askIncomeAmount(d: ObData): ObEffect {
-  return send(`Какой ежемесячный доход в ${d.incomeCcy}? (просто число, например 6200)`);
+  return send(
+    `Типичный месячный доход в ${d.incomeCcy} (примерно, просто число — например 6200). ` +
+      'Если доход каждый месяц разный — нажмите «Пропустить» и вносите факт командой /income.',
+    { inline_keyboard: [[{ text: 'Пропустить', callback_data: 'ob:inc:skip' }]] },
+  );
 }
 function askLiving(d: ObData): ObEffect {
   return send(`Лимит «на жизнь» (еда/быт) в месяц? Число${d.incomeCcy ? ` — по умолчанию ${d.incomeCcy}` : ''}.`);
@@ -135,7 +136,7 @@ const CB_STEP: Record<ObStep, string> = {
   terms: 'ob:terms:',
   income_ccy: 'ob:ic:',
   income_ccy_custom: '',
-  income_amount: '',
+  income_amount: 'ob:inc:',
   living_cap: '',
   tz: 'ob:tz:',
   tz_custom: '',
@@ -197,6 +198,11 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
     }
 
     case 'income_amount': {
+      if (cb === 'ob:inc:skip') {
+        d.incomeMinor = 0; // типичный доход не задан — факт через /income
+        d.livingCcy = d.incomeCcy;
+        return ok({ step: 'living_cap', data: d }, askLiving(d));
+      }
       if (input.type !== 'text') return ok(state, askIncomeAmount(d));
       try {
         const a = parseAmount(text);

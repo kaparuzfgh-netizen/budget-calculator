@@ -52,6 +52,16 @@ export interface ExpenseRow {
   source_key: string | null;
 }
 
+export interface IncomeEntryRow {
+  id: number;
+  user_id: number;
+  month: string; // 'YYYY-MM' в таймзоне пользователя
+  amount_minor: number;
+  currency: string;
+  note: string | null;
+  source_key: string | null;
+}
+
 /** Репозиторий, привязанный к конкретному пользователю. */
 export function scoped(db: Env['DB'], userId: number) {
   return {
@@ -115,11 +125,50 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(userId)
         .all<CommitmentRow>();
     },
+    /** Один платёж — строго свой (WHERE id AND user_id). */
+    getCommitment(id: number) {
+      return db
+        .prepare('SELECT * FROM commitments WHERE id = ? AND user_id = ?')
+        .bind(id, userId)
+        .first<CommitmentRow>();
+    },
     addCommitment(c: { name: string; amount_minor: number; currency: string; due_day: number | null }) {
       return db
         .prepare('INSERT INTO commitments (user_id, name, amount_minor, currency, due_day) VALUES (?, ?, ?, ?, ?)')
         .bind(userId, c.name, c.amount_minor, c.currency, c.due_day)
         .run();
+    },
+    /** Точечные правки — все WHERE id=? AND user_id=? (чужие id молча игнорируются). */
+    patchCommitment(
+      id: number,
+      patch: { amount_minor?: number; currency?: string; due_day?: number | null; active?: number },
+    ) {
+      const sets: string[] = ["updated_at = datetime('now')"];
+      const binds: (number | string | null)[] = [];
+      if (patch.amount_minor !== undefined) {
+        sets.push('amount_minor = ?');
+        binds.push(patch.amount_minor);
+      }
+      if (patch.currency !== undefined) {
+        sets.push('currency = ?');
+        binds.push(patch.currency);
+      }
+      if (patch.due_day !== undefined) {
+        sets.push('due_day = ?');
+        binds.push(patch.due_day);
+      }
+      if (patch.active !== undefined) {
+        sets.push('active = ?');
+        binds.push(patch.active);
+      }
+      binds.push(id, userId);
+      return db
+        .prepare(`UPDATE commitments SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+        .bind(...binds)
+        .run();
+    },
+    deleteCommitment(id: number) {
+      return db.prepare('DELETE FROM commitments WHERE id = ? AND user_id = ?').bind(id, userId).run();
     },
     countCommitments() {
       return db
@@ -129,6 +178,69 @@ export function scoped(db: Env['DB'], userId: number) {
     },
     deactivateAllCommitments() {
       return db.prepare('UPDATE commitments SET active = 0 WHERE user_id = ?').bind(userId).run();
+    },
+
+    // ── факт дохода по месяцам ──
+    addIncomeEntry(e: {
+      month: string;
+      amount_minor: number;
+      currency: string;
+      note: string | null;
+      source_key: string;
+    }) {
+      return db
+        .prepare(
+          'INSERT OR IGNORE INTO income_entries (user_id, month, amount_minor, currency, note, source_key) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .bind(userId, e.month, e.amount_minor, e.currency, e.note, e.source_key)
+        .run();
+    },
+    listIncomeEntries(month: string) {
+      return db
+        .prepare('SELECT * FROM income_entries WHERE user_id = ? AND month = ? ORDER BY id')
+        .bind(userId, month)
+        .all<IncomeEntryRow>();
+    },
+    getIncomeEntry(id: number) {
+      return db
+        .prepare('SELECT * FROM income_entries WHERE id = ? AND user_id = ?')
+        .bind(id, userId)
+        .first<IncomeEntryRow>();
+    },
+    deleteIncomeEntry(id: number) {
+      return db.prepare('DELETE FROM income_entries WHERE id = ? AND user_id = ?').bind(id, userId).run();
+    },
+
+    /** Точечная правка профиля — whitelist полей, всегда WHERE user_id. */
+    patchProfile(patch: {
+      income_minor?: number;
+      living_cap_minor?: number;
+      weekly_budget_minor?: number;
+      income_currency?: string;
+      living_currency?: string;
+      timezone?: string;
+    }) {
+      const sets: string[] = ["updated_at = datetime('now')"];
+      const binds: (number | string)[] = [];
+      const FIELDS = [
+        'income_minor',
+        'living_cap_minor',
+        'weekly_budget_minor',
+        'income_currency',
+        'living_currency',
+        'timezone',
+      ] as const;
+      for (const f of FIELDS) {
+        if (patch[f] !== undefined) {
+          sets.push(`${f} = ?`);
+          binds.push(patch[f]!);
+        }
+      }
+      binds.push(userId);
+      return db
+        .prepare(`UPDATE profiles SET ${sets.join(', ')} WHERE user_id = ?`)
+        .bind(...binds)
+        .run();
     },
 
     // ── траты ──
@@ -190,10 +302,7 @@ export function scoped(db: Env['DB'], userId: number) {
     },
     /** CAS-очистка: удаляет только если step === expected. */
     clearConversationExpected(expected: string) {
-      return db
-        .prepare('DELETE FROM conversation_state WHERE user_id = ? AND step = ?')
-        .bind(userId, expected)
-        .run();
+      return db.prepare('DELETE FROM conversation_state WHERE user_id = ? AND step = ?').bind(userId, expected).run();
     },
   };
 }

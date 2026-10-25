@@ -19,8 +19,9 @@ import {
   type ObInput,
   type ObState,
 } from '../bot/onboarding';
-import { parseAmount, todayInTz } from '../bot/parse';
-import { runPlan, runProfile, runSpent, runWeek } from '../bot/features';
+import { monthInTz, parseAmount, todayInTz } from '../bot/parse';
+import { runIncome, runIncomeList, runPlan, runProfile, runSpent, runWeek } from '../bot/features';
+import { advancePf, onPfCcyResult, PF_STEPS, type PfCtx, type PfEffect, type PfState } from '../bot/profile';
 import type { FxProvider } from '../fx/provider';
 import { getFxRates } from '../fx/service';
 
@@ -59,8 +60,21 @@ const MENU: Record<string, string> = {
   '📊 План': '/plan',
   '📅 Неделя': '/week',
   '➕ Трата': '/spent',
+  '💵 Доход': '/income',
   '⚙️ Профиль': '/profile',
 };
+/** pf-шаги, ждущие текстового ввода (остальные pf-шаги — навигация). */
+const PF_TEXT_STEPS = new Set([
+  'edit_typical',
+  'edit_living',
+  'edit_commit_amount',
+  'edit_commit_day',
+  'add_commit',
+  'edit_income_ccy',
+  'edit_living_ccy',
+  'edit_tz',
+  'edit_tz_custom',
+]);
 const STALE_MS = 24 * 3600 * 1000;
 
 const fxAdapter = (deps: AccessDeps) => ({
@@ -146,18 +160,88 @@ async function applyOnboarding(
   await runEffects(r.effects, msg, user, deps, r.state ?? { step: 'terms', data: { commitments: [] } });
 }
 
-/** Текущее состояние диалога (или запуск). Старше 24ч → перезапуск. */
+/** Текущее состояние диалога (или запуск). Старше 24ч → перезапуск/очистка. */
 async function currentOb(
   repo: ReturnType<typeof scoped>,
   deps: AccessDeps,
+  onboarded = false,
 ): Promise<{ state: ObState | null; effects: ObEffect[] } | null> {
   const conv = await repo.getConversation();
   if (!conv) return null;
   const now = deps.now ?? new Date();
   if (now.getTime() - Date.parse(conv.updated_at) > STALE_MS) {
+    if (onboarded) {
+      await repo.clearConversation(); // онбоарденный — гасим, онбординг не рестартуем
+      return null;
+    }
     return startOnboarding(); // устарело — вежливый рестарт с шага 1
   }
   return { state: { step: conv.step as ObState['step'], data: JSON.parse(conv.data) as ObState['data'] }, effects: [] };
+}
+
+// ── pf-флоу: контекст и выполнение эффектов ──
+async function pfCtx(repo: ReturnType<typeof scoped>, p: import('../db/repo').ProfileRow): Promise<PfCtx> {
+  return {
+    profile: p,
+    commitments: (await repo.listCommitments(false)).results,
+    incomeEntries: (await repo.listIncomeEntries(monthInTz(p.timezone, new Date()))).results,
+  };
+}
+
+async function runPfEffects(
+  effects: PfEffect[],
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+  state: PfState,
+): Promise<void> {
+  const tg = deps.telegram;
+  for (const e of effects) {
+    if (e.kind === 'send') await tg.sendMessage(msg.chatId, e.text, e.markup ? { replyMarkup: e.markup } : {});
+    else if (e.kind === 'patch') await repo.patchProfile(e.patch);
+    else if (e.kind === 'commit_add')
+      await repo.addCommitment({
+        name: e.c.name,
+        amount_minor: Math.round(e.c.amount * 100),
+        currency: e.c.currency ?? 'USD',
+        due_day: e.c.dueDay ?? null,
+      });
+    else if (e.kind === 'commit_patch') await repo.patchCommitment(e.id, e.patch);
+    else if (e.kind === 'commit_del') await repo.deleteCommitment(e.id);
+    else if (e.kind === 'income_del') await repo.deleteIncomeEntry(e.id);
+    else if (e.kind === 'checkCcy') {
+      try {
+        await fxAdapter(deps).get([e.code]);
+        await applyPf(onPfCcyResult(state, true), msg, repo, deps, state.step);
+      } catch {
+        await applyPf(onPfCcyResult(state, false), msg, repo, deps, state.step);
+      }
+      return;
+    }
+  }
+}
+
+async function applyPf(
+  r: { state: PfState | null; effects: PfEffect[] },
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+  expectedStep?: string,
+): Promise<void> {
+  if (r.state) {
+    if (expectedStep !== undefined) {
+      const w = await repo.setConversationExpected(r.state.step, JSON.stringify(r.state.data), expectedStep);
+      if (w.meta.changes === 0) return; // гонка — проигравший молчит
+    } else {
+      await repo.setConversation(r.state.step, JSON.stringify(r.state.data));
+    }
+  } else if (expectedStep !== undefined) {
+    const w = await repo.clearConversationExpected(expectedStep);
+    if (w.meta.changes === 0) return;
+  } else {
+    await repo.clearConversation();
+  }
+  await runPfEffects(r.effects, msg, repo, deps, r.state ?? { step: 'pf', data: {} });
 }
 
 /** Точка входа для известного пользователя: онбординг или команды. */
@@ -167,8 +251,8 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
   const profile = await repo.getProfile();
   const text = msg.text.trim();
 
-  // Активный диалог онбординга — любой ввод туда (кроме /cancel — внутри редьюсера).
-  const conv = await currentOb(repo, deps);
+  // Активный диалог — ввод туда (кроме /cancel — см. ниже).
+  const conv = await currentOb(repo, deps, !!profile?.onboarded_at);
 
   // /cancel — всегда, в одном месте, никогда не проваливается в unknownCommand.
   if (/^\/cancel(?:@\w+)?\s*$/.test(text)) {
@@ -187,8 +271,9 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
       await runEffects(conv.effects, msg, user, deps, conv.state!);
       return;
     }
-    if ((conv.state!.step as string) === 'spent_ask') {
-      // «➕ Трата» ждала сумму: команда/кнопка меню — отменяем вопрос и идём к ней,
+    const step = conv.state!.step as string;
+    if (step === 'spent_ask' || step === 'income_ask') {
+      // ждём сумму: команда/кнопка меню — отменяем вопрос и идём к ней,
       // сумма — записываем, мусор — ошибка, вопрос остаётся активным.
       if (!text.startsWith('/') && !MENU[text]) {
         try {
@@ -198,21 +283,35 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
           return;
         }
         await repo.clearConversation();
-        await runSpent(
-          msg.chatId,
-          tg,
-          repo,
-          fxAdapter(deps),
-          text,
-          `tg:${msg.updateId}`,
-          todayInTz(profile?.timezone ?? 'UTC', deps.now ?? new Date()),
-        );
+        const tz = profile?.timezone ?? 'UTC';
+        const now = deps.now ?? new Date();
+        if (step === 'spent_ask')
+          await runSpent(msg.chatId, tg, repo, fxAdapter(deps), text, `tg:${msg.updateId}`, todayInTz(tz, now));
+        else await runIncome(msg.chatId, tg, repo, fxAdapter(deps), text, `tg:${msg.updateId}`, monthInTz(tz, now));
         return;
       }
       await repo.clearConversation();
       // проваливаемся к обычной диспетчеризации команды
+    } else if (step in PF_STEPS) {
+      if (PF_TEXT_STEPS.has(step) && !text.startsWith('/') && !MENU[text]) {
+        // текст — ввод для редактируемого шага
+        const p0 = await repo.getProfile();
+        if (!p0) {
+          await repo.clearConversation();
+          return;
+        }
+        const ctx = await pfCtx(repo, p0);
+        await applyPf(advancePf(conv.state!, { type: 'text', text }, ctx), msg, repo, deps, step);
+        return;
+      }
+      // навигационный pf-шаг или команда во время правки — отменяем правку, идём к команде
+      await repo.clearConversation();
+      if (!text.startsWith('/') && !MENU[text]) {
+        await tg.sendMessage(msg.chatId, 'Правка отменена. Меню: /profile');
+        return;
+      }
     } else {
-      await applyOnboarding(advance(conv.state!, { type: 'text', text }), msg, user, deps, conv.state!.step);
+      await applyOnboarding(advance(conv.state!, { type: 'text', text }), msg, user, deps, step);
       return;
     }
   }
@@ -270,6 +369,23 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     }
     await repo.setConversation('spent_ask', '{}');
     await tg.sendMessage(msg.chatId, 'Сколько потратили? (например: 320 или 320 kgs кофе)');
+    return;
+  }
+  if (CMD('income').test(cmd)) {
+    const arg = cmd.split(/\s+/).slice(1).join(' ').trim();
+    const month = monthInTz(tz, deps.now ?? new Date());
+    if (arg) {
+      await runIncome(msg.chatId, tg, repo, fx, arg, `tg:${msg.updateId}`, month);
+      return;
+    }
+    // /income без аргументов — список месяца с кнопками удаления
+    const entries = (await repo.listIncomeEntries(month)).results;
+    if (entries.length) {
+      await runIncomeList(msg.chatId, tg, repo, month);
+      return;
+    }
+    await repo.setConversation('income_ask', '{}');
+    await tg.sendMessage(msg.chatId, 'Сколько получили? (например: 5200 eur зарплата)');
     return;
   }
   if (CMD('profile').test(cmd)) {
@@ -349,15 +465,19 @@ export async function handleCallback(
   const r = scoped(deps.db, user.id);
   const msg: IncomingMessage = { chatId: cb.chatId, fromId: cb.fromId, firstName: cb.firstName, text: '', updateId: 0 };
 
-  if (cb.data === 'ob:reset') {
-    const start = startOnboarding();
-    await applyOnboarding(start, msg, user, deps);
+  const p0 = await r.getProfile();
+  const conv = await currentOb(r, deps, !!p0?.onboarded_at);
+  if (!conv?.state) return;
+  const step = conv.state.step as string;
+  if (cb.data.startsWith('pf:') || cb.data.startsWith('in:')) {
+    if (!p0) return;
+    if (!(step in PF_STEPS)) return; // чужой шаг — молча
+    const ctx = await pfCtx(r, p0);
+    await applyPf(advancePf(conv.state, { type: 'callback', data: cb.data }, ctx), msg, r, deps, step);
     return;
   }
-  const conv = await currentOb(r, deps);
-  if (!conv?.state) return;
   const input: ObInput = { type: 'callback', data: cb.data };
-  await applyOnboarding(advance(conv.state, input), msg, user, deps, conv.state.step);
+  await applyOnboarding(advance(conv.state, input), msg, user, deps, step);
 }
 
 async function createInvite(

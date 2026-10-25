@@ -6,11 +6,12 @@ import { computeWaterfall } from '../domain/cashflow';
 import { weeklyStatus } from '../domain/budget';
 import { convert, round2 } from '../domain/money';
 import type { FxResult } from '../fx/service';
-import type { CommitmentRow } from '../db/repo';
+import type { CommitmentRow, IncomeEntryRow } from '../db/repo';
 import type { TelegramClient } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
 import { fmtMoney, fmtPct } from './format';
-import { parseAmount } from './parse';
+import { monthInTz, parseAmount } from './parse';
+import { MAIN_MENU_KB, profileMenuText, type PfCtx } from './profile';
 
 const FX_FAIL = 'Курсы временно недоступны, попробуйте позже';
 
@@ -28,12 +29,36 @@ async function fxFor(fx: FxLike, ccys: (string | undefined)[]): Promise<FxResult
 
 const usd = (amount: number, ccy: string, perUsd: Record<string, number>) => convert(amount, ccy, 'USD', { perUsd });
 
+/**
+ * resolveIncome — ЧИСТАЯ функция: какой доход идёт в /plan.
+ * override (аргумент /plan) > сумма записей месяца («факт») > типичный доход > нет.
+ * Записи конвертируются в incomeCcy через USD.
+ */
+export function resolveIncome(opts: {
+  entries: Pick<IncomeEntryRow, 'amount_minor' | 'currency'>[];
+  typicalMinor: number;
+  incomeCcy: string;
+  perUsd: Record<string, number>;
+  override?: { amount: number; currency: string };
+}): { amount: number; currency: string; source: 'override' | 'actual' | 'typical' | 'none'; count: number } {
+  const { entries, typicalMinor, incomeCcy, perUsd, override } = opts;
+  if (override)
+    return { amount: override.amount, currency: override.currency, source: 'override', count: entries.length };
+  if (entries.length) {
+    const sum = entries.reduce((s, e) => s + convert(e.amount_minor / 100, e.currency, incomeCcy, { perUsd }), 0);
+    return { amount: sum, currency: incomeCcy, source: 'actual', count: entries.length };
+  }
+  if (typicalMinor > 0) return { amount: typicalMinor / 100, currency: incomeCcy, source: 'typical', count: 0 };
+  return { amount: 0, currency: incomeCcy, source: 'none', count: 0 };
+}
+
 export async function runPlan(
   chatId: number,
   tg: TelegramClient,
   repo: Repo,
   fx: FxLike,
   argText: string,
+  monthIso?: string,
 ): Promise<void> {
   const p = await repo.getProfile();
   if (!p?.onboarded_at) {
@@ -41,11 +66,13 @@ export async function runPlan(
     return;
   }
   const commits = (await repo.listCommitments()).results;
-  let income = { amount: p.income_minor / 100, currency: p.income_currency };
+  const month = monthIso ?? monthInTz(p.timezone, new Date());
+  const entries = (await repo.listIncomeEntries(month)).results;
+  let override: { amount: number; currency: string } | undefined;
   if (argText.trim()) {
     try {
       const a = parseAmount(argText);
-      income = { amount: a.amount, currency: a.currency ?? p.income_currency };
+      override = { amount: a.amount, currency: a.currency ?? p.income_currency };
     } catch (e) {
       await tg.sendMessage(chatId, (e as Error).message);
       return;
@@ -53,12 +80,26 @@ export async function runPlan(
   }
   let fxr: FxResult;
   try {
-    fxr = await fxFor(fx, [p.income_currency, p.living_currency, income.currency, ...commits.map((c) => c.currency)]);
+    fxr = await fxFor(fx, [
+      p.income_currency,
+      p.living_currency,
+      override?.currency,
+      ...entries.map((e) => e.currency),
+      ...commits.map((c) => c.currency),
+    ]);
   } catch {
     await tg.sendMessage(chatId, FX_FAIL);
     return;
   }
   const pu = fxr.perUsd;
+  const inc = resolveIncome({
+    entries,
+    typicalMinor: p.income_minor,
+    incomeCcy: p.income_currency,
+    perUsd: pu,
+    ...(override ? { override } : {}),
+  });
+  const income = { amount: inc.amount, currency: inc.currency };
   const mandatoryUsd = commits.reduce(
     (s: number, c: CommitmentRow) => s + usd(c.amount_minor / 100, c.currency, pu),
     0,
@@ -82,14 +123,24 @@ export async function runPlan(
         `  • ${escapeHtml(c.name)} — ${fmtMoney(c.amount_minor / 100, c.currency)}${c.due_day ? ` (${c.due_day})` : ''}`,
     )
     .join('\n');
+  const incLabel =
+    inc.source === 'override'
+      ? ' (задано вручную)'
+      : inc.source === 'actual'
+        ? ` — факт за ${month}`
+        : inc.source === 'typical'
+          ? ' — типичный, факт за месяц не введён'
+          : ' — доход не указан, /income';
   const lines = [
     `📊 <b>План месяца</b>`,
     `💵 Доход: <b>${fmtMoney(round2(w.incomeUsd), 'USD')}</b>` +
-      (income.currency !== 'USD' ? ` (${fmtMoney(income.amount, income.currency)})` : ''),
+      (income.currency !== 'USD' ? ` (${fmtMoney(income.amount, income.currency)})` : '') +
+      `<i>${incLabel}</i>`,
     `🧾 Обязательства: −${fmtMoney(round2(mandatoryUsd), 'USD')}` + (commits.length ? `\n${top}` : ' (нет)'),
     `🍽 Лимит жизни: −${fmtMoney(round2(w.livingUsd), 'USD')} (${fmtMoney(p.living_cap_minor / 100, p.living_currency)})`,
-    `💚 <b>Свободный профицит: ${fmtMoney(round2(w.surplusUsd), 'USD')}</b>`,
-  ];
+    `💚 <b>Свободный профицит: ${fmtMoney(round2(w.surplusUsd), 'USD')}${inc.source === 'none' ? ' (без дохода)' : ''}</b>`,
+    inc.count > 0 ? `<i>Доход за ${month}: ${inc.count} записей</i>` : '',
+  ].filter(Boolean);
   if (p.bonus_prepay_share + p.bonus_dca_share > 0 && w.bonusDeltaUsd > 0) {
     lines.push(
       `🎁 Дельта бонуса: +${fmtMoney(round2(w.bonusDeltaUsd), 'USD')}` +
@@ -202,28 +253,87 @@ export async function runWeek(
   await tg.sendMessage(chatId, prefix + lines.join('\n'));
 }
 
+/** /income — факт дохода за ТЕКУЩИЙ месяц в таймзоне пользователя. */
+export async function runIncome(
+  chatId: number,
+  tg: TelegramClient,
+  repo: Repo,
+  fx: FxLike,
+  text: string,
+  sourceKey: string,
+  monthIso: string,
+): Promise<void> {
+  const p = await repo.getProfile();
+  if (!p?.onboarded_at) {
+    await tg.sendMessage(chatId, 'Сначала настройка — /start');
+    return;
+  }
+  let a;
+  try {
+    a = parseAmount(text);
+  } catch (e) {
+    await tg.sendMessage(chatId, (e as Error).message);
+    return;
+  }
+  const ccy = a.currency ?? p.income_currency;
+  const r = await repo.addIncomeEntry({
+    month: monthIso,
+    amount_minor: Math.round(a.amount * 100),
+    currency: ccy,
+    note: a.note ?? null,
+    source_key: sourceKey,
+  });
+  if (r.meta.changes === 0) return; // дубликат update_id — молча
+  const entries = (await repo.listIncomeEntries(monthIso)).results;
+  let total = '';
+  try {
+    const fxr = await fxFor(fx, [p.income_currency, ...entries.map((e) => e.currency)]);
+    const sum = entries.reduce(
+      (s, e) => s + convert(e.amount_minor / 100, e.currency, p.income_currency, { perUsd: fxr.perUsd }),
+      0,
+    );
+    total = ` — итого за ${monthIso}: ${fmtMoney(round2(sum), p.income_currency)}`;
+  } catch {
+    total = ' — курсы недоступны, итог позже';
+  }
+  await tg.sendMessage(
+    chatId,
+    `Записал доход: ${fmtMoney(a.amount, ccy)}${a.note ? ` (${escapeHtml(a.note)})` : ''}${total}\n/plan покажет расклад.`,
+  );
+}
+
+/** /income без аргументов — список записей месяца с кнопками удаления. */
+export async function runIncomeList(chatId: number, tg: TelegramClient, repo: Repo, monthIso: string): Promise<void> {
+  const entries = (await repo.listIncomeEntries(monthIso)).results;
+  const incomeSectionText = entries.length
+    ? entries
+        .map((e) => `  • ${fmtMoney(e.amount_minor / 100, e.currency)}${e.note ? ` (${escapeHtml(e.note)})` : ''}`)
+        .join('\n')
+    : '  записей за месяц нет';
+  await repo.setConversation('pf:income_list', '{}');
+  await tg.sendMessage(chatId, `💵 Доход за ${monthIso}:\n${incomeSectionText}`, {
+    replyMarkup: {
+      inline_keyboard: entries.map((e) => [
+        {
+          text: `🗑 ${fmtMoney(e.amount_minor / 100, e.currency)}${e.note ? ` ${e.note}` : ''}`,
+          callback_data: `in:del:${e.id}`,
+        },
+      ]),
+    },
+  });
+}
+
 export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo): Promise<void> {
   const p = await repo.getProfile();
   if (!p) {
     await tg.sendMessage(chatId, 'Профиль не настроен — /start');
     return;
   }
-  const commits = (await repo.listCommitments()).results;
-  const lines = [
-    '⚙️ <b>Профиль</b>',
-    `Доход: ${fmtMoney(p.income_minor / 100, p.income_currency)} · лимит жизни: ${fmtMoney(p.living_cap_minor / 100, p.living_currency)}`,
-    `Недельный бюджет: ${fmtMoney(p.weekly_budget_minor / 100, p.living_currency)} · таймзона: ${escapeHtml(p.timezone)}`,
-    commits.length
-      ? 'Платежи:\n' +
-        commits
-          .map(
-            (c) =>
-              `  • ${escapeHtml(c.name)} — ${fmtMoney(c.amount_minor / 100, c.currency)}${c.due_day ? ` (${c.due_day})` : ''}`,
-          )
-          .join('\n')
-      : 'Платежей нет.',
-  ];
-  await tg.sendMessage(chatId, lines.join('\n'), {
-    replyMarkup: { inline_keyboard: [[{ text: '🔁 Пройти настройку заново', callback_data: 'ob:reset' }]] },
-  });
+  const ctx: PfCtx = {
+    profile: p,
+    commitments: (await repo.listCommitments(false)).results,
+    incomeEntries: (await repo.listIncomeEntries(monthInTz(p.timezone, new Date()))).results,
+  };
+  await repo.setConversation('pf', '{}'); // меню активно — кнопки живут 24ч
+  await tg.sendMessage(chatId, profileMenuText(ctx), { replyMarkup: MAIN_MENU_KB });
 }

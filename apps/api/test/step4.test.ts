@@ -106,7 +106,7 @@ describe('онбординг (happy path через webhook)', () => {
     await cb(OWNER, 'ob:terms:ok');
     expect(last()).toContain('валюте основной доход');
     await cb(OWNER, 'ob:ic:EUR');
-    expect(last()).toContain('ежемесячный доход');
+    expect(last()).toContain('месячный доход');
     await msg(OWNER, '6200');
     expect(last()).toContain('Лимит «на жизнь»');
     await msg(OWNER, '60000 rub');
@@ -151,7 +151,7 @@ describe('онбординг (happy path через webhook)', () => {
     await cb(OWNER, 'ob:terms:ok');
     await cb(OWNER, 'ob:ic:X');
     await msg(OWNER, 'RUB'); // поддерживается fake-провайдером
-    expect(last()).toContain('ежемесячный доход');
+    expect(last()).toContain('месячный доход');
   });
 
   it('/id от незнакомца когда owner задан → тишина', async () => {
@@ -228,12 +228,12 @@ describe('команды бюджета', () => {
     expect(last()).toContain('нет трат');
   });
 
-  it('/profile показывает профиль; «заново» запускает онбординг', async () => {
+  it('/profile открывает меню разделов', async () => {
     await setupUser(OWNER + 4);
     await msg(OWNER + 4, '⚙️ Профиль');
     expect(last()).toContain('Профиль');
-    await cb(OWNER + 4, 'ob:reset');
-    expect(last()).toContain('Согласны');
+    await cb(OWNER + 4, 'pf:sec:ccytz');
+    expect(last()).toContain('Валюта и пояс');
   });
 
   it('callback от незнакомца — молча, но answerCallbackQuery уходит', async () => {

@@ -83,5 +83,10 @@
     конвертация `toMinor/fromMinor` на границе repo. Курсы — только через
     `getFxRates` (D1-кэш 6ч + provider). Онбординг — чистый редьюсер
     `bot/onboarding.ts` (эффекты исполняет services/access.ts).
+18. **Профиль:** `income_minor` — «типичный доход» (0 = не задан); факт —
+    `income_entries` по месяцам (`/income`). Правки профиля — редьюсер
+    `bot/profile.ts` (`advancePf`); колбэки `pf:*`/`in:*` step-aware
+    (`PF_STEPS`), CAS-запись состояния; ВСЕ мутации по id —
+    `WHERE id=? AND user_id=?` (чужие id молча игнорируются).
 16. Проверка `X-Telegram-Bot-Api-Secret-Token` — fail-closed (нет секрета в
     env → 503) и константная по времени (`src/http/security.ts`).

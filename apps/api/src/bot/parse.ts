@@ -75,6 +75,11 @@ export function isValidTimezone(tz: string): boolean {
   }
 }
 
+/** 'YYYY-MM' по таймзоне — для месячных записей дохода. */
+export function monthInTz(tz: string, now: Date): string {
+  return todayInTz(tz, now).slice(0, 7);
+}
+
 /** 'YYYY-MM-DD' по таймзоне — все «сегодня» вычисляем через Intl. */
 export function todayInTz(tz: string, now: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
