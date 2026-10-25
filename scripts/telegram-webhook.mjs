@@ -10,27 +10,8 @@
  * спрашиваются интерактивно со СКРЫТЫМ вводом (без эха). Значения никогда
  * не печатаются, не пишутся на диск и не попадают в историю шелла.
  */
-import readline from 'node:readline';
+import { askHidden } from './ask-hidden.mjs';
 import { buildSetWebhookPayload, maskUrl, redact } from './webhook-utils.mjs';
-
-function askHidden(question) {
-  return new Promise((resolve, reject) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    const orig = rl._writeToOutput.bind(rl);
-    rl._writeToOutput = (s) => {
-      if (rl.stdoutMuted) rl.output.write('*');
-      else orig(s);
-    };
-    rl.stdoutMuted = true;
-    rl.question(question, (answer) => {
-      rl.stdoutMuted = false;
-      rl.output.write('\n');
-      rl.close();
-      resolve(answer.trim());
-    });
-    rl.on('error', reject);
-  });
-}
 
 async function tgCall(token, method, payload) {
   const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {

@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { askHidden } from './ask-hidden.mjs';
 import { buildSetWebhookPayload, maskUrl, redact } from './webhook-utils.mjs';
 import {
   deriveWorkerUrl,
@@ -47,24 +48,13 @@ const die = (msg, code = 1) => {
 const hide = (s) => redact(s, secretsToRedact);
 
 // ── ввод ──
-function ask(question, { hidden = false } = {}) {
+function ask(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    if (hidden) {
-      // маскируем ТОЛЬКО вводимые символы — вопрос печатаем до включения mute
-      process.stdout.write(question);
-      rl._writeToOutput = () => {};
-      rl.question('', (answer) => {
-        rl.output.write('\n');
-        rl.close();
-        resolve(answer.trim());
-      });
-    } else {
-      rl.question(question, (answer) => {
-        rl.close();
-        resolve(answer.trim());
-      });
-    }
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
   });
 }
 
@@ -152,7 +142,10 @@ async function main() {
   // ── 2. Токен ──
   stepLog('Токен бота');
   let token = process.env.TELEGRAM_BOT_TOKEN ?? '';
-  if (!token) token = await ask('Токен из @BotFather (скрытый ввод): ', { hidden: true });
+  if (!token) {
+    token = await askHidden('Токен из @BotFather (скрытый ввод): ');
+    p(`   принято: ${token.length} символов`); // только длина, никогда значение
+  }
   secretsToRedact.push(token);
   if (!isValidBotToken(token)) die('Формат токена не похож на BotFather-токен (<digits>:<secret>).');
   let me;

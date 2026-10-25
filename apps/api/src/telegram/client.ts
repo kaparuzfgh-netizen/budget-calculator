@@ -22,6 +22,24 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/** Убрать теги для повторной отправки без parse_mode (видимый текст сохраняется). */
+export function stripTags(s: string): string {
+  return s.replace(/<\/?[a-zA-Z][^>]*>/g, '');
+}
+
+/**
+ * Короткое безопасное описание ошибки для логов: статус + описание Telegram
+ * без URL/токенов/текста сообщения, ≤120 символов (S-логирование).
+ */
+export function sanitizeTelegramError(e: unknown): string {
+  if (!(e instanceof TelegramError)) return e instanceof Error ? e.name : 'unknown';
+  const desc = e.description
+    .replace(/bot\d{6,}:[A-Za-z0-9_-]{10,}/g, 'bot***')
+    .replace(/https?:\/\/\S+/g, '<url>')
+    .slice(0, 120);
+  return `TelegramError ${e.status}: ${desc}`;
+}
+
 export interface InlineButton {
   text: string;
   callback_data?: string; // ≤64 байт
@@ -72,13 +90,29 @@ export function createTelegramClient(opts: { token: string; fetchImpl?: typeof f
 
   return {
     async sendMessage(chatId, text, o) {
-      await call('sendMessage', {
+      const body = {
         chat_id: chatId,
         text,
         parse_mode: o?.parseMode ?? 'HTML',
         disable_notification: o?.disableNotification,
         reply_markup: o?.replyMarkup,
-      });
+      };
+      try {
+        await call('sendMessage', body);
+      } catch (e) {
+        // Telegram 400 "can't parse entities" — ретрай БЕЗ parse_mode:
+        // пользователь всё равно получает ответ, текст плоский.
+        if (
+          e instanceof TelegramError &&
+          e.status === 400 &&
+          /parse entities/i.test(e.description) &&
+          body.parse_mode
+        ) {
+          await call('sendMessage', { ...body, text: stripTags(text), parse_mode: undefined });
+          return;
+        }
+        throw e;
+      }
     },
     async answerCallbackQuery(callbackQueryId, text) {
       await call('answerCallbackQuery', { callback_query_id: callbackQueryId, text });

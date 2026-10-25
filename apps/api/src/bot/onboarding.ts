@@ -130,10 +130,30 @@ function commitmentsList(d: ObData): string {
     .join('\n');
 }
 
+/** Какие callback-префиксы разрешены на каждом шаге ('' — кнопок нет). */
+const CB_STEP: Record<ObStep, string> = {
+  terms: 'ob:terms:',
+  income_ccy: 'ob:ic:',
+  income_ccy_custom: '',
+  income_amount: '',
+  living_cap: '',
+  tz: 'ob:tz:',
+  tz_custom: '',
+  commitments: 'ob:com:',
+  confirm: '',
+};
+
 export function advance(state: ObState, input: ObInput): { state: ObState | null; effects: ObEffect[] } {
   const d = state.data;
   const cb = input.type === 'callback' ? input.data : null;
   const text = input.type === 'text' ? input.text.trim() : '';
+
+  // Step-aware: callback чужого шага (старая кнопка / повторная доставка) —
+  // молча игнорируем: иначе повторное «Согласен» переспрашивало валюту.
+  if (cb !== null) {
+    const allowed = CB_STEP[state.step];
+    if (!allowed || !cb.startsWith(allowed)) return { state, effects: [] };
+  }
 
   if (input.type === 'text' && text === '/cancel') {
     return ok(null, send('Настройка отменена. /start — начать заново.'));

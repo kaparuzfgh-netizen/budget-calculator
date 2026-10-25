@@ -5,7 +5,7 @@ import { verifyWebhookSecret } from './security';
 import { accessRepo } from '../db/repo';
 import { handleCallback, handleMessage } from '../services/access';
 import { createFrankfurter } from '../fx/frankfurter';
-import { createTelegramClient, type TelegramClient } from '../telegram/client';
+import { createTelegramClient, sanitizeTelegramError, type TelegramClient } from '../telegram/client';
 
 const APP_VERSION = '0.1.0';
 
@@ -122,9 +122,9 @@ export function createRouter(deps: RouterDeps = {}) {
         },
       );
     } catch (e) {
-      // Никогда не логируем тело/текст/токены — только update_id и класс ошибки.
-      const code = e instanceof Error ? `${e.name}` : 'unknown';
-      console.error(`webhook: update ${update.update_id} не обработан (${code})`);
+      // Никогда не логируем тело/текст/токены — update_id + код и
+      // короткое санитизированное описание (для TelegramError — error_code).
+      console.error(`webhook: update ${update.update_id} не обработан (${sanitizeTelegramError(e)})`);
     }
     return c.json({ ok: true });
   });

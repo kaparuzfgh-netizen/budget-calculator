@@ -172,8 +172,28 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(userId, step, data)
         .run();
     },
+    /**
+     * CAS-запись: обновляет только если текущий step === expected.
+     * meta.changes === 0 → состояние изменил другой апдейт → проигравший молчит.
+     */
+    setConversationExpected(step: string, data: string, expected: string) {
+      return db
+        .prepare(
+          `UPDATE conversation_state SET step = ?, data = ?, updated_at = datetime('now')
+           WHERE user_id = ? AND step = ?`,
+        )
+        .bind(step, data, userId, expected)
+        .run();
+    },
     clearConversation() {
       return db.prepare('DELETE FROM conversation_state WHERE user_id = ?').bind(userId).run();
+    },
+    /** CAS-очистка: удаляет только если step === expected. */
+    clearConversationExpected(expected: string) {
+      return db
+        .prepare('DELETE FROM conversation_state WHERE user_id = ? AND step = ?')
+        .bind(userId, expected)
+        .run();
     },
   };
 }

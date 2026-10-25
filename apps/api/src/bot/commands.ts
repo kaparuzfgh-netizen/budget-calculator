@@ -30,7 +30,7 @@ export const TEXT = {
   myId: (tgId: number) => `Твой Telegram ID: <code>${tgId}</code>`,
   helpOnboarded: () =>
     'Команды:\n/plan [сумма [валюта]] — план месяца (водопад)\n' +
-    '/spent <сумма> [валюта] [заметка] — записать трату\n' +
+    '/spent сумма [валюта] [заметка] — записать трату\n' +
     '/week — неделя и месяц расходов\n' +
     '/profile — профиль и платежи\n' +
     '/id — твой Telegram ID\n' +

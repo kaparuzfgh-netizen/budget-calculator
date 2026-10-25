@@ -19,7 +19,7 @@ import {
   type ObInput,
   type ObState,
 } from '../bot/onboarding';
-import { todayInTz } from '../bot/parse';
+import { parseAmount, todayInTz } from '../bot/parse';
 import { runPlan, runProfile, runSpent, runWeek } from '../bot/features';
 import type { FxProvider } from '../fx/provider';
 import { getFxRates } from '../fx/service';
@@ -117,15 +117,32 @@ async function runEffects(
   }
 }
 
+/**
+ * Применить результат редьюсера с CAS: запись допустима, только если
+ * текущий шаг в БД всё ещё expectedStep (гонка двух апдейтов → проигравший
+ * не шлёт эффекты и не делает persist дважды).
+ */
 async function applyOnboarding(
   r: { state: ObState | null; effects: ObEffect[] },
   msg: IncomingMessage,
   user: UserRow,
   deps: AccessDeps,
+  expectedStep?: string,
 ): Promise<void> {
   const repo = scoped(deps.db, user.id);
-  if (r.state) await repo.setConversation(r.state.step, JSON.stringify(r.state.data));
-  else await repo.clearConversation();
+  if (r.state) {
+    if (expectedStep !== undefined) {
+      const w = await repo.setConversationExpected(r.state.step, JSON.stringify(r.state.data), expectedStep);
+      if (w.meta.changes === 0) return; // состояние перехватил другой апдейт — молчим
+    } else {
+      await repo.setConversation(r.state.step, JSON.stringify(r.state.data));
+    }
+  } else if (expectedStep !== undefined) {
+    const w = await repo.clearConversationExpected(expectedStep);
+    if (w.meta.changes === 0) return;
+  } else {
+    await repo.clearConversation();
+  }
   await runEffects(r.effects, msg, user, deps, r.state ?? { step: 'terms', data: { commitments: [] } });
 }
 
@@ -152,27 +169,52 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
 
   // Активный диалог онбординга — любой ввод туда (кроме /cancel — внутри редьюсера).
   const conv = await currentOb(repo, deps);
+
+  // /cancel — всегда, в одном месте, никогда не проваливается в unknownCommand.
+  if (/^\/cancel(?:@\w+)?\s*$/.test(text)) {
+    if (conv) {
+      await repo.clearConversation();
+      await tg.sendMessage(msg.chatId, 'Настройка отменена. /start — начать заново.');
+    } else {
+      await tg.sendMessage(msg.chatId, 'Нечего отменять.');
+    }
+    return;
+  }
+
   if (conv) {
     if (conv.effects.length) {
+      // устаревшее состояние — мягкий рестарт с первого шага
       await runEffects(conv.effects, msg, user, deps, conv.state!);
       return;
     }
     if ((conv.state!.step as string) === 'spent_ask') {
-      // кнопка «➕ Трата» ждала сумму
+      // «➕ Трата» ждала сумму: команда/кнопка меню — отменяем вопрос и идём к ней,
+      // сумма — записываем, мусор — ошибка, вопрос остаётся активным.
+      if (!text.startsWith('/') && !MENU[text]) {
+        try {
+          parseAmount(text);
+        } catch (e) {
+          await tg.sendMessage(msg.chatId, (e as Error).message);
+          return;
+        }
+        await repo.clearConversation();
+        await runSpent(
+          msg.chatId,
+          tg,
+          repo,
+          fxAdapter(deps),
+          text,
+          `tg:${msg.updateId}`,
+          todayInTz(profile?.timezone ?? 'UTC', deps.now ?? new Date()),
+        );
+        return;
+      }
       await repo.clearConversation();
-      await runSpent(
-        msg.chatId,
-        tg,
-        repo,
-        fxAdapter(deps),
-        text,
-        `tg:${msg.updateId}`,
-        todayInTz(profile?.timezone ?? 'UTC', deps.now ?? new Date()),
-      );
+      // проваливаемся к обычной диспетчеризации команды
+    } else {
+      await applyOnboarding(advance(conv.state!, { type: 'text', text }), msg, user, deps, conv.state!.step);
       return;
     }
-    await applyOnboarding(advance(conv.state!, { type: 'text', text }), msg, user, deps);
-    return;
   }
 
   if (!profile?.onboarded_at) {
@@ -315,7 +357,7 @@ export async function handleCallback(
   const conv = await currentOb(r, deps);
   if (!conv?.state) return;
   const input: ObInput = { type: 'callback', data: cb.data };
-  await applyOnboarding(advance(conv.state, input), msg, user, deps);
+  await applyOnboarding(advance(conv.state, input), msg, user, deps, conv.state.step);
 }
 
 async function createInvite(
