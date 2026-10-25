@@ -1,0 +1,981 @@
+{
+  "generatedWith": "legacy apps-script @ vm mock, fixed now 2026-10-21",
+  "cases": [
+    {
+      "fn": "annuityPayment",
+      "args": [
+        1287312,
+        0.119,
+        12,
+        34.46
+      ],
+      "result": 44285.5993830016
+    },
+    {
+      "fn": "derivePeriods",
+      "args": [
+        1287312,
+        0.119,
+        12,
+        44285.5993830016
+      ],
+      "result": 34.46000000000001
+    },
+    {
+      "fn": "annuityPayment",
+      "args": [
+        500000,
+        0.16,
+        12,
+        48
+      ],
+      "result": 14170.14040239587
+    },
+    {
+      "fn": "derivePeriods",
+      "args": [
+        500000,
+        0.16,
+        12,
+        14170.14040239587
+      ],
+      "result": 48.00000000000001
+    },
+    {
+      "fn": "annuityPayment",
+      "args": [
+        1200000,
+        0.0859,
+        26,
+        78
+      ],
+      "result": 17477.229464386928
+    },
+    {
+      "fn": "derivePeriods",
+      "args": [
+        1200000,
+        0.0859,
+        26,
+        17477.229464386928
+      ],
+      "result": 78
+    },
+    {
+      "fn": "annuityPayment",
+      "args": [
+        2000000,
+        0.21,
+        12,
+        120
+      ],
+      "result": 39986.334997847516
+    },
+    {
+      "fn": "derivePeriods",
+      "args": [
+        2000000,
+        0.21,
+        12,
+        39986.334997847516
+      ],
+      "result": 120.00000000000001
+    },
+    {
+      "fn": "annuityPayment",
+      "args": [
+        300000,
+        0,
+        12,
+        36
+      ],
+      "result": 8333.333333333334
+    },
+    {
+      "fn": "derivePeriods",
+      "args": [
+        300000,
+        0,
+        12,
+        8333.333333333334
+      ],
+      "result": 36
+    },
+    {
+      "fn": "annuityPayment",
+      "args": [
+        99999.55,
+        0.1549,
+        26,
+        52
+      ],
+      "result": 2241.9851388554143
+    },
+    {
+      "fn": "derivePeriods",
+      "args": [
+        99999.55,
+        0.1549,
+        26,
+        2241.9851388554143
+      ],
+      "result": 52.000000000000014
+    },
+    {
+      "fn": "derivePeriods",
+      "args": [
+        1000000,
+        0.12,
+        12,
+        9000
+      ],
+      "result": null
+    },
+    {
+      "fn": "annuityPayment",
+      "args": [
+        0,
+        0.12,
+        12,
+        36
+      ],
+      "result": 0
+    },
+    {
+      "fn": "annuityPayment",
+      "args": [
+        100000,
+        0.12,
+        12,
+        0
+      ],
+      "result": 0
+    },
+    {
+      "fn": "normalizedMonthly",
+      "args": {
+        "type": "monthly",
+        "payment": 44282
+      },
+      "result": 44282
+    },
+    {
+      "fn": "normalizedMonthly",
+      "args": {
+        "type": "biweekly",
+        "payment": 17314
+      },
+      "result": 37513.666666666664
+    },
+    {
+      "fn": "normalizedMonthly",
+      "args": {
+        "type": "biweekly",
+        "payment": 1
+      },
+      "result": 2.1666666666666665
+    },
+    {
+      "fn": "projection",
+      "args": [
+        "monthly",
+        0.119,
+        1287312,
+        44282,
+        0
+      ],
+      "result": {
+        "periodsLeft": 35,
+        "monthsLeft": 35,
+        "totalInterestRUB": 238848,
+        "monthlyPaymentRUB": 44282
+      }
+    },
+    {
+      "fn": "projection",
+      "args": [
+        "monthly",
+        0.119,
+        1287312,
+        44282,
+        50000
+      ],
+      "result": {
+        "periodsLeft": 15,
+        "monthsLeft": 15,
+        "totalInterestRUB": 102851,
+        "monthlyPaymentRUB": 94282
+      }
+    },
+    {
+      "fn": "projection",
+      "args": [
+        "biweekly",
+        0.0859,
+        800000,
+        17314,
+        0
+      ],
+      "result": {
+        "periodsLeft": 51,
+        "monthsLeft": 23.5,
+        "totalInterestRUB": 69526,
+        "monthlyPaymentRUB": 17314
+      }
+    },
+    {
+      "fn": "projection",
+      "args": [
+        "biweekly",
+        0.0859,
+        800000,
+        17314,
+        10000
+      ],
+      "result": {
+        "periodsLeft": 39,
+        "monthsLeft": 18,
+        "totalInterestRUB": 53882,
+        "monthlyPaymentRUB": 21929.384615384617
+      }
+    },
+    {
+      "fn": "projection",
+      "args": [
+        "monthly",
+        0.21,
+        250000,
+        15000,
+        0
+      ],
+      "result": {
+        "periodsLeft": 20,
+        "monthsLeft": 20,
+        "totalInterestRUB": 48170,
+        "monthlyPaymentRUB": 15000
+      }
+    },
+    {
+      "fn": "projection",
+      "args": [
+        "monthly",
+        0.12,
+        100000,
+        900,
+        0
+      ],
+      "result": {
+        "periodsLeft": 1200,
+        "monthsLeft": 1200,
+        "totalInterestRUB": 1200000,
+        "monthlyPaymentRUB": 900
+      }
+    },
+    {
+      "fn": "arbitrage",
+      "args": {
+        "amount": 0,
+        "depositRate": 0.16,
+        "debtRate": 0.119
+      },
+      "result": {
+        "depositYield": 0,
+        "interestSaved": 0,
+        "delta": 0,
+        "depositWins": false
+      }
+    },
+    {
+      "fn": "arbitrage",
+      "args": {
+        "amount": 50000,
+        "depositRate": 0.16,
+        "debtRate": 0.119
+      },
+      "result": {
+        "depositYield": 8000,
+        "interestSaved": 5950,
+        "delta": 2050.0000000000005,
+        "depositWins": true
+      }
+    },
+    {
+      "fn": "arbitrage",
+      "args": {
+        "amount": 100000,
+        "depositRate": 0.16,
+        "debtRate": 0.119
+      },
+      "result": {
+        "depositYield": 16000,
+        "interestSaved": 11900,
+        "delta": 4100.000000000001,
+        "depositWins": true
+      }
+    },
+    {
+      "fn": "arbitrage",
+      "args": {
+        "amount": 706000,
+        "depositRate": 0.16,
+        "debtRate": 0.119
+      },
+      "result": {
+        "depositYield": 112960,
+        "interestSaved": 84014,
+        "delta": 28946.000000000007,
+        "depositWins": true
+      }
+    },
+    {
+      "fn": "arbitrage",
+      "args": {
+        "amount": 1500000,
+        "depositRate": 0.16,
+        "debtRate": 0.119
+      },
+      "result": {
+        "depositYield": 240000,
+        "interestSaved": 178500,
+        "delta": 61500.000000000015,
+        "depositWins": true
+      }
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 6200,
+        "from": "EUR",
+        "to": "USD",
+        "fx": {
+          "EURUSD": 1.08,
+          "USDRUB": 90,
+          "USDKGS": 86
+        }
+      },
+      "result": 6696
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 6200,
+        "from": "EUR",
+        "to": "RUB",
+        "fx": {
+          "EURUSD": 1.08,
+          "USDRUB": 90,
+          "USDKGS": 86
+        }
+      },
+      "result": 602640
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 15000,
+        "from": "RUB",
+        "to": "KGS",
+        "fx": {
+          "EURUSD": 1.08,
+          "USDRUB": 90,
+          "USDKGS": 86
+        }
+      },
+      "result": 14333.333333333332
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 500,
+        "from": "USD",
+        "to": "EUR",
+        "fx": {
+          "EURUSD": 1.08,
+          "USDRUB": 90,
+          "USDKGS": 86
+        }
+      },
+      "result": 462.96296296296293
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 1000000,
+        "from": "KGS",
+        "to": "RUB",
+        "fx": {
+          "EURUSD": 1.08,
+          "USDRUB": 90,
+          "USDKGS": 86
+        }
+      },
+      "result": 1046511.6279069766
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 0,
+        "from": "EUR",
+        "to": "USD",
+        "fx": {
+          "EURUSD": 1.08,
+          "USDRUB": 90,
+          "USDKGS": 86
+        }
+      },
+      "result": 0
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 777.77,
+        "from": "USD",
+        "to": "USD",
+        "fx": {
+          "EURUSD": 1.08,
+          "USDRUB": 90,
+          "USDKGS": 86
+        }
+      },
+      "result": 777.77
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 6200,
+        "from": "EUR",
+        "to": "USD",
+        "fx": {
+          "EURUSD": 1.2,
+          "USDRUB": 75.5,
+          "USDKGS": 84.2
+        }
+      },
+      "result": 7440
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 6200,
+        "from": "EUR",
+        "to": "RUB",
+        "fx": {
+          "EURUSD": 1.2,
+          "USDRUB": 75.5,
+          "USDKGS": 84.2
+        }
+      },
+      "result": 561720
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 15000,
+        "from": "RUB",
+        "to": "KGS",
+        "fx": {
+          "EURUSD": 1.2,
+          "USDRUB": 75.5,
+          "USDKGS": 84.2
+        }
+      },
+      "result": 16728.476821192053
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 500,
+        "from": "USD",
+        "to": "EUR",
+        "fx": {
+          "EURUSD": 1.2,
+          "USDRUB": 75.5,
+          "USDKGS": 84.2
+        }
+      },
+      "result": 416.6666666666667
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 1000000,
+        "from": "KGS",
+        "to": "RUB",
+        "fx": {
+          "EURUSD": 1.2,
+          "USDRUB": 75.5,
+          "USDKGS": 84.2
+        }
+      },
+      "result": 896674.5843230403
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 0,
+        "from": "EUR",
+        "to": "USD",
+        "fx": {
+          "EURUSD": 1.2,
+          "USDRUB": 75.5,
+          "USDKGS": 84.2
+        }
+      },
+      "result": 0
+    },
+    {
+      "fn": "convert",
+      "args": {
+        "amount": 777.77,
+        "from": "USD",
+        "to": "USD",
+        "fx": {
+          "EURUSD": 1.2,
+          "USDRUB": 75.5,
+          "USDKGS": 84.2
+        }
+      },
+      "result": 777.77
+    },
+    {
+      "fn": "waterfall",
+      "args": {
+        "opts": {},
+        "resolved": {
+          "baseIncomeUsd": 5800,
+          "mandatoryUsd": 0,
+          "livingCap": {
+            "amount": 60000,
+            "currency": "RUB"
+          },
+          "bonusPrepayShare": 0.5,
+          "bonusDcaShare": 0.5,
+          "dcaTargets": {
+            "broad_market_etf": 0.58,
+            "growth_stocks": 0.23,
+            "crypto_assets": 0.19
+          },
+          "fx": {
+            "EURUSD": 1.09,
+            "USDRUB": 97,
+            "USDKGS": 86.5,
+            "FALLBACK_USED": true
+          }
+        }
+      },
+      "result": {
+        "incomeAmount": 5800,
+        "incomeCurrency": "EUR",
+        "incomeUSD": 6322.000000000001,
+        "livingUSD": 618.5567010309278,
+        "surplusUSD": 5703.443298969073,
+        "bonusDeltaUSD": 522.0000000000009,
+        "toPrepayUSD": 261.00000000000045,
+        "toDcaUSD": 261.00000000000045,
+        "split": {
+          "broad_market_etf": 151.38000000000025,
+          "growth_stocks": 60.03000000000011,
+          "crypto_assets": 49.59000000000009
+        }
+      }
+    },
+    {
+      "fn": "waterfall",
+      "args": {
+        "opts": {
+          "incomeAmount": 6200,
+          "incomeCurrency": "EUR"
+        },
+        "resolved": {
+          "baseIncomeUsd": 5800,
+          "mandatoryUsd": 0,
+          "livingCap": {
+            "amount": 60000,
+            "currency": "RUB"
+          },
+          "bonusPrepayShare": 0.5,
+          "bonusDcaShare": 0.5,
+          "dcaTargets": {
+            "broad_market_etf": 0.58,
+            "growth_stocks": 0.23,
+            "crypto_assets": 0.19
+          },
+          "fx": {
+            "EURUSD": 1.09,
+            "USDRUB": 97,
+            "USDKGS": 86.5,
+            "FALLBACK_USED": true
+          }
+        }
+      },
+      "result": {
+        "incomeAmount": 6200,
+        "incomeCurrency": "EUR",
+        "incomeUSD": 6758.000000000001,
+        "livingUSD": 618.5567010309278,
+        "surplusUSD": 6139.443298969073,
+        "bonusDeltaUSD": 958.0000000000009,
+        "toPrepayUSD": 479.00000000000045,
+        "toDcaUSD": 479.00000000000045,
+        "split": {
+          "broad_market_etf": 277.8200000000002,
+          "growth_stocks": 110.17000000000012,
+          "crypto_assets": 91.01000000000009
+        }
+      }
+    },
+    {
+      "fn": "waterfall",
+      "args": {
+        "opts": {
+          "incomeAmount": 7500,
+          "incomeCurrency": "EUR"
+        },
+        "resolved": {
+          "baseIncomeUsd": 5800,
+          "mandatoryUsd": 0,
+          "livingCap": {
+            "amount": 60000,
+            "currency": "RUB"
+          },
+          "bonusPrepayShare": 0.5,
+          "bonusDcaShare": 0.5,
+          "dcaTargets": {
+            "broad_market_etf": 0.58,
+            "growth_stocks": 0.23,
+            "crypto_assets": 0.19
+          },
+          "fx": {
+            "EURUSD": 1.09,
+            "USDRUB": 97,
+            "USDKGS": 86.5,
+            "FALLBACK_USED": true
+          }
+        }
+      },
+      "result": {
+        "incomeAmount": 7500,
+        "incomeCurrency": "EUR",
+        "incomeUSD": 8175.000000000001,
+        "livingUSD": 618.5567010309278,
+        "surplusUSD": 7556.443298969073,
+        "bonusDeltaUSD": 2375.000000000001,
+        "toPrepayUSD": 1187.5000000000005,
+        "toDcaUSD": 1187.5000000000005,
+        "split": {
+          "broad_market_etf": 688.7500000000002,
+          "growth_stocks": 273.1250000000001,
+          "crypto_assets": 225.62500000000009
+        }
+      }
+    },
+    {
+      "fn": "waterfall",
+      "args": {
+        "opts": {
+          "incomeAmount": 500000,
+          "incomeCurrency": "RUB"
+        },
+        "resolved": {
+          "baseIncomeUsd": 5800,
+          "mandatoryUsd": 0,
+          "livingCap": {
+            "amount": 60000,
+            "currency": "RUB"
+          },
+          "bonusPrepayShare": 0.5,
+          "bonusDcaShare": 0.5,
+          "dcaTargets": {
+            "broad_market_etf": 0.58,
+            "growth_stocks": 0.23,
+            "crypto_assets": 0.19
+          },
+          "fx": {
+            "EURUSD": 1.09,
+            "USDRUB": 97,
+            "USDKGS": 86.5,
+            "FALLBACK_USED": true
+          }
+        }
+      },
+      "result": {
+        "incomeAmount": 500000,
+        "incomeCurrency": "RUB",
+        "incomeUSD": 5154.639175257732,
+        "livingUSD": 618.5567010309278,
+        "surplusUSD": 4536.082474226804,
+        "bonusDeltaUSD": 0,
+        "toPrepayUSD": 0,
+        "toDcaUSD": 0,
+        "split": {
+          "broad_market_etf": 0,
+          "growth_stocks": 0,
+          "crypto_assets": 0
+        }
+      }
+    },
+    {
+      "fn": "waterfall",
+      "args": {
+        "opts": {
+          "incomeAmount": 450000,
+          "incomeCurrency": "KGS"
+        },
+        "resolved": {
+          "baseIncomeUsd": 5800,
+          "mandatoryUsd": 0,
+          "livingCap": {
+            "amount": 60000,
+            "currency": "RUB"
+          },
+          "bonusPrepayShare": 0.5,
+          "bonusDcaShare": 0.5,
+          "dcaTargets": {
+            "broad_market_etf": 0.58,
+            "growth_stocks": 0.23,
+            "crypto_assets": 0.19
+          },
+          "fx": {
+            "EURUSD": 1.09,
+            "USDRUB": 97,
+            "USDKGS": 86.5,
+            "FALLBACK_USED": true
+          }
+        }
+      },
+      "result": {
+        "incomeAmount": 450000,
+        "incomeCurrency": "KGS",
+        "incomeUSD": 5202.312138728324,
+        "livingUSD": 618.5567010309278,
+        "surplusUSD": 4583.755437697396,
+        "bonusDeltaUSD": 0,
+        "toPrepayUSD": 0,
+        "toDcaUSD": 0,
+        "split": {
+          "broad_market_etf": 0,
+          "growth_stocks": 0,
+          "crypto_assets": 0
+        }
+      }
+    },
+    {
+      "fn": "waterfall",
+      "args": {
+        "opts": {
+          "incomeAmount": 4000,
+          "incomeCurrency": "USD"
+        },
+        "resolved": {
+          "baseIncomeUsd": 5800,
+          "mandatoryUsd": 0,
+          "livingCap": {
+            "amount": 60000,
+            "currency": "RUB"
+          },
+          "bonusPrepayShare": 0.5,
+          "bonusDcaShare": 0.5,
+          "dcaTargets": {
+            "broad_market_etf": 0.58,
+            "growth_stocks": 0.23,
+            "crypto_assets": 0.19
+          },
+          "fx": {
+            "EURUSD": 1.09,
+            "USDRUB": 97,
+            "USDKGS": 86.5,
+            "FALLBACK_USED": true
+          }
+        }
+      },
+      "result": {
+        "incomeAmount": 4000,
+        "incomeCurrency": "USD",
+        "incomeUSD": 4000,
+        "livingUSD": 618.5567010309278,
+        "surplusUSD": 3381.443298969072,
+        "bonusDeltaUSD": 0,
+        "toPrepayUSD": 0,
+        "toDcaUSD": 0,
+        "split": {
+          "broad_market_etf": 0,
+          "growth_stocks": 0,
+          "crypto_assets": 0
+        }
+      }
+    },
+    {
+      "fn": "waterfall",
+      "args": {
+        "opts": {
+          "incomeAmount": 7000,
+          "incomeCurrency": "EUR",
+          "extraPrepayRUB": 80000,
+          "extraDcaUSD": 500
+        },
+        "resolved": {
+          "baseIncomeUsd": 5800,
+          "mandatoryUsd": 0,
+          "livingCap": {
+            "amount": 60000,
+            "currency": "RUB"
+          },
+          "bonusPrepayShare": 0.5,
+          "bonusDcaShare": 0.5,
+          "dcaTargets": {
+            "broad_market_etf": 0.58,
+            "growth_stocks": 0.23,
+            "crypto_assets": 0.19
+          },
+          "fx": {
+            "EURUSD": 1.09,
+            "USDRUB": 97,
+            "USDKGS": 86.5,
+            "FALLBACK_USED": true
+          }
+        }
+      },
+      "result": {
+        "incomeAmount": 7000,
+        "incomeCurrency": "EUR",
+        "incomeUSD": 7630.000000000001,
+        "livingUSD": 618.5567010309278,
+        "surplusUSD": 7011.443298969073,
+        "bonusDeltaUSD": 1830.000000000001,
+        "toPrepayUSD": 1739.7422680412376,
+        "toDcaUSD": 1415.0000000000005,
+        "split": {
+          "broad_market_etf": 820.7000000000002,
+          "growth_stocks": 325.4500000000001,
+          "crypto_assets": 268.8500000000001
+        }
+      }
+    },
+    {
+      "fn": "replay",
+      "args": {
+        "params": {
+          "rate": 0.119,
+          "frequency": "monthly",
+          "initialBalance": 1287312,
+          "initialPayment": 44282
+        },
+        "events": [
+          {
+            "kind": "payment",
+            "amount": 44282
+          },
+          {
+            "kind": "payment",
+            "amount": 44282
+          },
+          {
+            "kind": "prepay",
+            "amount": 100000
+          },
+          {
+            "kind": "payment",
+            "amount": 0
+          },
+          {
+            "kind": "reconcile",
+            "amount": 1100000
+          },
+          {
+            "kind": "payment",
+            "amount": 30000
+          }
+        ]
+      },
+      "result": {
+        "balance": 1080908.3333333333,
+        "payment": 40664.09245246548,
+        "paymentsMade": 3
+      }
+    },
+    {
+      "fn": "replay",
+      "args": {
+        "params": {
+          "rate": 0.0859,
+          "frequency": "biweekly",
+          "initialBalance": 1491303,
+          "initialPayment": 17314
+        },
+        "events": [
+          {
+            "kind": "payment",
+            "amount": 17314
+          },
+          {
+            "kind": "payment",
+            "amount": 17314
+          },
+          {
+            "kind": "prepay",
+            "amount": 50000
+          },
+          {
+            "kind": "payment",
+            "amount": 17314
+          }
+        ]
+      },
+      "result": {
+        "balance": 1403854.0056526805,
+        "payment": 16723.678147125735,
+        "paymentsMade": 3
+      }
+    },
+    {
+      "fn": "replay",
+      "args": {
+        "params": {
+          "rate": 0.119,
+          "frequency": "monthly",
+          "initialBalance": 1287312,
+          "initialPayment": 44282
+        },
+        "events": []
+      },
+      "result": {
+        "balance": 1287312,
+        "payment": 44282,
+        "paymentsMade": 0
+      }
+    },
+    {
+      "fn": "weeklyStatus",
+      "args": {
+        "today": "2026-10-21",
+        "expenses": [
+          {
+            "date": "2026-10-19",
+            "amount": 3000
+          },
+          {
+            "date": "2026-10-21",
+            "amount": 4500
+          },
+          {
+            "date": "2026-10-18",
+            "amount": 7000
+          },
+          {
+            "date": "2026-09-30",
+            "amount": 9999
+          }
+        ],
+        "monthlyCap": 60000,
+        "weeklyBudget": 15000
+      },
+      "result": {
+        "weekSpent": 7500,
+        "monthSpent": 14500,
+        "burnRate": 0.35674603174603176,
+        "dailyAllowance": 4136.363636363636,
+        "daysLeft": 11
+      }
+    }
+  ]
+}
