@@ -5,6 +5,13 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Онбординг и бюджет (шаг 4):** миграция `0003` (profiles, commitments,
+  weekly_expenses, conversation_state, fx_rates; деньги — INTEGER minor);
+  онбординг как чистый редьюсер (согласие → валюта/доход/лимит/таймзона/
+  платежи → профиль + персистентное меню); команды `/plan`, `/spent` (и
+  кнопка «➕ Трата» + голая сумма), `/week`, `/profile`, `/cancel`;
+  inline-кнопки и `callback_query` в webhook; FX-провайдер Frankfurter
+  с D1-кэшем 6ч и stale-fallback; изоляция tenant на всех новых таблицах.
 - **`npm run setup` — интерактивный мастер подключения бота v2:** владельцу
   нужен только токен @BotFather (скрытый ввод, поддерживает вставку);
   остальное автоматизировано — getMe, username в `wrangler.toml`,

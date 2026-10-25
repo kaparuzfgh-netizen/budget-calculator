@@ -40,3 +40,13 @@ export function convert(amount: number, from: Currency, to: Currency, fx: FxRate
 export function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+
+/** float → INTEGER минорных единиц (копейки) — граница хранения. */
+export function toMinor(n: number): number {
+  return Math.round(n * 100);
+}
+
+/** INTEGER минорных единиц → float. */
+export function fromMinor(m: number): number {
+  return m / 100;
+}

@@ -17,6 +17,41 @@ export interface ConsentRow {
   created_at: string;
 }
 
+export interface ProfileRow {
+  user_id: number;
+  base_currency: string;
+  income_currency: string;
+  living_currency: string;
+  timezone: string;
+  income_minor: number;
+  living_cap_minor: number;
+  weekly_budget_minor: number;
+  bonus_prepay_share: number;
+  bonus_dca_share: number;
+  onboarded_at: string | null;
+}
+
+export interface CommitmentRow {
+  id: number;
+  user_id: number;
+  name: string;
+  amount_minor: number;
+  currency: string;
+  due_day: number | null;
+  active: number;
+}
+
+export interface ExpenseRow {
+  id: number;
+  user_id: number;
+  spent_on: string;
+  amount_minor: number;
+  currency: string;
+  note: string | null;
+  source: string;
+  source_key: string | null;
+}
+
 /** Репозиторий, привязанный к конкретному пользователю. */
 export function scoped(db: Env['DB'], userId: number) {
   return {
@@ -26,6 +61,147 @@ export function scoped(db: Env['DB'], userId: number) {
         .prepare('SELECT kind, granted, created_at FROM consents WHERE user_id = ? ORDER BY kind')
         .bind(userId)
         .all<ConsentRow>();
+    },
+    grantConsent(kind: string) {
+      return db
+        .prepare('INSERT OR REPLACE INTO consents (user_id, kind, granted) VALUES (?, ?, 1)')
+        .bind(userId, kind)
+        .run();
+    },
+    hasConsent(kind: string) {
+      return db
+        .prepare('SELECT granted FROM consents WHERE user_id = ? AND kind = ?')
+        .bind(userId, kind)
+        .first<{ granted: number }>();
+    },
+
+    // ── профиль ──
+    getProfile() {
+      return db.prepare('SELECT * FROM profiles WHERE user_id = ?').bind(userId).first<ProfileRow>();
+    },
+    upsertProfile(p: Omit<ProfileRow, 'user_id'>) {
+      return db
+        .prepare(
+          `INSERT INTO profiles (user_id, base_currency, income_currency, living_currency, timezone,
+            income_minor, living_cap_minor, weekly_budget_minor, bonus_prepay_share, bonus_dca_share, onboarded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE SET base_currency=excluded.base_currency,
+             income_currency=excluded.income_currency, living_currency=excluded.living_currency,
+             timezone=excluded.timezone, income_minor=excluded.income_minor,
+             living_cap_minor=excluded.living_cap_minor, weekly_budget_minor=excluded.weekly_budget_minor,
+             bonus_prepay_share=excluded.bonus_prepay_share, bonus_dca_share=excluded.bonus_dca_share,
+             onboarded_at=excluded.onboarded_at, updated_at=datetime('now')`,
+        )
+        .bind(
+          userId,
+          p.base_currency,
+          p.income_currency,
+          p.living_currency,
+          p.timezone,
+          p.income_minor,
+          p.living_cap_minor,
+          p.weekly_budget_minor,
+          p.bonus_prepay_share,
+          p.bonus_dca_share,
+          p.onboarded_at,
+        )
+        .run();
+    },
+
+    // ── обязательные платежи ──
+    listCommitments(activeOnly = true) {
+      return db
+        .prepare(`SELECT * FROM commitments WHERE user_id = ?${activeOnly ? ' AND active = 1' : ''} ORDER BY id`)
+        .bind(userId)
+        .all<CommitmentRow>();
+    },
+    addCommitment(c: { name: string; amount_minor: number; currency: string; due_day: number | null }) {
+      return db
+        .prepare('INSERT INTO commitments (user_id, name, amount_minor, currency, due_day) VALUES (?, ?, ?, ?, ?)')
+        .bind(userId, c.name, c.amount_minor, c.currency, c.due_day)
+        .run();
+    },
+    countCommitments() {
+      return db
+        .prepare('SELECT COUNT(*) AS n FROM commitments WHERE user_id = ? AND active = 1')
+        .bind(userId)
+        .first<{ n: number }>();
+    },
+    deactivateAllCommitments() {
+      return db.prepare('UPDATE commitments SET active = 0 WHERE user_id = ?').bind(userId).run();
+    },
+
+    // ── траты ──
+    addExpense(e: {
+      spent_on: string;
+      amount_minor: number;
+      currency: string;
+      note: string | null;
+      source: string;
+      source_key: string;
+    }) {
+      return db
+        .prepare(
+          'INSERT OR IGNORE INTO weekly_expenses (user_id, spent_on, amount_minor, currency, note, source, source_key) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .bind(userId, e.spent_on, e.amount_minor, e.currency, e.note, e.source, e.source_key)
+        .run();
+    },
+    listExpenses(sinceIsoDate?: string) {
+      return db
+        .prepare(
+          `SELECT * FROM weekly_expenses WHERE user_id = ?${sinceIsoDate ? ' AND spent_on >= ?' : ''} ORDER BY spent_on, id`,
+        )
+        .bind(...(sinceIsoDate ? [userId, sinceIsoDate] : [userId]))
+        .all<ExpenseRow>();
+    },
+
+    // ── состояние диалога ──
+    getConversation() {
+      return db
+        .prepare('SELECT step, data, updated_at FROM conversation_state WHERE user_id = ?')
+        .bind(userId)
+        .first<{ step: string; data: string; updated_at: string }>();
+    },
+    setConversation(step: string, data: string) {
+      return db
+        .prepare(
+          `INSERT INTO conversation_state (user_id, step, data) VALUES (?, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE SET step=excluded.step, data=excluded.data, updated_at=datetime('now')`,
+        )
+        .bind(userId, step, data)
+        .run();
+    },
+    clearConversation() {
+      return db.prepare('DELETE FROM conversation_state WHERE user_id = ?').bind(userId).run();
+    },
+  };
+}
+
+// ── глобальные, не user-data: курсы валют ──
+export interface FxRateRow {
+  currency: string;
+  per_usd: number;
+  as_of: string;
+  fetched_at: string;
+}
+
+export function fxRepo(db: Env['DB']) {
+  return {
+    get(currency: string) {
+      return db.prepare('SELECT * FROM fx_rates WHERE currency = ?').bind(currency).first<FxRateRow>();
+    },
+    list() {
+      return db.prepare('SELECT * FROM fx_rates ORDER BY currency').all<FxRateRow>();
+    },
+    upsert(currency: string, perUsd: number, asOf: string, fetchedAt: string) {
+      return db
+        .prepare(
+          `INSERT INTO fx_rates (currency, per_usd, as_of, fetched_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(currency) DO UPDATE SET per_usd=excluded.per_usd, as_of=excluded.as_of, fetched_at=excluded.fetched_at`,
+        )
+        .bind(currency, perUsd, asOf, fetchedAt)
+        .run();
     },
   };
 }
@@ -44,11 +220,7 @@ export interface UserRow {
 }
 
 export type AuditAction =
-  | 'owner_bootstrap'
-  | 'invite_created'
-  | 'invite_redeemed'
-  | 'invite_redeem_failed'
-  | 'id_reply';
+  'owner_bootstrap' | 'invite_created' | 'invite_redeemed' | 'invite_redeem_failed' | 'id_reply';
 
 /** Глобальные таблицы доступа — user-data здесь нет (S5 применяется к scoped). */
 export function accessRepo(db: Env['DB']) {
@@ -131,10 +303,7 @@ export function accessRepo(db: Env['DB']) {
 
     /** Идемпотентность webhook: true → update новый, false → дубликат. */
     async markUpdateProcessed(updateId: number): Promise<boolean> {
-      const r = await db
-        .prepare('INSERT OR IGNORE INTO processed_updates (update_id) VALUES (?)')
-        .bind(updateId)
-        .run();
+      const r = await db.prepare('INSERT OR IGNORE INTO processed_updates (update_id) VALUES (?)').bind(updateId).run();
       return r.meta.changes === 1;
     },
 

@@ -102,7 +102,8 @@ describe('pickPrivateSender / nextOffset', () => {
 
 describe('deriveWorkerUrl / toml-парсинг', () => {
   it('извлекает URL из вывода wrangler deploy', () => {
-    const out = 'Uploaded budget-companion-api (x sec)\n https://budget-companion-api.fool-undef.workers.dev\nCurrent Deployment ID: abc';
+    const out =
+      'Uploaded budget-companion-api (x sec)\n https://budget-companion-api.fool-undef.workers.dev\nCurrent Deployment ID: abc';
     expect(deriveWorkerUrl({ deployOutput: out })).toBe('https://budget-companion-api.fool-undef.workers.dev');
   });
   it('собирает из name+subdomain, иначе null', () => {

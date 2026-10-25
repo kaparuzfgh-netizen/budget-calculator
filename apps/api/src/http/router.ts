@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { Env } from '../env';
 import { verifyWebhookSecret } from './security';
 import { accessRepo } from '../db/repo';
-import { handleMessage } from '../services/access';
+import { handleCallback, handleMessage } from '../services/access';
+import { createFrankfurter } from '../fx/frankfurter';
 import { createTelegramClient, type TelegramClient } from '../telegram/client';
 
 const APP_VERSION = '0.1.0';
@@ -16,9 +17,15 @@ const updateSchema = z.object({
       message_id: z.number(),
       text: z.string().optional(),
       chat: z.object({ id: z.number(), type: z.string() }),
-      from: z
-        .object({ id: z.number(), first_name: z.string().optional(), username: z.string().optional() })
-        .optional(),
+      from: z.object({ id: z.number(), first_name: z.string().optional(), username: z.string().optional() }).optional(),
+    })
+    .optional(),
+  callback_query: z
+    .object({
+      id: z.string(),
+      data: z.string().max(64).optional(),
+      from: z.object({ id: z.number(), first_name: z.string().optional(), username: z.string().optional() }).optional(),
+      message: z.object({ chat: z.object({ id: z.number(), type: z.string() }) }).optional(),
     })
     .optional(),
 });
@@ -26,6 +33,8 @@ const updateSchema = z.object({
 export interface RouterDeps {
   /** Подмена клиента Telegram в тестах. */
   telegram?: TelegramClient;
+  /** Подмена FX-провайдера в тестах. */
+  fx?: import('../fx/provider').FxProvider;
 }
 
 /** HTTP-роутер воркера. Маршруты добавляются шагами миграции (ADR-0001). */
@@ -62,7 +71,11 @@ export function createRouter(deps: RouterDeps = {}) {
       return c.json({ ok: true });
     }
     const msg = update.message;
-    if (!msg || msg.chat.type !== 'private' || !msg.from) {
+    const cb = update.callback_query;
+    if (
+      (!msg || msg.chat.type !== 'private' || !msg.from) &&
+      (!cb || cb.message?.chat.type !== 'private' || !cb.from)
+    ) {
       return c.json({ ok: true });
     }
 
@@ -73,18 +86,39 @@ export function createRouter(deps: RouterDeps = {}) {
 
     const telegram = deps.telegram ?? createTelegramClient({ token: c.env.TELEGRAM_BOT_TOKEN });
     try {
+      if (cb && cb.message?.chat.type === 'private' && cb.from) {
+        await handleCallback(
+          {
+            id: cb.id,
+            chatId: cb.message.chat.id,
+            fromId: cb.from.id,
+            firstName: cb.from.first_name ?? null,
+            data: cb.data ?? '',
+          },
+          {
+            db: c.env.DB,
+            telegram,
+            ownerTelegramId: c.env.OWNER_TELEGRAM_ID,
+            botUsername: c.env.TELEGRAM_BOT_USERNAME,
+            fx: deps.fx ?? createFrankfurter(),
+          },
+        );
+        return c.json({ ok: true });
+      }
       await handleMessage(
         {
-          chatId: msg.chat.id,
-          fromId: msg.from.id,
-          firstName: msg.from.first_name ?? null,
-          text: msg.text ?? '',
+          chatId: msg!.chat.id,
+          fromId: msg!.from!.id,
+          firstName: msg!.from!.first_name ?? null,
+          text: msg!.text ?? '',
+          updateId: update.update_id,
         },
         {
           db: c.env.DB,
           telegram,
           ownerTelegramId: c.env.OWNER_TELEGRAM_ID,
           botUsername: c.env.TELEGRAM_BOT_USERNAME,
+          fx: deps.fx ?? createFrankfurter(),
         },
       );
     } catch (e) {

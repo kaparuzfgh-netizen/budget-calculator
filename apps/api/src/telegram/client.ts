@@ -22,13 +22,28 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+export interface InlineButton {
+  text: string;
+  callback_data?: string; // ≤64 байт
+  url?: string;
+}
+
+export interface ReplyMarkup {
+  inline_keyboard?: InlineButton[][];
+  keyboard?: string[][];
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+}
+
 export interface SendMessageOpts {
   parseMode?: 'HTML' | undefined;
   disableNotification?: boolean;
+  replyMarkup?: ReplyMarkup;
 }
 
 export interface TelegramClient {
   sendMessage(chatId: number | string, text: string, opts?: SendMessageOpts): Promise<void>;
+  answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
 }
 
 interface TgApiResult {
@@ -36,10 +51,7 @@ interface TgApiResult {
   description?: string;
 }
 
-export function createTelegramClient(opts: {
-  token: string;
-  fetchImpl?: typeof fetch;
-}): TelegramClient {
+export function createTelegramClient(opts: { token: string; fetchImpl?: typeof fetch }): TelegramClient {
   const f = opts.fetchImpl ?? fetch;
   const call = async (method: string, body: unknown) => {
     // URL с токеном существует только внутри этого вызова.
@@ -65,7 +77,11 @@ export function createTelegramClient(opts: {
         text,
         parse_mode: o?.parseMode ?? 'HTML',
         disable_notification: o?.disableNotification,
+        reply_markup: o?.replyMarkup,
       });
+    },
+    async answerCallbackQuery(callbackQueryId, text) {
+      await call('answerCallbackQuery', { callback_query_id: callbackQueryId, text });
     },
   };
 }

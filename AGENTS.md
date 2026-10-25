@@ -79,5 +79,9 @@
     и их хэши (в логах — только `update_id` и код ошибки). Незнакомым
     отправителям — тишина и ноль записей в БД. Код приглашения хранится
     только как SHA-256 hex; в audit_log — `expires_at`, не код.
+17. **Деньги:** в D1 — INTEGER minor units (копейки); домен — float,
+    конвертация `toMinor/fromMinor` на границе repo. Курсы — только через
+    `getFxRates` (D1-кэш 6ч + provider). Онбординг — чистый редьюсер
+    `bot/onboarding.ts` (эффекты исполняет services/access.ts).
 16. Проверка `X-Telegram-Bot-Api-Secret-Token` — fail-closed (нет секрета в
     env → 503) и константная по времени (`src/http/security.ts`).

@@ -40,7 +40,7 @@ export function parseWebhookUrl(url) {
 export function buildSetWebhookPayload({ url, secretToken }) {
   const payload = {
     url: parseWebhookUrl(url),
-    allowed_updates: ['message'],
+    allowed_updates: ['message', 'callback_query'],
     drop_pending_updates: true,
   };
   if (secretToken) payload.secret_token = secretToken;

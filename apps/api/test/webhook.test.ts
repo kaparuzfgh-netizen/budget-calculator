@@ -19,6 +19,7 @@ const fakeTelegram: TelegramClient = {
   async sendMessage(chatId, text) {
     sent.push({ chatId: Number(chatId), text });
   },
+  async answerCallbackQuery() {},
 };
 
 const app = createRouter({ telegram: fakeTelegram });
@@ -56,7 +57,19 @@ function msg(updateId: number, tgId: number, text: string, extra: Record<string,
 }
 
 async function cleanDb() {
-  for (const t of ['processed_updates', 'audit_log', 'invites', 'users', 'consents']) {
+  // дочерние таблицы (FK → users) — до users; БД общая на все тест-файлы
+  for (const t of [
+    'conversation_state',
+    'weekly_expenses',
+    'commitments',
+    'profiles',
+    'consents',
+    'fx_rates',
+    'processed_updates',
+    'audit_log',
+    'invites',
+    'users',
+  ]) {
     await env.DB.prepare(`DELETE FROM ${t}`).run();
   }
 }
@@ -197,7 +210,9 @@ describe('доступ', () => {
     const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code2)))]
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
-    await env.DB.prepare("UPDATE invites SET expires_at = '2020-01-01T00:00:00.000Z' WHERE code_hash = ?").bind(hash).run();
+    await env.DB.prepare("UPDATE invites SET expires_at = '2020-01-01T00:00:00.000Z' WHERE code_hash = ?")
+      .bind(hash)
+      .run();
     await post(msg(75, 777003, `/start ${code2}`));
     expect(sent.at(-1)!.text).toContain('недействительно');
   });
@@ -205,10 +220,7 @@ describe('доступ', () => {
   it('гонка: один код для двух sender → один пользователь, один отказ', async () => {
     await post(msg(80, OWNER_TG, '/start'));
     const code = await inviteCode();
-    await Promise.all([
-      post(msg(82, 881001, `/start ${code}`)),
-      post(msg(83, 882002, `/start ${code}`)),
-    ]);
+    await Promise.all([post(msg(82, 881001, `/start ${code}`)), post(msg(83, 882002, `/start ${code}`))]);
     const { results } = await env.DB.prepare("SELECT telegram_id FROM users WHERE role='member'").all();
     expect(results.length).toBe(1);
     const texts = sent.slice(-2).map((m) => m.text);
@@ -251,6 +263,7 @@ describe('доступ', () => {
       async sendMessage() {
         throw new Error(`boom ${SECRET} ${'token-xyz'} приватный-текст`);
       },
+      async answerCallbackQuery() {},
     };
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bad = createRouter({ telegram: boom });
@@ -277,7 +290,7 @@ describe('webhook-utils (скрипт)', () => {
     expect(maskUrl('https://x.workers.dev/tg?token=abc#f')).toBe('https://x.workers.dev/tg');
     expect(redact('err tok=SECRET123 out', ['SECRET123'])).toBe('err tok=*** out');
     const p = buildSetWebhookPayload({ url: 'https://x.dev/wh?a=1', secretToken: 's' });
-    expect(p.allowed_updates).toEqual(['message']);
+    expect(p.allowed_updates).toEqual(['message', 'callback_query']);
     expect(p.drop_pending_updates).toBe(true);
     expect(() => buildSetWebhookPayload({ url: 'http://x.dev/wh' })).toThrow('https');
   });

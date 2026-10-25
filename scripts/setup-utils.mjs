@@ -24,7 +24,10 @@ export function setTomlVar(tomlText, key, value) {
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     if (/^\[vars\]\s*$/.test(t)) varsStart = i;
-    else if (varsStart >= 0 && /^\[/.test(t) && !/^\[\[/.test(t)) { varsEnd = i; break; }
+    else if (varsStart >= 0 && /^\[/.test(t) && !/^\[\[/.test(t)) {
+      varsEnd = i;
+      break;
+    }
   }
 
   if (varsStart === -1) {

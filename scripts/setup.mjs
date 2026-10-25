@@ -141,9 +141,11 @@ async function main() {
   p(`   ✓ Cloudflare: вошли (${who.out.match(/[\w.+-]+@[\w.-]+/)?.[0] ?? 'аккаунт ок'})`);
   const toml = fs.readFileSync(tomlPath, 'utf8');
   if ((parseDatabaseId(toml) ?? 'PLACEHOLDER') === 'PLACEHOLDER_SET_BY_OWNER') {
-    die('wrangler.toml: database_id = PLACEHOLDER_SET_BY_OWNER.\n' +
+    die(
+      'wrangler.toml: database_id = PLACEHOLDER_SET_BY_OWNER.\n' +
         '   Создайте БД: npm run wrangler -- d1 create budget-companion\n' +
-        '   и впишите выданный database_id в apps/api/wrangler.toml.');
+        '   и впишите выданный database_id в apps/api/wrangler.toml.',
+    );
   }
   p('   ✓ database_id задан');
 
@@ -225,7 +227,9 @@ async function main() {
       let updates = [];
       try {
         updates = await tg(token, 'getUpdates', { timeout: 25, offset, allowed_updates: ['message'] });
-      } catch { /* сеть моргнула — продолжаем поллинг */ }
+      } catch {
+        /* сеть моргнула — продолжаем поллинг */
+      }
       const hit = pickPrivateSender(updates, offset - 1);
       if (hit) {
         const ans = (await ask(`   Найден: ${hit.firstName || '?'} (id ${hit.tgId}). Это вы? [y/N] `)).toLowerCase();
