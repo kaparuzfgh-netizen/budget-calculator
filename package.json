@@ -20,6 +20,7 @@
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "golden": "node scripts/gen-golden.js",
+    "setup": "node scripts/setup.mjs",
     "webhook:set": "node scripts/telegram-webhook.mjs set",
     "webhook:info": "node scripts/telegram-webhook.mjs info",
     "webhook:delete": "node scripts/telegram-webhook.mjs delete",

@@ -15,7 +15,7 @@ migrations_dir = "migrations"
 # ── Несекретные переменные ──────────────────────────────────────
 # Username бота без @ — для ссылок-приглашений https://t.me/<bot>?start=<code>.
 [vars]
-TELEGRAM_BOT_USERNAME = ""
+TELEGRAM_BOT_USERNAME = "Helper_6666_bot"
 
 # ── Cron-триггеры (шаг 4 миграции: напоминания, валютные алерты) ─
 # Раскомментировать, когда появится handler scheduled() в src/index.ts.

@@ -122,27 +122,60 @@ My Profile → API Tokens → Create Custom Token. Минимальные пра
 
 ## Подключение бота (веха B — webhook, владелец, инвайты)
 
-Webhook живёт на `POST /telegram/webhook`. Всё ниже — действия владельца.
+Webhook живёт на `POST /telegram/webhook`. Основной путь — одна команда:
 
-Порядок важен: сначала воркер и вебхук, потом узнаём свой ID.
+```bash
+npm run setup
+```
 
-1. **Секреты** (если ещё не заданы): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET` —
-   `npm run wrangler -- secret put <ИМЯ>`. `TELEGRAM_WEBHOOK_SECRET` на шаге 4 должен быть
-   тем же значением: если ротируешь — сразу копируй новое значение.
-2. **Username бота** (без @) — в `apps/api/wrangler.toml` `[vars]` → `TELEGRAM_BOT_USERNAME`.
-   Без него `/invite` выдаёт текст `/start <code>` вместо ссылки.
-3. `npm run wrangler -- d1 migrations apply DB --remote`, затем `npm run deploy -w apps/api`.
-4. **Зарегистрируй вебхук** (токен и секрет спросит скрытым вводом — ничего не печатается
-   и не сохраняется): `npm run webhook:set -- https://<твой-воркер>.workers.dev/telegram/webhook`.
-   Проверка: `npm run webhook:info`. Удаление: `npm run webhook:delete`.
-5. **Узнай свой numeric Telegram ID.** Напиши боту `/id` — пока `OWNER_TELEGRAM_ID` не задан,
-   бот отвечает каждому отправителю его ID (один раз на telegram_id; осознанный компромисс
-   bootstrap'а). Затем `npm run wrangler -- secret put OWNER_TELEGRAM_ID` → введи число.
-   Сразу после этого незнакомцы снова в тишине. Альтернатива: @userinfobot (сторонний сервис).
-6. **Смоук:** напиши боту `/start` — ты владелец. `/invite` → ссылка → открой со второго
-   аккаунта → он участник. Незнакомому аккаунту бот не отвечает — это by design.
-7. **Диагностика:** `npm run webhook:info` (URL замаскирован, видны `last_error_message` и
-   `pending_update_count`), `npm run wrangler -- tail`.
+### Предусловия (один раз)
+
+- `npm run wrangler -- login` — вход в Cloudflare (браузер);
+- `npm run wrangler -- d1 create budget-companion` → `database_id` вписать
+  в `apps/api/wrangler.toml` вместо `PLACEHOLDER_SET_BY_OWNER`;
+- токен бота: в Telegram открой **@BotFather → /newbot** (или /mybots →
+  API Token) — мастер спросит его один раз скрытым вводом (или задай env
+  `TELEGRAM_BOT_TOKEN`).
+
+### Что делает мастер (8 шагов, ошибки — понятными русскими сообщениями)
+
+Проверки окружения → токен + `getMe` → username бота в `wrangler.toml` →
+миграции D1 + `wrangler deploy` → секреты (`TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_WEBHOOK_SECRET` — новый при каждом запуске, `JWT_SECRET` — если
+нет) → поиск владельца через getUpdates → `setWebhook` → проверка `/health`.
+
+Флаги: `--dry-run` (только план), `--skip-deploy`, `--rotate` (перегенерировать
+JWT тоже). **Повторный запуск безопасен** — шаги идемпотентны; учти, что
+webhook-секрет обновляется при каждом запуске (нельзя прочитать обратно,
+поэтому регенерируется, а не переиспользуется).
+
+Типичные ошибки: «токен неверный» → скопируй заново из @BotFather;
+«database_id = PLACEHOLDER» → шаг `d1 create` выше; «не авторизован» →
+`npm run wrangler -- login`; «владелец не найден за 2 минуты» → напиши
+боту любое сообщение и перезапусти.
+
+После мастера: напиши боту `/start` → `/invite` → ссылка для второго
+аккаунта. Незнакомым бот не отвечает — это by design.
+
+<details>
+<summary>Ручной путь / fallback (без мастера)</summary>
+
+1. Узнай numeric Telegram ID: напиши боту `/id` (пока `OWNER_TELEGRAM_ID`
+   не задан, отвечает всем один раз) или @userinfobot (сторонний сервис).
+   `npm run wrangler -- secret put OWNER_TELEGRAM_ID`.
+2. Секреты: `npm run wrangler -- secret put TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET`.
+3. `TELEGRAM_BOT_USERNAME` (без @) в `apps/api/wrangler.toml` `[vars]`.
+4. `npm run wrangler -- d1 migrations apply DB --remote`
+5. `npm run deploy -w apps/api`
+6. `npm run webhook:set -- https://<воркер>.workers.dev/telegram/webhook`
+   (токен и секрет спросит скрытым вводом).
+   Проверка: `npm run webhook:info`; удаление: `npm run webhook:delete`.
+
+</details>
+
+**Диагностика:** `npm run webhook:info` (URL замаскирован, видны
+`last_error_message` и `pending_update_count`), `npm run wrangler -- tail`.
 
 ## Жёсткие правила (повтор из AGENTS.md)
 

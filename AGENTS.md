@@ -23,6 +23,8 @@
 - `npm run build:web` — сборка `apps/web` → `dist`.
 - `npm run build:bundle` — `dist/BUNDLE.gs` (опциональный артефакт v1, gitignored).
 - `npm run deploy [-- --dry-run]` — v1: check → `clasp push --force` → версия → деплой.
+- `npm run setup` — мастер подключения бота v2 (токен BotFather один раз,
+  дальше всё само; `--dry-run` печатает план).
 - `npm run dev -w apps/api` — wrangler dev (локальный воркер + D1).
 - `npx clasp status` — какие файлы уедут в Apps Script.
 - `npx clasp login` / `npx wrangler login` — только пользователь (браузер).

@@ -5,6 +5,16 @@
 ## [Unreleased]
 
 ### Добавлено
+- **`npm run setup` — интерактивный мастер подключения бота v2:** владельцу
+  нужен только токен @BotFather (скрытый ввод, поддерживает вставку);
+  остальное автоматизировано — getMe, username в `wrangler.toml`,
+  миграции D1 + `wrangler deploy`, секреты через stdin
+  (`TELEGRAM_WEBHOOK_SECRET` генерируется заново при каждом запуске,
+  `JWT_SECRET` — если отсутствует или `--rotate`), поиск владельца через
+  getUpdates с подтверждением, `setWebhook` + проверка `getWebhookInfo`
+  и `/health`. Флаги `--dry-run`, `--skip-deploy`, `--rotate`; идемпотентен;
+  ошибки — понятными русскими сообщениями. Ручной путь сохранён в docs
+  как fallback.
 - **Webhook бота v2** (шаг 3 миграции): `POST /telegram/webhook` с проверкой
   `X-Telegram-Bot-Api-Secret-Token` (fail-closed, константное сравнение через
   SHA-256), дедуп `update_id` (миграция `0002_processed_updates.sql`),
