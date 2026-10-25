@@ -9,7 +9,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "budget-companion"
-database_id = "PLACEHOLDER_SET_BY_OWNER"
+database_id = "d886f0a1-de15-4880-a8be-dfff4a0a1c34"
 migrations_dir = "migrations"
 
 # ── Cron-триггеры (шаг 4 миграции: напоминания, валютные алерты) ─
