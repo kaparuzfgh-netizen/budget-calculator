@@ -33,6 +33,7 @@ function tgCall_(method, payload) {
 }
 
 function sendMessage_(chatId, html, opts) {
+  if (Array.isArray(opts)) opts = { buttons: opts }; // допускаем голый массив кнопок
   opts = opts || {};
   const payload = {
     chat_id: chatId,

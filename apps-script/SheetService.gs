@@ -13,7 +13,8 @@ function ss_() {
 }
 
 function sheet_(code) {
-  const name = SHEETS[code];
+  // принимаем и ключ SHEETS ('FX_SETTINGS'), и готовое имя ('FX_and_Settings')
+  const name = SHEETS[code] || code;
   let sh = ss_().getSheetByName(name);
   if (!sh) sh = ss_().insertSheet(name);
   return sh;

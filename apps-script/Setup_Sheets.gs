@@ -16,10 +16,12 @@ function setup() {
   const built = runWithLock_(function () {
     return {
       fx: buildOnce_(SHEETS.FX_SETTINGS, buildFxSettings_),
+      // Debts СТРОГО раньше Commitments: реестр ссылается формулами на Debt_Engine,
+      // а формула на несуществующий лист застынет как #REF!
+      debts: buildOnce_(SHEETS.DEBTS, buildDebtEngine_),
       commitments: buildOnce_(SHEETS.COMMITMENTS, buildCommitments_),
       monthly: buildOnce_(SHEETS.MONTHLY, buildMonthlyCycles_),
       weekly: buildOnce_(SHEETS.WEEKLY, buildWeeklyExpenses_),
-      debts: buildOnce_(SHEETS.DEBTS, buildDebtEngine_),
       portfolio: buildOnce_(SHEETS.PORTFOLIO, buildPortfolio_),
       networth: buildOnce_(SHEETS.NETWORTH, buildNetWorth_),
       fxhistory: buildOnce_(SHEETS.FX_HISTORY, buildFxHistory_),
@@ -464,7 +466,7 @@ function setupWebhook(url) {
   const res = tgCall_('setWebhook', {
     url: full,
     secret_token: secret,
-    allowed_updates: JSON.stringify(['message', 'callback_query']),
+    allowed_updates: ['message', 'callback_query'],
     drop_pending_updates: true,
   });
   const me = tgCall_('getMe', {});
@@ -488,7 +490,8 @@ function backupNow() {
   const files = [];
   exportSheets.forEach(function (code) {
     const csv = sheetToCsv_(sheet_(code));
-    if (csv) files.push(Utilities.newBlob(csv, 'text/csv', SHEETS[code] + '.csv'));
+    const name = SHEETS[code] || code;
+    if (csv) files.push(Utilities.newBlob(csv, 'text/csv', name + '.csv'));
   });
   files.push(Utilities.newBlob(BACKUP_README_(), 'text/plain', 'RESTORE.txt'));
   const zipName = 'budget-backup-' + fmtISO_(new Date()) + '.zip';

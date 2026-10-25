@@ -145,8 +145,9 @@ const PROP = {
   CHAT_ID: 'TELEGRAM_CHAT_ID',
   GEMINI_KEY: 'GEMINI_API_KEY',
   GROQ_KEY: 'GROQ_API_KEY',
-  GROQ_MODEL: 'GROQ_MODEL', // опционально: переопределить модель Groq (напр. meta-llama/llama-4-maverick-17b-128e-instruct)
+  GROQ_MODEL: 'GROQ_MODEL',
   WEBHOOK_SECRET: 'WEBHOOK_SECRET',
+  TMA_READ_TOKEN: 'TMA_READ_TOKEN',
   SHEET_ID: 'SHEET_ID', // опционально, если скрипт не привязан к таблице
   GH_BACKUP_TOKEN: 'GH_BACKUP_TOKEN', // опционально: GitHub PAT (contents) для бэкап-копии
   GH_BACKUP_REPO: 'GH_BACKUP_REPO',   // опционально: 'user/private-repo'
@@ -170,7 +171,8 @@ function ss_() {
 }
 
 function sheet_(code) {
-  const name = SHEETS[code];
+  // принимаем и ключ SHEETS ('FX_SETTINGS'), и готовое имя ('FX_and_Settings')
+  const name = SHEETS[code] || code;
   let sh = ss_().getSheetByName(name);
   if (!sh) sh = ss_().insertSheet(name);
   return sh;
@@ -460,6 +462,7 @@ function tgCall_(method, payload) {
 }
 
 function sendMessage_(chatId, html, opts) {
+  if (Array.isArray(opts)) opts = { buttons: opts }; // допускаем голый массив кнопок
   opts = opts || {};
   const payload = {
     chat_id: chatId,
@@ -572,10 +575,12 @@ function setup() {
   const built = runWithLock_(function () {
     return {
       fx: buildOnce_(SHEETS.FX_SETTINGS, buildFxSettings_),
+      // Debts СТРОГО раньше Commitments: реестр ссылается формулами на Debt_Engine,
+      // а формула на несуществующий лист застынет как #REF!
+      debts: buildOnce_(SHEETS.DEBTS, buildDebtEngine_),
       commitments: buildOnce_(SHEETS.COMMITMENTS, buildCommitments_),
       monthly: buildOnce_(SHEETS.MONTHLY, buildMonthlyCycles_),
       weekly: buildOnce_(SHEETS.WEEKLY, buildWeeklyExpenses_),
-      debts: buildOnce_(SHEETS.DEBTS, buildDebtEngine_),
       portfolio: buildOnce_(SHEETS.PORTFOLIO, buildPortfolio_),
       networth: buildOnce_(SHEETS.NETWORTH, buildNetWorth_),
       fxhistory: buildOnce_(SHEETS.FX_HISTORY, buildFxHistory_),
@@ -1020,7 +1025,7 @@ function setupWebhook(url) {
   const res = tgCall_('setWebhook', {
     url: full,
     secret_token: secret,
-    allowed_updates: JSON.stringify(['message', 'callback_query']),
+    allowed_updates: ['message', 'callback_query'],
     drop_pending_updates: true,
   });
   const me = tgCall_('getMe', {});
@@ -1044,7 +1049,8 @@ function backupNow() {
   const files = [];
   exportSheets.forEach(function (code) {
     const csv = sheetToCsv_(sheet_(code));
-    if (csv) files.push(Utilities.newBlob(csv, 'text/csv', SHEETS[code] + '.csv'));
+    const name = SHEETS[code] || code;
+    if (csv) files.push(Utilities.newBlob(csv, 'text/csv', name + '.csv'));
   });
   files.push(Utilities.newBlob(BACKUP_README_(), 'text/plain', 'RESTORE.txt'));
   const zipName = 'budget-backup-' + fmtISO_(new Date()) + '.zip';
@@ -1989,7 +1995,7 @@ const CashflowEngine = {
       sh.getRange(r, 2).setFormula('=ISOWEEKNUM(A' + r + ')');
       sh.getRange(r, 4).setFormula('=IFERROR($C' + r + '/FX_and_Settings!$B$4*FX_and_Settings!$B$3,0)');
       sh.getRange(r, 5).setFormula('=IFERROR($C' + r + '/FX_and_Settings!$B$4,0)');
-      sh.getRange(r, 9).setFormula('=FX_and_Settings!$B$10-D' + r);
+      sh.getRange(r, 9).setFormula('=FX_and_Settings!$B$11-D' + r); // B11 = WEEKLY_BUDGET_RUB
       return self.weeklyStatus();
     });
   },
@@ -2443,7 +2449,7 @@ const DebtEngine = {
  * к ответам модели до записи (словарь CAT_ALIAS_* в FX_and_Settings).
  */
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash'; // актуальная бесплатная flash-модель AI Studio
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' +
   GEMINI_MODEL + ':generateContent';
 

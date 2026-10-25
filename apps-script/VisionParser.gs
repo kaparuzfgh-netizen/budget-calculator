@@ -15,7 +15,7 @@
  * к ответам модели до записи (словарь CAT_ALIAS_* в FX_and_Settings).
  */
 
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash'; // актуальная бесплатная flash-модель AI Studio
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' +
   GEMINI_MODEL + ':generateContent';
 

@@ -200,7 +200,7 @@ const CashflowEngine = {
       sh.getRange(r, 2).setFormula('=ISOWEEKNUM(A' + r + ')');
       sh.getRange(r, 4).setFormula('=IFERROR($C' + r + '/FX_and_Settings!$B$4*FX_and_Settings!$B$3,0)');
       sh.getRange(r, 5).setFormula('=IFERROR($C' + r + '/FX_and_Settings!$B$4,0)');
-      sh.getRange(r, 9).setFormula('=FX_and_Settings!$B$10-D' + r);
+      sh.getRange(r, 9).setFormula('=FX_and_Settings!$B$11-D' + r); // B11 = WEEKLY_BUDGET_RUB
       return self.weeklyStatus();
     });
   },
