@@ -16,3 +16,10 @@ node_modules/
 Thumbs.db
 dist/
 .deploy.json
+
+# ── v2: Cloudflare Workers / Pages (apps/*) ───────────────────
+.wrangler/
+.dev.vars
+*.tsbuildinfo
+apps/web/dist/
+dist-check/

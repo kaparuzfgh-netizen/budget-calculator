@@ -4,17 +4,23 @@
   "private": true,
   "description": "Personal Finance Companion — serverless-движок личных финансов (Telegram + Apps Script + Google Sheets)",
   "license": "UNLICENSED",
+  "workspaces": [
+    "apps/*"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "node scripts/smoke-test.js",
     "build:bundle": "node scripts/build-bundle.js",
-    "lint": "node scripts/build-bundle.js --quiet && eslint scripts dist/BUNDLE.gs",
+    "lint": "node scripts/build-bundle.js --quiet && eslint scripts dist/BUNDLE.gs apps",
     "lint:sh": "node scripts/lint-sh.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run lint && npm test",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:api": "npm run test -w apps/api",
+    "build:web": "npm run build -w apps/web",
+    "check": "npm run lint && npm test && npm run typecheck && npm run test:api && npm run build:web",
     "push": "clasp push",
     "deploy": "node scripts/deploy.js",
     "bootstrap": "node scripts/bootstrap.js",
@@ -25,6 +31,8 @@
     "@google/clasp": "^3.4.1",
     "eslint": "^10.0.0",
     "globals": "^17.0.0",
-    "prettier": "^3.9.10"
+    "prettier": "^3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.2"
   }
 }

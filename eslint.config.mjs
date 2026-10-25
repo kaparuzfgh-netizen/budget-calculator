@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import globals from 'globals';
+import tseslint from 'typescript-eslint';
 
 // Сервисы Apps Script, доступные в .gs как глобальные объекты рантайма.
 const gasGlobals = {
@@ -60,6 +61,18 @@ export default [
     rules: {
       ...js.configs.recommended.rules,
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
+    },
+  },
+  // v2: TypeScript в apps/* (Worker + Vite). Типы и no-undef проверяет tsc —
+  // здесь только ts-правила (recommended уже отключает конфликтующие).
+  ...tseslint.configs.recommended.map((c) => ({
+    ...c,
+    files: ['apps/**/*.ts', 'apps/**/*.tsx'],
+  })),
+  {
+    files: ['apps/**/*.ts', 'apps/**/*.tsx'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
 ];

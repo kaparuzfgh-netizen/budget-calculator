@@ -33,6 +33,15 @@ jobs:
       - name: Smoke-тесты бэкенда (офлайн)
         run: npm test
 
+      - name: Typecheck (apps/*, TypeScript strict)
+        run: npm run typecheck
+
+      - name: Тесты API (vitest в рантайме workerd + локальная D1)
+        run: npm run test:api
+
+      - name: Сборка Mini App v2
+        run: npm run build:web
+
       - name: Prettier (tooling и конфиги)
         run: npm run format:check
 

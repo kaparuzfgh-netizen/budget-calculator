@@ -2,19 +2,30 @@
 
 ## Проект
 
-Serverless-бот личных финансов: бэкенд — Google Apps Script (`apps-script/*.gs`,
-единый глобальный скоуп модулей!), БД — Google Sheets, UI — Telegram-бот
-+ Mini App (`mini-app/index.html`). Runtime — **не Node**: см. ограничения ниже.
+Идёт миграция v1→v2 ([ADR-0001](docs/adr/0001-platform-and-architecture.md)).
+До шага 9 живут **два стека одновременно**:
+
+- **v1 (legacy):** Google Apps Script (`apps-script/*.gs`, единый глобальный
+  скоуп модулей!), БД — Google Sheets, Mini App — `mini-app/index.html`.
+  Runtime — **не Node**.
+- **v2 (новый):** `apps/api` — Cloudflare Worker (TypeScript strict, Hono, D1
+  через `wrangler d1 migrations`); `apps/web` — Mini App на Vite + TypeScript.
+  Разработка v2 — `docs/v2-development.md`.
 
 ## Команды
 
-- `npm ci` — зависимости (clasp, eslint, prettier — всё dev).
-- `npm run check` — lint + офлайн smoke-тесты. **Обязательно перед коммитом.**
-- `npm test` — только тесты (работают без сети и Google).
-- `npm run build:bundle` — `dist/BUNDLE.gs` (опциональный артефакт, gitignored).
-- `npm run deploy [-- --dry-run]` — check → `clasp push --force` → версия → деплой.
+- `npm ci` — все зависимости (workspaces: legacy + apps/*).
+- `npm run check` — lint + smoke (v1) + typecheck + тесты API + сборка web.
+  **Обязательно перед коммитом.**
+- `npm test` — только офлайн-тесты v1 (моки Apps Script).
+- `npm run typecheck` — `tsc --noEmit` по `apps/*`.
+- `npm run test:api` — vitest в рантайме workerd с локальной D1.
+- `npm run build:web` — сборка `apps/web` → `dist`.
+- `npm run build:bundle` — `dist/BUNDLE.gs` (опциональный артефакт v1, gitignored).
+- `npm run deploy [-- --dry-run]` — v1: check → `clasp push --force` → версия → деплой.
+- `npm run dev -w apps/api` — wrangler dev (локальный воркер + D1).
 - `npx clasp status` — какие файлы уедут в Apps Script.
-- `npx clasp login` — только пользователь (интерактивный браузер).
+- `npx clasp login` / `npx wrangler login` — только пользователь (браузер).
 
 ## Жёсткие правила
 
@@ -36,7 +47,29 @@ Serverless-бот личных финансов: бэкенд — Google Apps Sc
    не «чинить молча», сначала согласовать с владельцем.
 6. Бизнес-логику `apps-script/*.gs` не менять без явной задачи; пользовательский
    текст — отдельным минимальным диффом.
-7. Деплой/вход в Google — только владелец (interactive). Агенту достаточно
-   `--dry-run` и `clasp status`. Секреты CI (`CLASPRC_JSON`, `CLASP_JSON`,
-   `DEPLOYMENT_ID`) настраивает владелец — SETUP.md, раздел CI/CD.
-8. `node_modules/` и `dist/` — не трекаются.
+7. Деплой/вход в Google и Cloudflare — только владелец (interactive). Агенту
+   достаточно `--dry-run` и `clasp status` / `wrangler deploy --dry-run`.
+   Секреты CI (`CLASPRC_JSON`, `CLASP_JSON`, `DEPLOYMENT_ID`,
+   `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) настраивает владелец —
+   SETUP.md и docs/v2-development.md.
+8. `node_modules/`, `dist/`, `.wrangler/`, `dist-check/` — не трекаются.
+
+## Правила v2 (apps/*)
+
+9. **Workers ≠ Node**: в коде `apps/api` — только Web API (fetch, Web Crypto,
+   `crypto`, `URL`, `URLSearchParams` здесь ЕСТЬ), никаких `process`, `fs`,
+   `Buffer`, `node:*`. Тесты идут в workerd — но статически такие ошибки линтер
+   не ловит, будь внимателен.
+10. **Изоляция tenant (S5):** доступ к БД — только через `scoped(env.DB, userId)`
+    в `apps/api/src/db/repo.ts`; каждый запрос обязан содержать
+    `WHERE user_id = ?` (или join через таблицу с user_id). Сырые
+    `db.prepare(...)` вне repo.ts запрещены; тест «A не видит B» обязателен.
+11. **Никаких токенов в URL** — только `Authorization: Bearer <JWT>` после
+    проверки `initData` (шаг 3). Секреты — `wrangler secret put`, локально —
+    `.dev.vars` (в .gitignore).
+12. Миграции — только новые файлы `migrations/NNNN_name.sql` (иммутабельны);
+    применение — `wrangler d1 migrations apply DB [--local|--remote]`.
+13. Zod-схемы на каждом входе (S12); домен в `src/domain/` — чистые функции
+    без I/O (числа-эталоны из `scripts/smoke-test.js`).
+14. Не «чинить молча» найденные баги v1 (например `URLSearchParams` в
+    `TmaApi.gs`) — v1 живёт до шага 9 как есть, находки — в отчёт владельцу.

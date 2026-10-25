@@ -7,6 +7,12 @@
 Google Apps Script как оркестратор, Gemini 2.0 Flash как vision-парсер чеков.
 **TCO: $0/мес.**
 
+> **v2 в разработке** — идёт миграция на Cloudflare Workers + D1 + Pages
+> (мультипользовательский режим, изоляция данных): см.
+> [ADR-0001](docs/adr/0001-platform-and-architecture.md) и
+> [docs/v2-development.md](docs/v2-development.md). Новый код — в `apps/*`;
+> документы ниже описывают v1.
+
 ## Возможности
 
 | # | Модуль | Что делает |

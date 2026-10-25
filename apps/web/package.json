@@ -1,0 +1,16 @@
+{
+  "name": "@budget-companion/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mini App v2 — Vite + TypeScript (placeholder до шага 5 миграции)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
+  }
+}

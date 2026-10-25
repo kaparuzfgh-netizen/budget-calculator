@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### Добавлено
+- **Каркас v2** (шаг 1 миграции, [ADR-0001](docs/adr/0001-platform-and-architecture.md)):
+  npm-workspaces `apps/*`; `apps/api` — Cloudflare Worker (TypeScript strict,
+  Hono, zod) с `GET /health`, биндингами D1 `DB` и секретами
+  (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET`), миграцией
+  `0001_init.sql` (users/invites/consents/audit_log) и репозиторным слоем
+  `scoped(db, userId)` с принудительным `WHERE user_id = ?`; `apps/web` —
+  placeholder на Vite + TypeScript. Тесты vitest исполняются в workerd
+  (@cloudflare/vitest-plugin) с локальной D1: /health, миграции, изоляция
+  tenant «A не видит B», проверка рантайма.
+- CI: в `ci.yml` добавлены typecheck, тесты API и сборка web;
+  `deploy-v2.yml` — деплой в Cloudflare (миграции D1 → wrangler deploy →
+  Pages) по секретам `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`,
+  до их настройки пропускается без ошибки.
+- `docs/v2-development.md` — локальный запуск, миграции, настройка деплоя.
+- Правила v2 в AGENTS.md (только Workers-совместимые API, изоляция через
+  репозиторий, без токенов в URL, секреты через `wrangler secret`).
+
 ### Изменено
 - Разработка и деплой — только через clasp: `npm run bootstrap` (первый раз)
   и `npm run deploy` (push → версия → развёртывание → URL). `apps-script/`

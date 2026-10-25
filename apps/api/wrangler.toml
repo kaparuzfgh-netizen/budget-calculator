@@ -1,0 +1,23 @@
+name = "budget-companion-api"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+workers_dev = true
+
+# ── D1 ─────────────────────────────────────────────────────────
+# Владелец создаёт БД один раз: `wrangler d1 create budget-companion`
+# и вписывает сюда выданный database_id (см. docs/v2-development.md).
+[[d1_databases]]
+binding = "DB"
+database_name = "budget-companion"
+database_id = "PLACEHOLDER_SET_BY_OWNER"
+migrations_dir = "migrations"
+
+# ── Cron-триггеры (шаг 4 миграции: напоминания, валютные алерты) ─
+# Раскомментировать, когда появится handler scheduled() в src/index.ts.
+# [triggers]
+# crons = ["0 20 * * 0"]   # воскресный опрос 20:00 — пример
+
+# ── Секреты (НЕ в этом файле!) ──────────────────────────────────
+# Задаются через `wrangler secret put <NAME>` (и в CI через
+# CLOUDFLARE_* секреты GitHub):
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, JWT_SECRET

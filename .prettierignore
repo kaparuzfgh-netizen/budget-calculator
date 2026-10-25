@@ -5,3 +5,4 @@ mini-app/
 dist/
 package-lock.json
 *.md
+dist-check/
