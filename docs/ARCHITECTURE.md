@@ -36,7 +36,7 @@ flowchart TD
     end
     REPO["db/repo.ts<br/>scoped(env.DB, user_id) — каждый запрос<br/>с WHERE user_id = ?"]
     FX["fx/service.ts → fx/frankfurter.ts<br/>getFxRates: кэш D1 (fx_rates, 6ч)"]
-    D1[("D1 «budget-companion»<br/>SQLite, 18 таблиц")]
+    D1[("D1 «budget-companion»<br/>SQLite, 19 таблиц")]
     SPA[("Workers Static Assets<br/>apps/web/dist — SPA-fallback")]
     CRON["scheduled()<br/>crons: 0 * * * * (каждый час UTC)"]
   end
@@ -132,7 +132,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 
 ## Слой данных (D1)
 
-18 таблиц, миграции `apps/api/migrations/0001–0011` — **иммутабельны**: изменения
+18 таблиц, миграции `apps/api/migrations/0001–0014` — **иммутабельны**: изменения
 только новыми файлами `NNNN_name.sql`; применение —
 `wrangler d1 migrations apply DB [--local|--remote]` (в `npm run release`
 уже встроено, при провале миграций деплой не идёт).
@@ -157,6 +157,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 | `loans` | 0008, 0011 | Личные займы: `direction` owe/owed, `due_on`, `closed_at` |
 | `loan_events` | 0008 | Журнал возвратов (`repay`), append-only |
 | `commitment_payments` | 0010 | Журнал оплат платежей (manual/auto — автопроводка cron'ом) |
+| `categories` | 0014 | Категории трат: пресеты (`preset_key`) + свои, `archived`, `sort`; `weekly_expenses.category_id`, `income_entries.received_on` |
 
 **Правила:**
 

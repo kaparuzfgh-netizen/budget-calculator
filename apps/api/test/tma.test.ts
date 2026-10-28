@@ -92,7 +92,7 @@ async function cleanDb() {
   for (const t of [
     'conversation_state',
     'income_entries',
-    'weekly_expenses',
+    'weekly_expenses', 'categories',
     'commitment_payments',
     'commitments',
     'profiles',

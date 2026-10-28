@@ -79,7 +79,7 @@ beforeEach(async () => {
     'debt_events',
     'debts',
     'income_entries',
-    'weekly_expenses',
+    'weekly_expenses', 'categories',
     'commitment_payments',
     'commitments',
     'profiles',

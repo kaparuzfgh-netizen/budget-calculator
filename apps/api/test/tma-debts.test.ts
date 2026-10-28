@@ -20,7 +20,7 @@ beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
   for (const t of [
     'debt_events', 'debts', 'loan_events', 'loans',
-    'conversation_state', 'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments',
+    'conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'commitments',
     'profiles', 'consents', 'reminder_log', 'rate_limit', 'audit_log',
     'processed_updates', 'invites', 'users',
   ]) await env.DB.prepare(`DELETE FROM ${t}`).run();

@@ -18,6 +18,9 @@ import { convert, round2, toMinor } from '../domain/money';
 const usd = (amount: number, ccy: string, pu: Record<string, number>) => convert(amount, ccy, 'USD', { perUsd: pu });
 import { resolveIncome } from '../bot/features';
 import { isValidTimezone, monthInTz, todayInTz, weekStartInTz } from '../bot/parse';
+import { matchCategory } from '../domain/categories';
+import { buildUserReport } from '../services/report';
+import type { Period } from '../domain/report';
 import {
   bad,
   CCY_RE,
@@ -43,11 +46,29 @@ import {
 
 export { LIMITS };
 
-const moneySchema = z.object({ amount: zAmount, currency: zCcy.optional(), note: zNote, client_id: zClientId });
+const moneySchema = z.object({
+  amount: zAmount,
+  currency: zCcy.optional(),
+  note: zNote,
+  client_id: zClientId,
+  category_id: z.number().int().positive().nullable().optional(),
+});
 const expensePatchSchema = z.object({
   amount: zAmount.optional(),
   currency: zCcy.optional(),
   note: z.string().trim().max(LIMITS.maxNote).nullable().optional(),
+  category_id: z.number().int().positive().nullable().optional(),
+});
+const categorySchema = z.object({
+  name: z.string().trim().min(1).max(32),
+  emoji: z.string().max(8).optional(),
+  client_id: zClientId,
+});
+const categoryPatchSchema = z.object({
+  name: z.string().trim().min(1).max(32).optional(),
+  emoji: z.string().max(8).optional(),
+  archived: z.boolean().optional(),
+  sort: z.number().int().optional(),
 });
 const commitSchema = z.object({
   name: z.string().trim().min(1).max(LIMITS.maxName),
@@ -197,7 +218,7 @@ export function registerTmaApi(
     if (!p) return c.json(notOnboarded().body, 403);
     const start = weekStartInTz(p.timezone, new Date());
     const rows = (await repo.listExpenses(start)).results.slice(-50).reverse();
-    return okJson(c, { week_start: start, expenses: rows.map((e) => ({ id: e.id, spent_on: e.spent_on, amount_minor: e.amount_minor, currency: e.currency, note: e.note })) });
+    return okJson(c, { week_start: start, expenses: rows.map((e) => ({ id: e.id, spent_on: e.spent_on, amount_minor: e.amount_minor, currency: e.currency, note: e.note, category_id: e.category_id })) });
   });
   app.post('/api/tma/expenses', tmaAuth, async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -212,13 +233,25 @@ export function registerTmaApi(
       const dup = await repo.findExpenseByKey(key);
       if (dup) return okJson(c, { id: dup.id, duplicate: true });
     }
+    let categoryId = b.category_id ?? null;
+    if (categoryId !== null && !(await repo.getCategory(categoryId)))
+      return c.json(bad('категория не найдена').body, 400);
+    let note = b.note ?? null;
+    if (categoryId === null) {
+      // автокатегория по заметке (совпавшее первое слово вырезается)
+      await repo.ensureCategories();
+      const m = matchCategory(note, (await repo.listCategories()).results);
+      categoryId = m.categoryId;
+      note = m.note;
+    }
     const r = await repo.addExpense({
       spent_on: todayInTz(p.timezone, new Date()),
       amount_minor: toMinor(b.amount),
       currency: b.currency ?? p.living_currency,
-      note: b.note ?? null,
+      note,
       source: 'manual',
       source_key: key,
+      category_id: categoryId,
     });
     if (r.meta.changes === 0) {
       const dup = b.client_id ? await repo.findExpenseByKey(key) : null;
@@ -234,10 +267,15 @@ export function registerTmaApi(
     if (!parsed.success) return c.json(bad('недопустимые поля').body, 400);
     const repo = repoOf(c);
     if (!(await repo.getExpense(id))) return c.json(notFound().body, 404);
-    const patch: { amount_minor?: number; currency?: string; note?: string | null } = {};
+    const patch: { amount_minor?: number; currency?: string; note?: string | null; category_id?: number | null } = {};
     if (parsed.data.amount !== undefined) patch.amount_minor = toMinor(parsed.data.amount);
     if (parsed.data.currency !== undefined) patch.currency = parsed.data.currency;
     if (parsed.data.note !== undefined) patch.note = parsed.data.note;
+    if (parsed.data.category_id !== undefined) {
+      if (parsed.data.category_id !== null && !(await repo.getCategory(parsed.data.category_id)))
+        return c.json(bad('категория не найдена').body, 400);
+      patch.category_id = parsed.data.category_id;
+    }
     await repo.patchExpense(id, patch);
     return okJson(c, { ok: true });
   });
@@ -248,6 +286,76 @@ export function registerTmaApi(
     const w = await repo.deleteExpense(id);
     if (w.meta.changes === 0) return c.json(notFound().body, 404);
     return okJson(c, { ok: true });
+  });
+
+  // ── categories ──
+  app.get('/api/tma/categories', tmaAuth, async (c) => {
+    const repo = repoOf(c);
+    await repo.ensureCategories();
+    const all = c.req.query('all') === '1';
+    const rows = (await repo.listCategories(all)).results;
+    return okJson(c, {
+      categories: rows.map((x) => ({ id: x.id, name: x.name, emoji: x.emoji, preset_key: x.preset_key, archived: !!x.archived, sort: x.sort })),
+    });
+  });
+  app.post('/api/tma/categories', tmaAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = categorySchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('нужны name (1..32) и допустимый emoji').body, 400);
+    const repo = repoOf(c);
+    const cnt = await repo.countCategories();
+    if ((cnt?.n ?? 0) >= 50) return c.json(bad('не больше 50 активных категорий').body, 400);
+    const r = await repo.addCategory({
+      name: parsed.data.name,
+      emoji: parsed.data.emoji ?? '',
+      sort: (cnt?.n ?? 0) + 100,
+    });
+    return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
+  });
+  app.patch('/api/tma/categories/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = categoryPatchSchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('недопустимые поля').body, 400);
+    const repo = repoOf(c);
+    if (!(await repo.getCategory(id))) return c.json(notFound().body, 404);
+    const patch: { name?: string; emoji?: string; archived?: number; sort?: number } = {};
+    if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+    if (parsed.data.emoji !== undefined) patch.emoji = parsed.data.emoji;
+    if (parsed.data.archived !== undefined) patch.archived = parsed.data.archived ? 1 : 0;
+    if (parsed.data.sort !== undefined) patch.sort = parsed.data.sort;
+    await repo.patchCategory(id, patch);
+    return okJson(c, { ok: true });
+  });
+  app.delete('/api/tma/categories/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const repo = repoOf(c);
+    if (!(await repo.getCategory(id))) return c.json(notFound().body, 404);
+    await repo.deleteCategory(id);
+    return okJson(c, { ok: true });
+  });
+
+  // ── report ──
+  app.get('/api/tma/report', tmaAuth, async (c) => {
+    const q = c.req.query();
+    const period = (q.period ?? 'month') as Period;
+    if (!['week', 'month', 'quarter', 'half', 'year'].includes(period))
+      return c.json(bad('period: week|month|quarter|half|year').body, 400);
+    const offset = q.offset === undefined || q.offset === '' ? 0 : Number(q.offset);
+    if (!Number.isInteger(offset) || offset > 0 || offset < -60)
+      return c.json(bad('offset: целое −60..0').body, 400);
+    try {
+      const repo = repoOf(c);
+      const rep = await buildUserReport(repo, fxGet(c, fx), period, offset, new Date());
+      if (!rep) return c.json(notOnboarded().body, 403);
+      return okJson(c, rep);
+    } catch (e) {
+      const f = fail(e);
+      if (f) return c.json(f.body, f.status as 400);
+      throw e;
+    }
   });
 
   // ── income ──
@@ -286,6 +394,7 @@ export function registerTmaApi(
       currency: b.currency ?? p.income_currency,
       note: b.note ?? null,
       source_key: key,
+      received_on: todayInTz(p.timezone, new Date()),
     });
     if (r.meta.changes === 0) {
       const dup = b.client_id ? await repo.findIncomeByKey(key) : null;

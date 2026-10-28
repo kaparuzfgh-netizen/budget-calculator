@@ -52,7 +52,9 @@ const updateSchema = z.object({
       id: z.string(),
       data: z.string().max(64).optional(),
       from: z.object({ id: z.number(), first_name: z.string().optional(), username: z.string().optional() }).optional(),
-      message: z.object({ chat: z.object({ id: z.number(), type: z.string() }) }).optional(),
+      message: z
+        .object({ message_id: z.number().optional(), chat: z.object({ id: z.number(), type: z.string() }) })
+        .optional(),
     })
     .optional(),
 });
@@ -251,6 +253,7 @@ export function createRouter(deps: RouterDeps = {}) {
             firstName: cb.from.first_name ?? null,
             data: cb.data ?? '',
             updateId: update.update_id,
+            messageId: cb.message.message_id, // опционально в схеме; без него — fallback на sendMessage
           },
           accessDeps,
         );

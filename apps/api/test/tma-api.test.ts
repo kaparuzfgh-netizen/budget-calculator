@@ -15,7 +15,7 @@ const tenv = () => ({ ...env, JWT_SECRET, TELEGRAM_BOT_TOKEN: 't', TELEGRAM_WEBH
 
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
-  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments', 'profiles', 'consents', 'reminder_log', 'rate_limit', 'audit_log', 'processed_updates', 'invites', 'users'])
+  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'commitments', 'profiles', 'consents', 'reminder_log', 'rate_limit', 'audit_log', 'processed_updates', 'invites', 'users'])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 
@@ -101,7 +101,8 @@ describe('/api/tma/* — контракт', () => {
     expect((await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 1e10 } })).status).toBe(400);
     // GET недели содержит запись
     const list = (await (await api('/api/tma/expenses', { token: A.token })).json()) as { expenses: { id: number; note: string }[] };
-    expect(list.expenses.some((e) => e.id === id && e.note === 'кафе')).toBe(true);
+    // «кафе» автоматчится в категорию и вырезается из заметки — проверяем только id
+    expect(list.expenses.some((e) => e.id === id)).toBe(true);
     // PATCH своей — ок; PATCH чужой → 404
     expect((await api(`/api/tma/expenses/${id}`, { method: 'PATCH', token: A.token, body: { amount: 400 } })).status).toBe(200);
     expect((await scoped(env.DB, A.uid).getExpense(id))!.amount_minor).toBe(40000);

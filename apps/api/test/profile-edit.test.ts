@@ -80,7 +80,7 @@ beforeEach(async () => {
   for (const t of [
     'conversation_state',
     'income_entries',
-    'weekly_expenses',
+    'weekly_expenses', 'categories',
     'commitment_payments',
     'commitments',
     'profiles',
@@ -393,7 +393,7 @@ describe('траты: отмена / правка / удаление (ex:*)', ()
     const uid = await setupUser(OWNER + 60);
     await msg(OWNER + 60, '➕ Трата');
     await msg(OWNER + 60, '344 кафе');
-    expect(last()).toContain('Записал: 344');
+    expect(last()).toContain('Записал 344');
     const undo = cbsOf().find((d) => d.startsWith('ex:undo:'))!;
     const eid = Number(undo.slice(8));
     expect(cbsOf()).toContain(`ex:e:${eid}`);
@@ -437,7 +437,7 @@ describe('траты: отмена / правка / удаление (ex:*)', ()
         .flat()
         .map((b) => b.text)
         .join(' '),
-    ).toContain('обед');
+    ).toContain('🍽'); // «обед» автоматчился в категорию 🍽 и вырезан из заметки
     await cb(OWNER + 62, `ex:v:${eid}`);
     expect(last()).toContain('100');
     await cb(OWNER + 62, `ex:del:${eid}`);

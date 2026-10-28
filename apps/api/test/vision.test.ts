@@ -251,7 +251,7 @@ beforeEach(async () => {
   });
   for (const t of [
     'conversation_state',
-    'weekly_expenses',
+    'weekly_expenses', 'categories',
     'debt_events',
     'debts',
     'profiles',

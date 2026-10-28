@@ -73,7 +73,7 @@ const cb = (tgId: number, data: string, id?: number) =>
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
   sent.length = 0;
-  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments', 'profiles', 'consents', 'fx_rates', 'processed_updates', 'audit_log', 'invites', 'reminder_log', 'users']) {
+  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'commitments', 'profiles', 'consents', 'fx_rates', 'processed_updates', 'audit_log', 'invites', 'reminder_log', 'users']) {
     await env.DB.prepare(`DELETE FROM ${t}`).run();
   }
 });
@@ -254,15 +254,17 @@ describe('редьюсер: step-aware callback', () => {
   });
 });
 
-describe('голая сумма — быстрый ввод траты убран', () => {
-  it('«344» и «500 kgs» вне промпта → «Не знаю такую команду», трата НЕ пишется', async () => {
+describe('голая сумма — быстрый ввод траты', () => {
+  it('«344» и «500 kgs» вне промпта → трата пишется; «привет» — «Не знаю»', async () => {
     const uid = await makeOnboarded(OWNER + 30);
     await msg(OWNER + 30, '344');
+    expect(sent.at(-1)!.text).toContain('Записал');
+    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(1);
+    await msg(OWNER + 30, '500 rub');
+    expect(sent.at(-1)!.text).toContain('Записал');
+    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(2);
+    await msg(OWNER + 30, 'привет');
     expect(sent.at(-1)!.text).toBe(TEXT.unknownCommand);
-    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(0);
-    await msg(OWNER + 30, '500 kgs');
-    expect(sent.at(-1)!.text).toBe(TEXT.unknownCommand);
-    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(0);
   });
 
   it('«344» в spent_ask → трата; «344» в income_ask → доход (промпты не тронуты)', async () => {

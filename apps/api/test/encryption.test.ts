@@ -15,7 +15,7 @@ beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 
 beforeEach(async () => {
   for (const t of [
-    'conversation_state', 'income_entries', 'weekly_expenses', 'loan_events', 'loans',
+    'conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'loan_events', 'loans',
     'exchanges', 'debt_events', 'debts', 'commitment_payments', 'commitments',
     'profiles', 'consents', 'reminder_log', 'audit_log', 'users',
   ])

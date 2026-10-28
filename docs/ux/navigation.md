@@ -29,6 +29,7 @@ flowchart TD
 
   HOME --> PLAN["📊 План (результат)"]
   HOME --> WEEK["📅 Неделя (результат)"]
+  HOME --> REPORT["📈 Отчёт: периоды (результат)"]
   HOME --> SPENT_ASK["➕ Трата: ввод суммы"]
   SPENT_ASK -. сохранено .-> SPENT_DONE["Трата записана + статус недели (результат)"]
   SPENT_ASK -- Отмена --> HOME
@@ -239,6 +240,7 @@ flowchart TD
 | HOME | root | 0 | — | пункты inline (`/menu`, `[🏠 Меню]`); Mini App — menu-button у поля ввода (`setChatMenuButton`, setup.mjs), отдельной кнопки нет |
 | PLAN | result | 1 | HOME | `[🏠 Меню]` |
 | WEEK | result | 1 | HOME | `[🏠 Меню]` |
+| REPORT | result | 1 | HOME | `[🏠 Меню]`; периоды/«Раньше-Позже» — `rp:*` правкой сообщения; `/report` |
 | SPENT_ASK | prompt | 1 | HOME | `[✖ Отмена]` → HOME |
 | SPENT_DONE | result | 1 | HOME | `[🏠 Меню]` |
 | INCOME_HUB | menu | 1 | HOME | `[🏠 Меню]` (если открыт из профиля: `[← Назад] [🏠 Меню]`, назад → PF_INCOME) |

@@ -65,6 +65,8 @@ export interface SendMessageOpts {
 
 export interface TelegramClient {
   sendMessage(chatId: number | string, text: string, opts?: SendMessageOpts): Promise<void>;
+  /** Правка своего сообщения (inline-кнопки). Опционально — в тест-моках может отсутствовать. */
+  editMessageText?(chatId: number | string, messageId: number, text: string, opts?: SendMessageOpts): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
   /** Документ (multipart, Workers-compatible FormData+Blob). */
   sendDocument(chatId: number | string, filename: string, content: string | Uint8Array, mime?: string): Promise<void>;
@@ -143,6 +145,29 @@ export function createTelegramClient(opts: { token: string; fetchImpl?: typeof f
           body.parse_mode
         ) {
           await call('sendMessage', { ...body, text: stripTags(text), parse_mode: undefined });
+          return;
+        }
+        throw e;
+      }
+    },
+    async editMessageText(chatId, messageId, text, o) {
+      const body = {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: o?.parseMode ?? 'HTML',
+        reply_markup: o?.replyMarkup,
+      };
+      try {
+        await call('editMessageText', body);
+      } catch (e) {
+        if (
+          e instanceof TelegramError &&
+          e.status === 400 &&
+          /parse entities/i.test(e.description) &&
+          body.parse_mode
+        ) {
+          await call('editMessageText', { ...body, text: stripTags(text), parse_mode: undefined });
           return;
         }
         throw e;

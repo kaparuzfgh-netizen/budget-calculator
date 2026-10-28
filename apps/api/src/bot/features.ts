@@ -4,9 +4,12 @@
  */
 import { computeWaterfall } from '../domain/cashflow';
 import { weeklyStatus } from '../domain/budget';
+import { matchCategory } from '../domain/categories';
 import { convert, round2 } from '../domain/money';
+import type { Period } from '../domain/report';
+import { buildUserReport } from '../services/report';
 import type { FxResult } from '../fx/service';
-import type { CommitmentRow, IncomeEntryRow } from '../db/repo';
+import type { CategoryRow, CommitmentRow, ExpenseRow, IncomeEntryRow } from '../db/repo';
 import type { ReplyMarkup, TelegramClient } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
 import { fmtMoney, fmtPct } from './format';
@@ -197,34 +200,199 @@ export async function runSpent(
     );
     return;
   }
+  await repo.ensureCategories();
+  const cats = (await repo.listCategories()).results;
+  const m = matchCategory(a.note ?? null, cats);
   const r = await repo.addExpense({
     spent_on: todayIso,
     amount_minor: Math.round(a.amount * 100),
     currency: ccy,
-    note: a.note ?? null,
+    note: m.note,
     source: 'manual',
     source_key: sourceKey,
+    category_id: m.categoryId,
   });
   if (r.meta.changes === 0) return; // дубликат update_id — молча
-  const exId = Number(r.meta.last_row_id);
-  const spentMk: ReplyMarkup = {
+  const ex = (await repo.getExpense(Number(r.meta.last_row_id)))!;
+  const view = await spentView(repo, p, fx, ex, cats, todayIso);
+  await tg.sendMessage(chatId, view.text, { replyMarkup: view.mk });
+}
+
+/** Текст и клавиатура записанной траты: компактная строка + статус недели. */
+async function spentView(
+  repo: Repo,
+  p: { living_currency: string; living_cap_minor: number; weekly_budget_minor: number },
+  fx: FxLike,
+  ex: ExpenseRow,
+  cats: CategoryRow[],
+  todayIso: string,
+  forcePicker = false,
+): Promise<{ text: string; mk: ReplyMarkup }> {
+  const weekStart = weekStartOfIso(todayIso);
+  const expenses = (await repo.listExpenses(weekStart)).results;
+  const fxr = await fxFor(fx, [p.living_currency, ...expenses.map((e) => e.currency)]);
+  const weekSpent = expenses.reduce(
+    (s, e) => s + convert(e.amount_minor / 100, e.currency, p.living_currency, { perUsd: fxr.perUsd }),
+    0,
+  );
+  const budget = p.weekly_budget_minor / 100;
+  const c = p.living_currency;
+  const cat = cats.find((x) => x.id === ex.category_id) ?? null;
+  const head =
+    `✅ Записал ${fmtMoney(round2(ex.amount_minor / 100), ex.currency)}` +
+    (cat ? ` · ${cat.emoji} ${escapeHtml(cat.name)}` : '') +
+    (ex.note ? ` — ${escapeHtml(ex.note)}` : '');
+  const week =
+    `Неделя: ${fmtMoney(round2(weekSpent), c)} из ${fmtMoney(round2(budget), c)} · ` +
+    (weekSpent > budget ? `🔴 перерасход ${fmtMoney(round2(weekSpent - budget), c)}` : `остаток ${fmtMoney(round2(budget - weekSpent), c)}`);
+  const undoEdit = [
+    { text: '↩ Отменить', callback_data: `ex:undo:${ex.id}` },
+    { text: '✏️ Изменить', callback_data: `ex:e:${ex.id}` },
+  ];
+  if (cat && !forcePicker) {
+    return {
+      text: `${head}\n${week}`,
+      mk: { inline_keyboard: [[{ text: '🏷 Категория', callback_data: `ex:cg:${ex.id}` }], undoEdit, HOME_ROW] },
+    };
+  }
+  // пикер: до 9 активных категорий, по 3 в ряд
+  const pick = cats.filter((x) => !x.archived).slice(0, 9);
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < pick.length; i += 3)
+    rows.push(
+      pick.slice(i, i + 3).map((x) => ({
+        text: `${x.emoji} ${x.name.length > 10 ? `${x.name.slice(0, 9)}…` : x.name}`,
+        callback_data: `ex:sc:${ex.id}:${x.id}`,
+      })),
+    );
+  return {
+    text: `${head}\n${week}\n\nВыберите категорию:`,
+    mk: { inline_keyboard: [...rows, undoEdit, HOME_ROW] },
+  };
+}
+
+/** Колбэки категории траты: ex:cg:<id> — показать пикер; ex:sc:<id>:<cat> — назначить. */
+export async function handleExCategory(
+  data: string,
+  chatId: number,
+  messageId: number | undefined,
+  repo: Repo,
+  fx: FxLike,
+  tg: TelegramClient,
+  todayIso: string,
+): Promise<void> {
+  const p = await repo.getProfile();
+  if (!p?.onboarded_at) return;
+  const send = async (text: string, mk: ReplyMarkup) => {
+    if (messageId && tg.editMessageText) {
+      try {
+        await tg.editMessageText(chatId, messageId, text, { replyMarkup: mk });
+        return;
+      } catch {
+        /* упало редактирование — шлём новым сообщением */
+      }
+    }
+    await tg.sendMessage(chatId, text, { replyMarkup: mk });
+  };
+  const cg = /^ex:cg:(\d+)$/.exec(data);
+  if (cg) {
+    const ex = await repo.getExpense(Number(cg[1]));
+    if (!ex) return; // чужая/удалённая — молча
+    const cats = (await repo.listCategories()).results;
+    const view = await spentView(repo, p, fx, ex, cats, todayIso, true);
+    await send(view.text, view.mk);
+    return;
+  }
+  const sc = /^ex:sc:(\d+):(\d+)$/.exec(data);
+  if (sc) {
+    const ex = await repo.getExpense(Number(sc[1]));
+    const cat = await repo.getCategory(Number(sc[2]));
+    if (!ex || !cat) return; // чужие id — молча (R7)
+    await repo.patchExpense(ex.id, { category_id: cat.id });
+    const ex2 = (await repo.getExpense(ex.id))!;
+    const cats = (await repo.listCategories()).results;
+    const view = await spentView(repo, p, fx, ex2, cats, todayIso);
+    await send(view.text, view.mk);
+    return;
+  }
+}
+
+const RP_PERIODS: { p: Period; label: string }[] = [
+  { p: 'week', label: 'Неделя' },
+  { p: 'month', label: 'Месяц' },
+  { p: 'quarter', label: 'Квартал' },
+  { p: 'half', label: 'Полгода' },
+  { p: 'year', label: 'Год' },
+];
+
+function reportMarkup(period: Period, offset: number): ReplyMarkup {
+  const btn = (p: Period, label: string) => ({
+    text: `${p === period ? '• ' : ''}${label}`,
+    callback_data: `rp:${p}:${offset}`,
+  });
+  const nav = [{ text: '‹ Раньше', callback_data: `rp:${period}:${offset - 1}` }];
+  if (offset < 0) nav.push({ text: 'Позже ›', callback_data: `rp:${period}:${offset + 1}` });
+  return {
     inline_keyboard: [
-      [
-        { text: '↩ Отменить', callback_data: `ex:undo:${exId}` },
-        { text: '✏️ Изменить', callback_data: `ex:e:${exId}` },
-      ],
+      RP_PERIODS.slice(0, 3).map((x) => btn(x.p, x.label)),
+      RP_PERIODS.slice(3).map((x) => btn(x.p, x.label)),
+      nav,
       HOME_ROW,
     ],
   };
-  await runWeek(
-    chatId,
-    tg,
-    repo,
-    fx,
-    todayIso,
-    `Записал: ${fmtMoney(a.amount, ccy)}${a.note ? ` (${escapeHtml(a.note)})` : ''}\n\n`,
-    spentMk,
-  );
+}
+
+function renderReport(rep: NonNullable<Awaited<ReturnType<typeof buildUserReport>>>): string {
+  const c = rep.currency;
+  const m = (minor: number) => fmtMoney(round2(minor / 100), c);
+  const pctDelta =
+    rep.prev.spent_total > 0 ? Math.round((rep.spent.total / rep.prev.spent_total - 1) * 100) : null;
+  const lines = [
+    `📈 <b>${escapeHtml(rep.label)}</b>`,
+    `Получено: ${m(rep.received.total)}`,
+    `Потрачено: ${m(rep.spent.total)}`,
+    `  • Жизнь: ${m(rep.spent.living)}${rep.living_limit.cap > 0 ? ` (${Math.round(rep.living_limit.used_pct * 100)}% лимита)` : ''}`,
+    `  • Платежи: ${m(rep.spent.commitments)}`,
+    `  • Кредиты: ${m(rep.spent.credits)}`,
+    `  • Долги людям: ${m(rep.spent.loans_repaid)}`,
+    `Итог: ${rep.net >= 0 ? '+' : '−'}${m(Math.abs(rep.net))}` +
+      (pctDelta !== null ? ` (${pctDelta >= 0 ? '▲' : '▼'} ${Math.abs(pctDelta)}% расходов к ${escapeHtml(rep.prev.label)})` : ''),
+  ];
+  if (rep.categories.length) {
+    lines.push('', 'По категориям:');
+    for (const cat of rep.categories.slice(0, 10))
+      lines.push(`${cat.emoji} ${escapeHtml(cat.name)} — ${m(cat.amount)} · ${Math.round(cat.share * 100)}%`);
+  }
+  lines.push('', `<i>Курсы на ${escapeHtml(rep.fx_as_of || '—')}</i>`);
+  return lines.join('\n');
+}
+
+/** /report и rp:<period>:<offset> (правка сообщения вместо нового). */
+export async function runReport(
+  chatId: number,
+  tg: TelegramClient,
+  repo: Repo,
+  fx: FxLike,
+  period: Period,
+  offset: number,
+  messageId?: number,
+): Promise<void> {
+  const rep = await buildUserReport(repo, (ccys) => fx.get(ccys), period, offset, new Date());
+  if (!rep) {
+    await tg.sendMessage(chatId, 'Сначала настройка — /start');
+    return;
+  }
+  const text = renderReport(rep);
+  const mk = reportMarkup(period, offset);
+  if (messageId && tg.editMessageText) {
+    try {
+      await tg.editMessageText(chatId, messageId, text, { replyMarkup: mk });
+      return;
+    } catch {
+      /* fallback — новое сообщение */
+    }
+  }
+  await tg.sendMessage(chatId, text, { replyMarkup: mk });
 }
 
 export async function runWeek(
@@ -325,6 +493,7 @@ export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo)
     ).results,
     incomeEntries: (await repo.listIncomeEntries(month)).results,
     expenses: (await repo.listExpenses(weekStartInTz(p.timezone, now))).results,
+    categories: (await repo.listCategories(true)).results,
     month,
     today: todayInTz(p.timezone, now),
   };

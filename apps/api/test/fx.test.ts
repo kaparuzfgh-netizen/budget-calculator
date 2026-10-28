@@ -105,7 +105,7 @@ beforeEach(async () => {
   sent.length = 0;
   for (const t of [
     'conversation_state', 'debt_events', 'debts', 'loan_events', 'loans', 'exchanges',
-    'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments', 'profiles',
+    'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'commitments', 'profiles',
     'consents', 'fx_rates', 'reminder_log', 'processed_updates', 'audit_log', 'invites', 'users',
   ]) await env.DB.prepare(`DELETE FROM ${t}`).run();
 });

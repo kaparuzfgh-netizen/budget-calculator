@@ -97,7 +97,7 @@ beforeEach(async () => {
     'loans',
     'exchanges',
     'income_entries',
-    'weekly_expenses',
+    'weekly_expenses', 'categories',
     'commitment_payments',
     'commitments',
     'profiles',
@@ -133,7 +133,7 @@ async function onboarded(tgId: number, withCommit = true) {
 }
 /** whitelist: зарегистрированные пространства callback_data */
 const CB_OK =
-  /^(nv:(home|back:[A-Z_]+|go:[A-Z_]+)|pf:[a-z0-9:/_-]*|in:del:\d+$|in:del:(yes|no)$|inc:(add|list)$|ex:[a-z]+:\d+$|ex:(list|dyes)$|dbt:[a-z0-9:]+|ln:[a-z0-9:]+|fxa:[a-z0-9:]+|vs:[a-z0-9:]+|ob:[a-z:]+)/i;
+  /^(nv:(home|back:[A-Z_]+|go:[A-Z_]+)|pf:[a-z0-9:/_-]*|in:del:\d+$|in:del:(yes|no)$|inc:(add|list)$|ex:[a-z]+:\d+(:\d+)?$|ex:(list|dyes)$|rp:(week|month|quarter|half|year):-?\d+$|dbt:[a-z0-9:]+|ln:[a-z0-9:]+|fxa:[a-z0-9:]+|vs:[a-z0-9:]+|ob:[a-z:]+)/i;
 function assertNavRow(expected: string[], actualLast: string[], screen: string) {
   expect(actualLast, `${screen}: нав-ряд ${JSON.stringify(actualLast)}`).toEqual(expected);
 }

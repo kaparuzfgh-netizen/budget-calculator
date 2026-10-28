@@ -198,6 +198,13 @@
       "nav": "confirm"
     },
     {
+      "id": "REPORT",
+      "kind": "result",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
       "id": "EXPENSES_LIST",
       "kind": "menu",
       "depth": 3,
@@ -586,6 +593,7 @@
   "edges": [
     ["HOME", "PLAN"],
     ["HOME", "WEEK"],
+    ["HOME", "REPORT"],
     ["HOME", "SPENT_ASK"],
     ["SPENT_ASK", "SPENT_DONE"],
     ["SPENT_ASK", "HOME"],

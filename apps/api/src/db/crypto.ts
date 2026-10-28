@@ -119,6 +119,7 @@ export const FIELDS: FieldsSpec = {
   loan_events: { amount_minor: 'num' },
   exchanges: { amount_from_minor: 'num', amount_to_minor: 'num', rate: 'num', note: 'str' },
   conversation_state: { data: 'str' },
+  categories: { name: 'str', emoji: 'str' },
 };
 
 /** Дешифровать строку по FIELDS-спеку (null → null). */

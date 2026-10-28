@@ -85,7 +85,7 @@ beforeEach(async () => {
   // порядок важен: дочерние таблицы (FK → users) — до users
   for (const t of [
     'conversation_state',
-    'weekly_expenses',
+    'weekly_expenses', 'categories',
     'commitment_payments',
     'commitments',
     'profiles',

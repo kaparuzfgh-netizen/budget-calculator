@@ -61,7 +61,7 @@ async function cleanDb() {
   // дочерние таблицы (FK → users) — до users; БД общая на все тест-файлы
   for (const t of [
     'conversation_state',
-    'weekly_expenses',
+    'weekly_expenses', 'categories',
     'commitment_payments',
     'commitments',
     'profiles',

@@ -7,7 +7,7 @@
  */
 import type { ReplyMarkup } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
-import type { CommitmentPaymentRow, CommitmentRow, ExpenseRow, IncomeEntryRow, ProfileRow } from '../db/repo';
+import type { CategoryRow, CommitmentPaymentRow, CommitmentRow, ExpenseRow, IncomeEntryRow, ProfileRow } from '../db/repo';
 import { fmtMoney } from './format';
 import { isValidTimezone, parseAmount, parseCommitmentLine, parseCurrencyCode, type ParsedCommitment } from './parse';
 import { parseAmountDate } from './debts';
@@ -34,6 +34,7 @@ export interface PfCtx {
   commitPayments: CommitmentPaymentRow[]; // журнал оплат платежей (окно ~год)
   incomeEntries: IncomeEntryRow[];
   expenses: ExpenseRow[]; // траты текущей локальной недели
+  categories: CategoryRow[]; // категории (вкл. архивные — для подписей)
   month: string;
   today: string; // 'YYYY-MM-DD' локально
   incomeTotal?: string | undefined; // итог месяца в валюте дохода (из FX, может быть '—')
@@ -466,12 +467,15 @@ export function renderPf(
     case 'EXPENSES_LIST': {
       const rows = ctx.expenses
         .slice(0, 20)
-        .map((e) => [
-          btn(
-            `${e.spent_on.slice(5)} · ${fmtMoney(e.amount_minor / 100, e.currency)}${e.note ? ` ${escapeHtml(e.note)}` : ''}`,
-            `ex:v:${e.id}`,
-          ),
-        ]);
+        .map((e) => {
+          const ce = ctx.categories.find((c) => c.id === e.category_id)?.emoji ?? '';
+          return [
+            btn(
+              `${e.spent_on.slice(5)} · ${fmtMoney(e.amount_minor / 100, e.currency)}${ce ? ` ${ce}` : ''}${e.note ? ` ${escapeHtml(e.note)}` : ''}`,
+              `ex:v:${e.id}`,
+            ),
+          ];
+        });
       return {
         step: 'expenses_list',
         text: ctx.expenses.length ? `📋 <b>Траты недели</b> — ${ctx.expenses.length}` : 'Трат за неделю нет',
@@ -486,12 +490,23 @@ export function renderPf(
           text: 'Запись не найдена',
           markup: kb([], 'EXPENSES_LIST'),
         };
+      const ecat = ctx.categories.find((c) => c.id === e.category_id);
       return {
         step: 'expense',
         text:
           `💸 <b>Трата</b>\n📅 ${e.spent_on}\n` +
-          `${fmtMoney(e.amount_minor / 100, e.currency)}${e.note ? ` · ${escapeHtml(e.note)}` : ''}`,
-        markup: kb([[btn('✏️ Изменить', `ex:e:${e.id}`), btn('🗑 Удалить', `ex:del:${e.id}`)]], 'EXPENSE'),
+          `${fmtMoney(e.amount_minor / 100, e.currency)}${e.note ? ` · ${escapeHtml(e.note)}` : ''}\n` +
+          `🏷 ${ecat ? `${ecat.emoji} ${escapeHtml(ecat.name)}` : 'Без категории'}`,
+        markup: kb(
+          [
+            [
+              btn('✏️ Изменить', `ex:e:${e.id}`),
+              btn('🏷 Категория', `ex:cg:${e.id}`),
+              btn('🗑 Удалить', `ex:del:${e.id}`),
+            ],
+          ],
+          'EXPENSE',
+        ),
       };
     }
     case 'EXPENSE_DEL': {

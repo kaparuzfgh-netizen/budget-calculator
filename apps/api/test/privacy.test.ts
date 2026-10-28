@@ -35,7 +35,7 @@ const cb = (id: number, data: string) =>
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
   sent.length = 0; docs.length = 0;
-  for (const t of ['conversation_state', 'loan_events', 'loans', 'debt_events', 'debts', 'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments', 'profiles', 'consents', 'reminder_log', 'audit_log', 'processed_updates', 'invites', 'exchanges', 'users'])
+  for (const t of ['conversation_state', 'loan_events', 'loans', 'debt_events', 'debts', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'commitments', 'profiles', 'consents', 'reminder_log', 'audit_log', 'processed_updates', 'invites', 'exchanges', 'users'])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 async function onboarded(tgId: number) {
@@ -50,7 +50,7 @@ async function onboarded(tgId: number) {
 }
 /** Таблицы с колонкой user_id (PRAGMA/sqlite_master в workerd D1 запрещены — список статичен по миграциям). */
 function userIdTables(): string[] {
-  return ['consents', 'audit_log', 'profiles', 'commitments', 'commitment_payments', 'weekly_expenses', 'income_entries', 'debts', 'debt_events', 'loans', 'loan_events', 'exchanges', 'conversation_state', 'reminder_log'];
+  return ['consents', 'audit_log', 'profiles', 'commitments', 'commitment_payments', 'weekly_expenses', 'categories', 'income_entries', 'debts', 'debt_events', 'loans', 'loan_events', 'exchanges', 'conversation_state', 'reminder_log'];
 }
 
 describe('/export', () => {
@@ -97,7 +97,7 @@ describe('/export', () => {
       exchanges: { from_ccy: string; note: string; user_id: number }[];
       schema_version: number;
     };
-    expect(j.schema_version).toBe(4);
+    expect(j.schema_version).toBe(5);
     expect(j.profile.user_id).toBe(uidA);
     expect(j.commitments.map((c) => c.name)).toEqual(['A-тайное']);
     expect(j.commitment_payments).toHaveLength(1);

@@ -14,7 +14,8 @@ import { advance, onCcyResult, startOnboarding, type ObEffect, type ObInput, typ
 import { convert, round2 } from '../domain/money';
 import { fmtMoney } from '../bot/format';
 import { monthInTz, parseAmount, todayInTz, weekStartInTz } from '../bot/parse';
-import { runIncome, runPlan, runProfile, runSpent, runWeek } from '../bot/features';
+import { handleExCategory, runIncome, runPlan, runProfile, runReport, runSpent, runWeek } from '../bot/features';
+import type { Period } from '../domain/report';
 import {
   advancePf,
   cancelTarget,
@@ -105,6 +106,7 @@ const MENU: Record<string, string> = {
   '🏦 Кредиты': '/credits',
   '🤝 Долги': '/loans',
   '💱 Курсы': '/fx',
+  '📈 Отчёт': '/report',
   '⚙️ Профиль': '/profile',
 };
 /** pf-шаги, ждущие текстового ввода (остальные pf-шаги — навигация). */
@@ -342,6 +344,7 @@ async function pfCtx(
     commitPayments: (await repo.listCommitmentPaymentsSince(since)).results,
     incomeEntries,
     expenses,
+    categories: (await repo.listCategories(true)).results,
     month,
     today: todayInTz(p.timezone, now),
     incomeTotal,
@@ -984,6 +987,10 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     await runWeek(msg.chatId, tg, repo, fx, today);
     return;
   }
+  if (CMD('report').test(cmd)) {
+    await runReport(msg.chatId, tg, repo, fx, 'month', 0);
+    return;
+  }
   if (CMD('spent').test(cmd)) {
     const arg = cmd.split(/\s+/).slice(1).join(' ').trim();
     if (arg) {
@@ -999,6 +1006,7 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
         commitPayments: [],
         incomeEntries: [],
         expenses: [],
+        categories: [],
         month: monthInTz(tz, deps.now ?? new Date()),
         today,
       },
@@ -1095,8 +1103,19 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     await createInvite(msg, user, deps, accessRepo(deps.db));
     return;
   }
-  // Не команда и не ввод активного шага — «не знаю». Голая сумма трату НЕ
-  // записывает: расход вносится только через ➕ Трата / /spent (spent_ask).
+  // Быстрый ввод: голая сумма вне активного шага — это трата («500 кафе»).
+  // Активные шаги (spent_ask/income_ask/онбординг) обрабатываются выше и сюда
+  // не доходят.
+  let isAmount = true;
+  try {
+    parseAmount(text);
+  } catch {
+    isAmount = false; // не сумма — неизвестная команда
+  }
+  if (isAmount) {
+    await runSpent(msg.chatId, tg, repo, fx, text, `tg:${msg.updateId}`, today);
+    return;
+  }
   await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
 }
 
@@ -1138,7 +1157,16 @@ export async function handleMessage(msg: IncomingMessage, deps: AccessDeps): Pro
 
 /** Callback-кнопки — только для известных пользователей. */
 export async function handleCallback(
-  cb: { id: string; chatId: number; fromId: number; firstName: string | null; data: string; updateId?: number },
+  cb: {
+    id: string;
+    chatId: number;
+    fromId: number;
+    firstName: string | null;
+    data: string;
+    updateId?: number;
+    /** message_id сообщения с кнопкой — для editMessageText (rp:/ex:cg/ex:sc). */
+    messageId?: number | undefined;
+  },
   deps: AccessDeps,
 ): Promise<void> {
   const repo = accessRepo(deps.db);
@@ -1157,6 +1185,29 @@ export async function handleCallback(
   };
 
   const p0 = await r.getProfile();
+  // rp:* (отчёт) и ex:cg/ex:sc (категория траты) — без диалога, правка сообщения.
+  if (cb.data.startsWith('rp:')) {
+    if (!p0?.onboarded_at) return;
+    const m = /^rp:(week|month|quarter|half|year):(-?\d+)$/.exec(cb.data);
+    if (!m) return; // невалидный — молча
+    const offset = Math.max(-60, Math.min(0, Number(m[2])));
+    await runReport(cb.chatId, deps.telegram, r, fxAdapter(deps), m[1] as Period, offset, cb.messageId);
+    return;
+  }
+  if (/^ex:(cg|sc):/.test(cb.data)) {
+    if (!p0?.onboarded_at) return;
+    const tz = p0.timezone;
+    await handleExCategory(
+      cb.data,
+      cb.chatId,
+      cb.messageId,
+      r,
+      fxAdapter(deps),
+      deps.telegram,
+      todayInTz(tz, deps.now ?? new Date()),
+    );
+    return;
+  }
   // nv:* — навигация по реестру (R7: чужие/устаревшие — молча)
   if (cb.data === NAV_HOME || /^nv:(back|go):/.test(cb.data)) {
     const target = cb.data === NAV_HOME ? 'HOME' : (/^nv:(?:back|go):(.+)$/.exec(cb.data)?.[1] ?? '');
@@ -1186,6 +1237,7 @@ export async function handleCallback(
       DEBTS: '/debts',
       LOANS: '/loans',
       FX_HUB: '/fx',
+      REPORT: '/report',
     }[target];
     if (cmd) {
       await knownUser({ ...navMsg, text: cmd }, user, deps);

@@ -58,6 +58,8 @@ export interface ExpenseRow {
   note: string | null;
   source: string;
   source_key: string | null;
+  /** Категория (миграция 0014); NULL — без категории. */
+  category_id: number | null;
 }
 
 export interface IncomeEntryRow {
@@ -68,6 +70,20 @@ export interface IncomeEntryRow {
   currency: string;
   note: string | null;
   source_key: string | null;
+  /** Фактическая дата получения (миграция 0014); у старых строк = первое число месяца. */
+  received_on: string | null;
+}
+
+/** Категория расхода (миграция 0014); name/emoji — enc1:. */
+export interface CategoryRow {
+  id: number;
+  user_id: number;
+  name: string;
+  emoji: string;
+  preset_key: string | null;
+  sort: number;
+  archived: number;
+  created_at: string;
 }
 
 export interface DebtRow {
@@ -386,12 +402,13 @@ export function scoped(db: Env['DB'], userId: number) {
       currency: string;
       note: string | null;
       source_key: string;
+      received_on?: string | null;
     }) {
       return db
         .prepare(
-          'INSERT OR IGNORE INTO income_entries (user_id, month, amount_minor, currency, note, source_key) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT OR IGNORE INTO income_entries (user_id, month, amount_minor, currency, note, source_key, received_on) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .bind(userId, e.month, await en('income_entries', 'amount_minor', e.amount_minor), e.currency, await en('income_entries', 'note', e.note), e.source_key)
+        .bind(userId, e.month, await en('income_entries', 'amount_minor', e.amount_minor), e.currency, await en('income_entries', 'note', e.note), e.source_key, e.received_on ?? null)
         .run();
     },
     listIncomeEntries(month: string) {
@@ -410,6 +427,121 @@ export function scoped(db: Env['DB'], userId: number) {
       return db.prepare('DELETE FROM income_entries WHERE id = ? AND user_id = ?').bind(id, userId).run();
     },
 
+    // ── категории расходов (миграция 0014) ──
+    /** Все категории юзера: сначала активные по sort, потом архивные. */
+    listCategories(includeArchived = false) {
+      return db
+        .prepare(`SELECT * FROM categories WHERE user_id = ?${includeArchived ? '' : ' AND archived = 0'} ORDER BY archived, sort, id`)
+        .bind(userId)
+        .all<CategoryRow>()
+        .then((r) => decRows('categories', r));
+    },
+    getCategory(id: number) {
+      return db
+        .prepare('SELECT * FROM categories WHERE id = ? AND user_id = ?')
+        .bind(id, userId)
+        .first<CategoryRow>()
+        .then((r) => decRow('categories', r));
+    },
+    /** Пресеты: если у юзера нет ни одной категории — засеваем все (идемпотентно). */
+    async ensureCategories() {
+      const n = await db
+        .prepare('SELECT COUNT(*) AS n FROM categories WHERE user_id = ?')
+        .bind(userId)
+        .first<{ n: number }>();
+      if (n && n.n > 0) return;
+      const { PRESETS } = await import('../domain/categories');
+      const stmts = [];
+      for (let i = 0; i < PRESETS.length; i++) {
+        stmts[i] = db
+          .prepare('INSERT OR IGNORE INTO categories (user_id, name, emoji, preset_key, sort) VALUES (?, ?, ?, ?, ?)')
+          .bind(
+            userId,
+            (await encStr(userId, 'categories', 'name', PRESETS[i]!.name))!,
+            (await encStr(userId, 'categories', 'emoji', PRESETS[i]!.emoji))!,
+            PRESETS[i]!.key,
+            i,
+          );
+      }
+      await db.batch(stmts);
+    },
+    async addCategory(c: { name: string; emoji: string; sort: number }) {
+      return db
+        .prepare('INSERT INTO categories (user_id, name, emoji, sort) VALUES (?, ?, ?, ?)')
+        .bind(userId, await en('categories', 'name', c.name), await en('categories', 'emoji', c.emoji), c.sort)
+        .run();
+    },
+    countCategories() {
+      return db
+        .prepare('SELECT COUNT(*) AS n FROM categories WHERE user_id = ? AND archived = 0')
+        .bind(userId)
+        .first<{ n: number }>();
+    },
+    async patchCategory(id: number, patch: { name?: string; emoji?: string; archived?: number; sort?: number }) {
+      const sets: string[] = [];
+      const binds: (number | string | null)[] = [];
+      for (const k of ['name', 'emoji', 'archived', 'sort'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(await en('categories', k, patch[k]));
+        }
+      if (!sets.length) return db.prepare('SELECT 1').run();
+      return db
+        .prepare(`UPDATE categories SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+        .bind(...binds, id, userId)
+        .run();
+    },
+    /** Удаление: сначала обнуляем ссылки у трат, потом строку (batch). */
+    deleteCategory(id: number) {
+      return db.batch([
+        db.prepare('UPDATE weekly_expenses SET category_id = NULL WHERE user_id = ? AND category_id = ?').bind(userId, id),
+        db.prepare('DELETE FROM categories WHERE id = ? AND user_id = ?').bind(id, userId),
+      ]);
+    },
+
+    // ── range-чтения для отчётов (даты plaintext, BETWEEN) ──
+    listExpensesBetween(from: string, to: string) {
+      return db
+        .prepare('SELECT * FROM weekly_expenses WHERE user_id = ? AND spent_on BETWEEN ? AND ? ORDER BY spent_on, id')
+        .bind(userId, from, to)
+        .all<ExpenseRow>()
+        .then((r) => decRows('weekly_expenses', r));
+    },
+    listCommitmentPaymentsBetween(from: string, to: string) {
+      return db
+        .prepare('SELECT * FROM commitment_payments WHERE user_id = ? AND paid_on BETWEEN ? AND ? ORDER BY paid_on, id')
+        .bind(userId, from, to)
+        .all<CommitmentPaymentRow>()
+        .then((r) => decRows('commitment_payments', r));
+    },
+    /** События долгов: только платежи/ЧДП (reconcile в отчёт не идёт). */
+    listDebtEventsBetween(from: string, to: string) {
+      return db
+        .prepare(
+          "SELECT * FROM debt_events WHERE user_id = ? AND event_on BETWEEN ? AND ? AND kind IN ('payment','prepay') ORDER BY event_on, id",
+        )
+        .bind(userId, from, to)
+        .all<DebtEventRow>()
+        .then((r) => decRows('debt_events', r));
+    },
+    listLoanEventsBetween(from: string, to: string) {
+      return db
+        .prepare('SELECT * FROM loan_events WHERE user_id = ? AND event_on BETWEEN ? AND ? ORDER BY event_on, id')
+        .bind(userId, from, to)
+        .all<LoanEventRow>()
+        .then((r) => decRows('loan_events', r));
+    },
+    /** Доходы по фактической дате (received_on, fallback — 1-е число месяца). */
+    listIncomeBetween(from: string, to: string) {
+      return db
+        .prepare(
+          "SELECT * FROM income_entries WHERE user_id = ? AND COALESCE(received_on, month || '-01') BETWEEN ? AND ? ORDER BY id",
+        )
+        .bind(userId, from, to)
+        .all<IncomeEntryRow>()
+        .then((r) => decRows('income_entries', r));
+    },
+
     // ── reminder_log: идемпотентность отправки и рейт-лимит /export ──
     claimReminder(kind: string, key: string) {
       return db
@@ -425,7 +557,7 @@ export function scoped(db: Env['DB'], userId: number) {
     },
     /** /export — только собственные строки пользователя, без секретов/хэшей. */
     async exportUserData() {
-      const [profile, commitments, commitPays, expenses, income, debts, debtEvents, loans, loanEvents, exchanges] =
+      const [profile, commitments, commitPays, expenses, income, debts, debtEvents, loans, loanEvents, exchanges, categories] =
         await Promise.all([
           this.getProfile(),
           this.listCommitments(false),
@@ -437,6 +569,7 @@ export function scoped(db: Env['DB'], userId: number) {
           this.listLoans(),
           db.prepare('SELECT * FROM loan_events WHERE user_id = ? ORDER BY id').bind(userId).all<LoanEventRow>().then((r) => decRows('loan_events', r)),
           this.listExchanges(),
+          this.listCategories(true),
         ]);
       const strip = <T extends Record<string, unknown>>(r: T) => {
         const { source_key, ...rest } = r; // update_id-идемпотентность не экспортируем
@@ -444,7 +577,7 @@ export function scoped(db: Env['DB'], userId: number) {
         return rest;
       };
       return {
-        schema_version: 4,
+        schema_version: 5,
         exported_at: new Date().toISOString(),
         profile: profile ? strip(profile as unknown as Record<string, unknown>) : null,
         commitments: commitments.results.map((c) => strip(c as unknown as Record<string, unknown>)),
@@ -456,6 +589,7 @@ export function scoped(db: Env['DB'], userId: number) {
         loans: loans.results.map((l) => strip(l as unknown as Record<string, unknown>)),
         loan_events: loanEvents.results.map((e) => strip(e as unknown as Record<string, unknown>)),
         exchanges: exchanges.results.map((x) => strip(x as unknown as Record<string, unknown>)),
+        categories: categories.results.map((x) => strip(x as unknown as Record<string, unknown>)),
       };
     },
     /** /delete_me — все строки пользователя во всех таблицах с user_id (children first). */
@@ -464,6 +598,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'conversation_state',
         'income_entries',
         'weekly_expenses',
+        'categories',
         'loan_events',
         'loans',
         'exchanges',
@@ -529,12 +664,16 @@ export function scoped(db: Env['DB'], userId: number) {
       note: string | null;
       source: string;
       source_key: string;
+      category_id?: number | null;
     }) {
+      // category_id пишется только если категория принадлежит юзеру (CASE+EXISTS).
       return db
         .prepare(
-          'INSERT OR IGNORE INTO weekly_expenses (user_id, spent_on, amount_minor, currency, note, source, source_key) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          `INSERT OR IGNORE INTO weekly_expenses (user_id, spent_on, amount_minor, currency, note, source, source_key, category_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL
+             WHEN EXISTS(SELECT 1 FROM categories WHERE id=? AND user_id=?) THEN ? END)`,
         )
-        .bind(userId, e.spent_on, await en('weekly_expenses', 'amount_minor', e.amount_minor), e.currency, await en('weekly_expenses', 'note', e.note), e.source, e.source_key)
+        .bind(userId, e.spent_on, await en('weekly_expenses', 'amount_minor', e.amount_minor), e.currency, await en('weekly_expenses', 'note', e.note), e.source, e.source_key, e.category_id ?? null, e.category_id ?? null, userId, e.category_id ?? null)
         .run();
     },
     findExpenseByKey(sourceKey: string) {
@@ -550,7 +689,7 @@ export function scoped(db: Env['DB'], userId: number) {
         .first<ExpenseRow>().then((r) => decRow('weekly_expenses', r));
     },
     /** Правка траты — только своей записи. */
-    async patchExpense(id: number, patch: { amount_minor?: number; currency?: string; note?: string | null }) {
+    async patchExpense(id: number, patch: { amount_minor?: number; currency?: string; note?: string | null; category_id?: number | null }) {
       const sets: string[] = [];
       const binds: (number | string | null)[] = [];
       for (const k of ['amount_minor', 'currency', 'note'] as const)
@@ -558,6 +697,13 @@ export function scoped(db: Env['DB'], userId: number) {
           sets.push(`${k} = ?`);
           binds.push(await en('weekly_expenses', k, patch[k]));
         }
+      if (patch.category_id !== undefined) {
+        // чужая категория не записывается никогда: ELSE — оставить как было
+        sets.push(
+          'category_id = CASE WHEN ? IS NULL THEN NULL WHEN EXISTS(SELECT 1 FROM categories WHERE id=? AND user_id=?) THEN ? ELSE category_id END',
+        );
+        binds.push(patch.category_id, patch.category_id, userId, patch.category_id);
+      }
       if (!sets.length) return db.prepare('SELECT 1').run();
       return db
         .prepare(`UPDATE weekly_expenses SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
