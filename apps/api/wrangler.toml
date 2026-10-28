@@ -24,13 +24,14 @@ run_worker_first = ["/api/*", "/telegram/*", "/health"]
 
 # ── Несекретные переменные ──────────────────────────────────────
 # Username бота без @ — для ссылок-приглашений https://t.me/<bot>?start=<code>.
-# MINI_APP_URL — куда ведёт кнопка «📱 Приложение» в /menu (web_app).
+# MINI_APP_URL — адрес Mini App, на него указывает menu-button «💰 Бюджет»
+# у поля ввода (setChatMenuButton; ставится в scripts/setup.mjs, вручную —
+# node scripts/telegram-webhook.mjs menu <url>).
 [vars]
 TELEGRAM_BOT_USERNAME = "Helper_6666_bot"
 MINI_APP_URL = "https://budget-companion-api.fool-undef.workers.dev"
 
 # ── Cron-триггеры (шаг 4 миграции: напоминания, валютные алерты) ─
-# Раскомментировать, когда появится handler scheduled() в src/index.ts.
 [triggers]
 # напоминания: каждый час UTC — дальше фильтр по локальному времени пользователя
 crons = ["0 * * * *"]

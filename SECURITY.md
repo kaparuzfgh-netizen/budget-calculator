@@ -1,8 +1,66 @@
 # 🔐 SECURITY.md — аудит безопасности и политика секретов
 
+> До шага 9 миграции в репозитории два стека — документ в двух разделах:
+> **v2** (Cloudflare Workers + D1, прод) ниже и **v1** (Apps Script +
+> Google Sheets, legacy) — «Раздел v1» далее.
+
+## Раздел v2 (Cloudflare Workers)
+
+Аудит: 2026-10-28 · Код: `apps/api` + `apps/web` ·
+Полный отчёт: [AUDIT_REPORT.md](AUDIT_REPORT.md) ·
+Карта системы: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+### Модель угроз v2
+
+| Актив | Угроза | Контроль |
+|-------|--------|----------|
+| Данные пользователей в D1 | чтение/запись чужих данных (IDOR) | Изоляция на уровне кода: доступ только через `scoped(db, userId)` в `src/db/repo.ts` — каждый запрос содержит `WHERE user_id = ?`; мутации по id — `WHERE id=? AND user_id=?` (чужой id → 404 в REST / молча в боте); сырые `db.prepare` вне repo.ts запрещены; обязательные тесты «A не видит B» |
+| Секреты (токен бота, JWT, webhook) | утечка в git/код/логи | Только `wrangler secret put`; локально `.dev.vars` (в `.gitignore`, шаблон `.dev.vars.example`); токен бота существует только на сервере, во фронте нет `VITE_*`-секретов |
+| Webhook `POST /telegram/webhook` | поддельные апдейты | Заголовок `X-Telegram-Bot-Api-Secret-Token`; fail-closed (нет секрета → 503); сравнение constant-time — дайджесты SHA-256 без раннего выхода (`src/http/security.ts`) |
+| Повторная доставка webhook / ретрай Mini App | дубли записей | `processed_updates` (PK `update_id`); денежные журналы и справочники — `UNIQUE(user_id, source_key)` с ключами `tg:<update_id>`, `tma:<client_id>`, `auto:<объект>:<период>` |
+| Сессия Mini App | подделка initData, кража токена | `POST /api/tma/auth`: HMAC-SHA256 «WebAppData» от токена бота (Web Crypto), `auth_date` ≤ 24ч и не из будущего >5 мин, обязательный `user.id`; дальше JWT HS256 `{tg_id}` на 12ч и только `Authorization: Bearer` — токенов в URL нет; JWT живёт в памяти SPA (не в localStorage) |
+| Брутфорс `/api/tma/auth` | подбор initData | Rate-limit 20 попыток / 10 мин по SHA-256 от `CF-Connecting-IP` (таблица `rate_limit`, сам IP не храним); одинаковый 403 для «нет пользователя» и «не онбоарден» — факт существования аккаунта не раскрывается |
+| Доступ к боту | посторонние пользователи | Владелец бутстрапится по `OWNER_TELEGRAM_ID`; участники — одноразовые инвайты: код 128 бит, в БД только SHA-256 хэш, TTL 48ч, лимит 10 активных, в audit_log — `expires_at`, не код; незнакомцам — тишина и ноль записей в БД |
+| Удалённый пользователь | живой JWT после `/delete_me` | `deleted_at` в `users`: `findUserByTelegramId` удалённых не возвращает → 403 на всех `/api/tma/*` и молчание в боте |
+| Логи | утечка PII/секретов | Запрещено логировать текст сообщений, токены, коды инвайтов и их хэши; в логах — `update_id`, счётчики и коды ошибок (`sanitizeTelegramError` → error_code) |
+| Внешние вызовы | данные третьим сторонам | Только `api.telegram.org` и `api.frankfurter.dev` (курсы ЦБ, без ключа); таймаут `AbortSignal.timeout(8s)` |
+| Mini App (XSS/кликджекинг) | внедрение скриптов, фрейминг | CSP: `default-src 'self'; script-src 'self' https://telegram.org; connect-src 'self'; frame-ancestors` — только `*.telegram.org`; `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` на `/api/*` и `/telegram/*` |
+
+### Секреты и git (v2)
+
+- Прод — только `wrangler secret put`: `TELEGRAM_BOT_TOKEN`,
+  `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET`, `OWNER_TELEGRAM_ID`.
+  Несекретные `[vars]` в `wrangler.toml`: `TELEGRAM_BOT_USERNAME`, `MINI_APP_URL`.
+- Локально — `apps/api/.dev.vars` (в `.gitignore`); шаблон
+  `apps/api/.dev.vars.example`. `TELEGRAM_WEBHOOK_SECRET` и `JWT_SECRET`
+  генерируются случайно (`openssl rand -hex 32`).
+- Мастер `npm run setup` кладёт секреты через `wrangler secret put` (значения
+  не печатаются и не сохраняются); повторный запуск безопасен, при этом
+  `TELEGRAM_WEBHOOK_SECRET` генерируется заново — прочитать его обратно нельзя.
+- В репозитории — только плейсхолдеры (`123456789:AAxxx…`); контроль — те же
+  pre-commit хук и `gitleaks`, что у v1 (см. раздел v1, §4).
+
+### Что делать при утечке (v2)
+
+| Утечка | Действие |
+|--------|----------|
+| Токен бота | @BotFather → `/mybots` → API Token → **Revoke** → `wrangler secret put TELEGRAM_BOT_TOKEN` (через `npm run wrangler -- secret put …`) |
+| `JWT_SECRET` | `npm run setup -- --rotate` (или `wrangler secret put JWT_SECRET` новым `openssl rand -hex 32`) — все сессии Mini App обнулятся, пользователи войдут заново |
+| `TELEGRAM_WEBHOOK_SECRET` | `npm run setup` перегенерирует и загрузит сам; вручную — новый `openssl rand -hex 32` → `wrangler secret put` → `npm run webhook:set -- <url>` |
+| `OWNER_TELEGRAM_ID` задан неверно | `wrangler secret put OWNER_TELEGRAM_ID` верным значением; проверить созданных пользователей в D1 |
+| API-токен Cloudflare (CI) | dash.cloudflare.com → API Tokens → Roll/Delete → обновить `CLOUDFLARE_API_TOKEN` в GitHub Secrets |
+| Данные пользователя | По запросу — `/delete_me` у пользователя; админ-удаление — `wrangler d1 execute` по `user_id` (см. список таблиц в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) |
+
+После любой ротации — прогнать `npm run check` локально и `wrangler tail` на
+живом воркере.
+
+---
+
+## Раздел v1 (Google Apps Script + Google Sheets)
+
 Дата аудита: 2026-10-24 · Код: `apps-script/` + `mini-app/index.html`
 
-## 1. Модель угроз
+### 1. Модель угроз
 
 | Актив | Угроза | Контроль |
 |-------|--------|----------|
@@ -15,7 +73,7 @@
 | Квоты Gemini/UrlFetch | сжигание гигантскими файлами | лимит изображения 8 МБ (F3) |
 | Скриншоты → внешний AI | данные видит сторонний провайдер | Gemini (Google AI Studio) — основной; **Groq — резерв** (P1, только при недоступности Gemini). Оба — крупные провайдеры, ключи только в Script Properties; скриншоты содержат суммы, но не реквизиты карт/CVV (рекомендация: не присылать экраны с полными реквизитами) |
 
-## 2. Отчёт аудита (что проверено и исправлено)
+### 2. Отчёт аудита (что проверено и исправлено)
 
 | # | Находка | Severity | Статус |
 |---|---------|----------|--------|
@@ -41,15 +99,15 @@
 
 **Ранний аудит на этапе разработки** (до этого ревью) уже устранил: чтение состояния долгов за пределами строк 2–3 листа, перезапись строк ипотек в реестре, неконсистентность replay-журнала.
 
-## 3. Рантайм-аудит — запускайте периодически
+### 3. Рантайм-аудит — запускайте периодически
 
 В редакторе Apps Script выполните функцию **`securityAudit()`** (файл `SecurityAudit.gs`). Она проверяет: наличие/длину всех секретов, валидность токена бота (`getMe`), валидность ключа Gemini (дешёвый запрос списка моделей), привязку и ошибки webhook, доступ к таблице — и присылает отчёт владельцу в Telegram.
 
-## 4. Секреты и git
+### 4. Секреты и git
 
 **Принцип: секреты живут в Script Properties Apps Script и в локальном `secrets.json`, который никогда не коммитится.**
 
-### Файлы репозитория
+#### Файлы репозитория
 
 | Файл | Роль |
 |------|------|
@@ -58,7 +116,7 @@
 | `scripts/hooks/pre-commit` + `scripts/install-hooks.sh` | хук, блокирующий коммит с похожим на секрет фрагментом |
 | `.gitleaks.toml` | правила для сканера [gitleaks](https://github.com/gitleaks/gitleaks): токен Telegram `\d{8,10}:[A-Za-z0-9_-]{35}`, ключ Google `AIza…`, явные присваивания `*_SECRET=...` |
 
-### Первичная настройка
+#### Первичная настройка
 
 ```bash
 cd budget-calculator
@@ -68,7 +126,7 @@ cp secrets.example.json secrets.json   # локально, НЕ коммитит
 # заполните secrets.json, перенесите значения в Script Properties (SETUP.md, Шаг 3)
 ```
 
-### Вариант с git-secrets (awslabs)
+#### Вариант с git-secrets (awslabs)
 
 Если предпочитаете [git-secrets](https://github.com/awslabs/git-secrets):
 
@@ -80,14 +138,14 @@ git secrets --add '(WEBHOOK_SECRET|TMA_READ_TOKEN)\s*=\s*\S{16,}'
 git secrets --register-aws                            # опционально
 ```
 
-### Проверка истории
+#### Проверка истории
 
 ```bash
 gitleaks detect -c .gitleaks.toml --redact   # по всем коммитам
 gitleaks protect --staged --redact -c .gitleaks.toml   # по индексу
 ```
 
-## 5. Что делать при утечке секрета
+### 5. Что делать при утечке секрета
 
 | Утечка | Действие |
 |--------|----------|
@@ -99,7 +157,7 @@ gitleaks protect --staged --redact -c .gitleaks.toml   # по индексу
 
 После любой ротации: выполнить `securityAudit()` и убедиться, что все пункты ✅.
 
-## 6. Чек-лист перед продакшеном
+### 6. Чек-лист перед продакшеном
 
 - [ ] 3 секрета в Script Properties (токен бота, chat_id, ключ Gemini); `WEBHOOK_SECRET` и `TMA_READ_TOKEN` сгенерированы автоматически при `setup()` (проверка: `securityAudit()`)
 - [ ] Mini App открывается из Telegram (`/app`); ссылка для браузера — `getAccessInfo()`

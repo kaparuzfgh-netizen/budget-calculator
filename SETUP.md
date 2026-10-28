@@ -1,5 +1,9 @@
 # 🚀 Установка
 
+> Это инструкция для **v1 (legacy Apps Script)**.
+> Для v2 — [docs/v2-development.md](docs/v2-development.md) и раздел
+> «v2: быстрый старт» в [README.md](README.md).
+
 ~15 минут. Нужны: Google-аккаунт, Telegram, бесплатный ключ Gemini, Node.js ≥ 20.
 
 Установка и обновления идут через **[clasp](https://github.com/google/clasp)** —

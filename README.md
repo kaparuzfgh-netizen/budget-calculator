@@ -2,18 +2,78 @@
 
 [![CI](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/ci.yml/badge.svg)](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/ci.yml)
 [![Deploy Apps Script](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/deploy-apps-script.yml/badge.svg)](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/deploy-apps-script.yml)
+[![Deploy v2 (Cloudflare)](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/deploy-v2.yml/badge.svg)](https://github.com/kaparuzfgh-netizen/budget-calculator/actions/workflows/deploy-v2.yml)
 
-Серверлесс-движок личных финансов для Telegram: Google Sheets как база данных и BI-слой,
-Google Apps Script как оркестратор, Gemini 2.0 Flash как vision-парсер чеков.
-**TCO: $0/мес.**
+Серверлесс-движок личных финансов для Telegram. **TCO: $0/мес.**
 
-> **v2 в разработке** — идёт миграция на Cloudflare Workers + D1 + Pages
-> (мультипользовательский режим, изоляция данных): см.
-> [ADR-0001](docs/adr/0001-platform-and-architecture.md) и
-> [docs/v2-development.md](docs/v2-development.md). Новый код — в `apps/*`;
-> документы ниже описывают v1.
+> **v2 в проде.** Идёт миграция v1→v2 ([ADR-0001](docs/adr/0001-platform-and-architecture.md)):
+> до шага 9 в репозитории живут **два стека одновременно** — см. таблицу ниже.
 
-## Возможности
+## Структура репозитория: v1 и v2
+
+| Стек | Статус | Что это | Документация |
+|------|--------|---------|--------------|
+| **v2** — `apps/api`, `apps/web` | **production** | Мультипользовательский Telegram-бот + Mini App (Preact): Cloudflare Worker (Hono + D1), SPA раздаётся тем же воркером через Workers Static Assets | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — карта системы · [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — гид пользователя · [docs/v2-development.md](docs/v2-development.md) — разработка и деплой |
+| **v1** — `apps-script/`, `mini-app/` | legacy, жив до шага 9 миграции | Однопользовательский бэкенд на Google Apps Script, БД — Google Sheets, Mini App — один `index.html` на Pages | [SETUP.md](SETUP.md) — установка · [SECURITY.md](SECURITY.md) — аудит · разделы «v1 (legacy)» ниже |
+
+## v2: быстрый старт
+
+Предусловия: **Node.js ≥ 20**, бесплатный аккаунт [dash.cloudflare.com](https://dash.cloudflare.com), токен бота от @BotFather.
+
+```bash
+npm ci                          # зависимости всех workspaces
+npm run wrangler -- login       # вход в Cloudflare (браузер), один раз
+```
+
+Один раз — создать базу и вписать `database_id` в `apps/api/wrangler.toml`:
+
+```bash
+npm run wrangler -- d1 create budget-companion
+```
+
+Дальше всё делает мастер (токен BotFather → миграции D1 → деплой → секреты
+`TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET`/`JWT_SECRET`/`OWNER_TELEGRAM_ID` →
+webhook → menu-button):
+
+```bash
+npm run setup                   # --dry-run — только план
+```
+
+После мастера напишите боту `/start` — вы зарегистрированы владельцем;
+`/invite` создаёт одноразовую ссылку-приглашение для участников.
+
+**Локальная разработка:**
+
+```bash
+cp apps/api/.dev.vars.example apps/api/.dev.vars   # секреты для wrangler dev (в .gitignore)
+npm run dev -w apps/api                            # локальный воркер + D1 (miniflare)
+npm run wrangler -- d1 migrations apply DB --local # миграции в локальную D1
+npm run check                                      # lint + smoke v1 + typecheck + тесты API + сборка web
+```
+
+**Релиз:**
+
+```bash
+npm run release    # проверки → сборка apps/web → миграции D1 → wrangler deploy → /health
+```
+
+**Mini App:** голубая menu-button **«💰 Бюджет»** у поля ввода запускает Mini App
+(`setChatMenuButton`, ставится мастером; вручную —
+`node scripts/telegram-webhook.mjs menu <url>`).
+
+Подробно: [docs/v2-development.md](docs/v2-development.md) ·
+архитектура: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
+гид пользователя: [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+
+---
+
+## v1 (legacy): Google Apps Script + Google Sheets — до шага 9 миграции
+
+> Всё ниже описывает **v1** — однопользовательский бэкенд: Google Sheets как база
+> данных и BI-слой, Google Apps Script как оркестратор, Gemini 2.0 Flash как
+> vision-парсер чеков. Установка и эксплуатация — [SETUP.md](SETUP.md).
+
+### Возможности v1
 
 | # | Модуль | Что делает |
 |---|--------|-----------|
@@ -25,7 +85,7 @@ Google Apps Script как оркестратор, Gemini 2.0 Flash как vision
 | 6 | **FX Analytics & Forecast** | 180-дневная история курсов (GOOGLEFINANCE) → перцентили, RSI(14), SMA-тренд, волатильность ±σ и статистический прогноз на 7/30 дней; рекомендации по таймингу конвертаций **EUR→RUB (ипотеки), EUR→KGS (жизнь), EUR→USD (инвестиции)**: «конвертировать сейчас / дробить 50/50 / отложить» с гасителем боковика |
 | 7 | **Автопилот, здоровье и метрики** | Push-алерты при входе курса в выгодную зону (топ-15% перцентиля, кулдаун 7 дней); напоминания о списаниях за 2 дня; понедельничный nudge; digest «факт vs план» с savings rate; детектор аномалий «такого не может быть» (12 инвариантов, `/anomalies`); журнал `Ops_Log`; **ежемесячный бэкап вне Google** (zip со CSV всех данных — документом в Telegram-чат, опционально копия в приватный репозиторий GitHub); продуктовые метрики |
 
-## Архитектура
+### Архитектура v1 (legacy, до шага 9)
 
 ```
                      ┌─────────────────────────────┐
@@ -53,26 +113,40 @@ Google Apps Script как оркестратор, Gemini 2.0 Flash как vision
                    └──────────────┘
 ```
 
-## Структура проекта
+### Структура проекта
 
 ```
 budget-calculator/
-├── README.md                  ← вы здесь (архитектура + математика)
-├── SETUP.md                   пошаговый деплой через clasp (~15 минут)
+├── README.md                  ← вы здесь (v1 и v2, архитектура + математика)
+├── SETUP.md                   v1: пошаговый деплой через clasp (~15 минут)
 ├── CONTRIBUTING.md            команды и правила разработки
 ├── AGENTS.md                  заметки для ИИ-агентов и автоматизации
 ├── CHANGELOG.md               история изменений (Keep a Changelog)
-├── SECURITY.md                🔐 аудит безопасности + политика секретов в git
+├── SECURITY.md                🔐 аудит безопасности v1 и v2 + политика секретов
 ├── LICENSE                    все права защищены (частный проект)
-├── package.json               npm-скрипты: check / test / deploy / bootstrap
+├── package.json               npm-скрипты: check / test / deploy / setup / release
 ├── .gitignore                 секреты и креды не попадают в репозиторий
 ├── .gitleaks.toml             правила сканера секретов (gitleaks)
 ├── .claspignore               в Apps Script пушатся только *.gs и appsscript.json
 ├── .clasp.json.example        шаблон привязки к проекту (scriptId + rootDir)
 ├── .deploy.json.example       шаблон id развёртывания для npm run deploy
 ├── secrets.example.json       шаблон секретов (без значений; secrets.json в .gitignore)
-├── .github/workflows/         CI: lint+test+gitleaks; CD: clasp deploy + Pages
-├── apps-script/               бэкенд — пушится в Apps Script через clasp
+├── .github/workflows/         CI: lint+test+gitleaks; CD: clasp deploy, Pages, v2 (Cloudflare)
+├── docs/
+│   ├── ARCHITECTURE.md        карта системы v2 (диаграммы, данные, деплой)
+│   ├── USER_GUIDE.md          гид пользователя v2 (команды, экраны, FAQ)
+│   ├── v2-development.md      разработка и деплой v2
+│   ├── BOT_SETUP.md           v1: настройка профиля бота в @BotFather
+│   ├── ux/navigation.md       навигация бота v2 (источник истины + реестр экранов)
+│   └── adr/                   архитектурные решения (ADR-0001: платформа v2)
+├── apps/
+│   ├── api/                   v2: Cloudflare Worker — Hono-роутер, D1, cron
+│   │   ├── migrations/        SQL-миграции D1 (иммутабельны, wrangler d1 migrations)
+│   │   ├── src/               http/ services/ bot/ tma/ domain/ db/ fx/ telegram/
+│   │   ├── test/              vitest в рантайме workerd с локальной D1
+│   │   └── wrangler.toml      биндинги D1, [assets] SPA, [triggers] cron, [vars]
+│   └── web/                   v2: Mini App на Preact (Vite) → dist → Static Assets
+├── apps-script/               v1: бэкенд — пушится в Apps Script через clasp
 │   ├── appsscript.json        манифест (часовой пояс, oauthScopes, webapp)
 │   ├── Config.gs              финансовый профиль: доход, обязательства, ипотеки
 │   ├── Setup_Sheets.gs        setup() / createSpreadsheet(): автосоздание файла и листов
@@ -89,19 +163,22 @@ budget-calculator/
 │   ├── Triggers.gs            Sunday 20:00 weekly ask, daily maintenance, monthly
 │   └── SecurityAudit.gs       🔐 рантайм-аудит: секреты, токены, webhook, доступы
 ├── scripts/
-│   ├── smoke-test.js          офлайн-тесты бэкенда (моки Apps Script)
+│   ├── setup.mjs              v2: мастер подключения бота (npm run setup)
+│   ├── release.mjs            v2: релиз — проверки → web → миграции → deploy
+│   ├── telegram-webhook.mjs   v2: webhook set/info/delete + menu-button
+│   ├── smoke-test.js          v1: офлайн-тесты бэкенда (моки Apps Script)
 │   ├── build-bundle.js        опциональная сборка dist/BUNDLE.gs одним файлом
-│   ├── deploy.js              npm run deploy: check → push → версия → развёртывание
-│   ├── bootstrap.js           первичное создание проекта (clasp create + push)
+│   ├── deploy.js              v1: npm run deploy: check → push → версия → развёртывание
+│   ├── bootstrap.js           v1: первичное создание проекта (clasp create + push)
 │   ├── install-hooks.js/.sh   установка pre-commit хука (авто при npm install)
 │   ├── lint-sh.js             опциональный shellcheck
 │   └── hooks/pre-commit       блокирует коммит с токенами/ключами + eslint
-└── mini-app/
-    ├── index.html             Mini App: Vue 3 + Tailwind + Chart.js, один файл
+└── mini-app/                  v1: Mini App — один файл
+    ├── index.html             Vue 3 + Tailwind + Chart.js, CDN-зависимости
     └── README.md              деплой на GitHub Pages через CI
 ```
 
-## Схема Google Sheets
+### Схема Google Sheets (v1)
 
 | Лист | Назначение |
 |------|-----------|
@@ -117,7 +194,7 @@ budget-calculator/
 | `Metrics` | Продуктовые метрики: weekly-ответы, применённый каскад, сверки, исправления Vision, savings rate |
 | `Ops_Log` | Журнал операций и ошибок: `Date \| Level \| Source \| Message` — аномалии, сверки, алерты, автороллы, ошибки runtime |
 
-## Команды бота
+### Команды бота v1
 
 | Команда | Алиасы | Действие |
 |---------|--------|----------|
@@ -139,7 +216,7 @@ budget-calculator/
 | `/sync` | | Roll-forward долгов + снапшот Net Worth |
 | `/app` | | Открыть Mini App |
 
-## Финансовая математика
+### Финансовая математика (v1)
 
 **Аннуитет и ЧДП (Сбербанк).** Оставшийся срок `n` выводится инверсией аннуитета из
 текущих (баланс, ставка, платёж) → для базы получается 34.5 мес, что совпадает с
@@ -168,7 +245,7 @@ GOOGLEFINANCE для каждой конвертации пользовател�
 тише собственного шума (|move| < 0.5·σ√30) — рынок боковой, всегда «50/50».
 Статистика ≠ гарантия: обязательные платежи конвертируются в срок.
 
-## Где живёт математика
+### Где живёт математика (v1)
 
 Математика распределена между тремя слоями **намеренно** — каждый делает то,
 что другие не умеют:
@@ -181,7 +258,7 @@ GOOGLEFINANCE для каждой конвертации пользовател�
 
 **Дублирование — осознанное и сверяемое:** формула аннуитета живёт в трёх местах (лист B8, `DebtEngine`, Mini App) — все протестированы на консистентность, а `securityAudit()` ежедневно-проверяемо сверяет лист с кодом (ЧДП-калькулятор и кросс EUR/RUB, допуск 0.5%). Единственный нюанс определений: в `Monthly_Cycles` «Free Surplus» = доход − обязательства (схема ТЗ), бот и Mini App показывают профицит **после** лимита жизни — digest сравнивает корректно (план и факт оба «после жизни»).
 
-## Бесплатные лимиты
+### Бесплатные лимиты (v1)
 
 | Сервис | Free tier | Нагрузка проекта |
 |--------|-----------|------------------|
@@ -190,15 +267,22 @@ GOOGLEFINANCE для каждой конвертации пользовател�
 | Telegram Bot API | безлимит | — |
 | Cloudflare Pages / GitHub Pages | статика $0 | 1 файл `index.html` |
 
-## Безопасность
+v2 укладывается в те же $0: Workers Free, D1 Free (5 млн чтений/сутки),
+Frankfurter — без ключа, Telegram Bot API бесплатен
+(см. [AUDIT_REPORT.md](AUDIT_REPORT.md), оценка затрат).
 
-Секреты — только в Script Properties Apps Script; в репозитории их нет (`.gitignore`,
+### Безопасность
+
+v1: секреты — только в Script Properties Apps Script; в репозитории их нет (`.gitignore`,
 `secrets.example.json`, pre-commit хук и gitleaks-правила). Чтение API Mini App защищается
 свойством `TMA_READ_TOKEN`, записи — подписью `initData` (HMAC-SHA256). Полный отчёт аудита,
 модель угроз и действия при утечке — [SECURITY.md](SECURITY.md). Быстрая проверка живого
 проекта — функция `securityAudit()` в Apps Script.
 
-## Настройка бота в Telegram
+v2: модель угроз и контроли (tenant-изоляция, JWT, webhook) — в разделе
+«Раздел v2 (Cloudflare Workers)» того же [SECURITY.md](SECURITY.md).
+
+### Настройка бота в Telegram (v1)
 
 Минимум: выполните `setupBotProfile()` в Apps Script — командное меню
 (автокомплит «/» с описаниями), описание пустого чата и «О боте» настроятся
@@ -207,7 +291,7 @@ GOOGLEFINANCE для каждой конвертации пользовател�
 `План · Курсы · Неделя · Статус`. Подробно, по страницам BotFather:
 [docs/BOT_SETUP.md](docs/BOT_SETUP.md).
 
-## Установка
+### Установка v1
 
 Полный пошаговый гайд — [SETUP.md](SETUP.md). Коротко: `npm ci` →
 `npx clasp login` → `npm run bootstrap` (создаст проект и запушит код) →

@@ -15,7 +15,7 @@ export interface Env {
   OWNER_TELEGRAM_ID?: string;
   /** Переменная [vars]: username бота без @ (для ссылок-приглашений). */
   TELEGRAM_BOT_USERNAME?: string;
-  /** Переменная [vars]: URL Mini App — на него указывает кнопка 📱 в /menu. */
+  /** Переменная [vars]: URL Mini App — на него указывает menu-button «� Бюджет» (setChatMenuButton). */
   MINI_APP_URL?: string;
   /** Биндинг статики Mini App (wrangler.toml [assets]); SPA-fallback из роутера. */
   ASSETS?: Fetcher;

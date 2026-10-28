@@ -1,6 +1,9 @@
 # Локальные секреты для `wrangler dev` (НЕ коммитить — .dev.vars в .gitignore).
 # Реальные значения задаются в проде через `wrangler secret put`.
 TELEGRAM_BOT_TOKEN=123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Оба секрета ниже — случайные строки; сгенерировать:
+#   openssl rand -hex 32
+#   …или на Windows без OpenSSL: node -e "console.log(crypto.randomUUID()+crypto.randomUUID())"
 TELEGRAM_WEBHOOK_SECRET=dev-webhook-secret-change-me
 JWT_SECRET=dev-jwt-secret-change-me
 # Числовой Telegram ID владельца (узнать: написать боту /id). Можно оставить пустым.
