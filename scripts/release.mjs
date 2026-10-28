@@ -9,13 +9,20 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { deriveWorkerUrl, parseWorkerName } from './setup-utils.mjs';
 import { maskUrl, redact } from './webhook-utils.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const apiDir = path.join(root, 'apps', 'api');
-const wranglerBin = path.join(apiDir, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
+// wrangler может быть поднят npm в корневой node_modules (workspaces hoist) —
+// резолвим от package.json воркера, а не фиксированным путём.
+const wranglerBin = path.join(
+  path.dirname(createRequire(path.join(apiDir, 'package.json')).resolve('wrangler/package.json')),
+  'bin',
+  'wrangler.js',
+);
 const args = process.argv.slice(2);
 const DRY = args.includes('--dry-run');
 const SKIP = args.includes('--skip-checks');
