@@ -21,6 +21,8 @@ import { isValidTimezone, monthInTz, todayInTz, weekStartInTz } from '../bot/par
 import { matchCategory } from '../domain/categories';
 import { buildUserReport } from '../services/report';
 import type { Period } from '../domain/report';
+import { debtViews } from '../services/debts';
+import { dueDateFor } from '../services/reminders';
 import {
   bad,
   CCY_RE,
@@ -356,6 +358,68 @@ export function registerTmaApi(
       if (f) return c.json(f.body, f.status as 400);
       throw e;
     }
+  });
+
+  // ── upcoming: оплаты текущего локального месяца ──
+  app.get('/api/tma/upcoming', tmaAuth, async (c) => {
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const today = todayInTz(p.timezone, new Date());
+    const month = today.slice(0, 7);
+    const y = Number(month.slice(0, 4));
+    const m = Number(month.slice(5, 7));
+    const iso = (dd: { y: number; m: number; d: number }) =>
+      `${dd.y}-${String(dd.m).padStart(2, '0')}-${String(dd.d).padStart(2, '0')}`;
+    const [commits, cpays, dvs] = await Promise.all([
+      repo.listCommitments(),
+      repo.listCommitmentPaymentsSince(`${month}-01`),
+      debtViews(repo, today),
+    ]);
+    const paidC = new Set(cpays.results.filter((x) => x.paid_on.startsWith(month)).map((x) => x.commitment_id));
+    const items: {
+      kind: 'commitment' | 'debt';
+      id: number;
+      name: string;
+      amount_minor: number;
+      currency: string;
+      due_on: string;
+      paid: boolean;
+      overdue: boolean;
+    }[] = [];
+    for (const cm of commits.results) {
+      if (!cm.due_day) continue;
+      const due = iso(dueDateFor(cm.due_day, y, m));
+      const paid = paidC.has(cm.id);
+      items.push({
+        kind: 'commitment',
+        id: cm.id,
+        name: cm.name,
+        amount_minor: cm.amount_minor,
+        currency: cm.currency,
+        due_on: due,
+        paid,
+        overdue: !paid && due < today,
+      });
+    }
+    for (const v of dvs) {
+      const d = v.debt;
+      if (!d.due_day || d.frequency !== 'monthly') continue; // biweekly — вне месячного списка
+      const due = iso(dueDateFor(d.due_day, y, m));
+      const paid = v.events.some((e) => e.kind === 'payment' && e.event_on.startsWith(month));
+      items.push({
+        kind: 'debt',
+        id: d.id,
+        name: d.name,
+        amount_minor: toMinor(round2(v.payment)),
+        currency: d.currency,
+        due_on: due,
+        paid,
+        overdue: !paid && due < today,
+      });
+    }
+    items.sort((a, b) => (a.paid === b.paid ? a.due_on.localeCompare(b.due_on) : a.paid ? 1 : -1));
+    return okJson(c, { month, currency_hint: p.living_currency, items });
   });
 
   // ── income ──

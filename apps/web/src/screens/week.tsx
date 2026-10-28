@@ -12,7 +12,7 @@
  */
 import { useMemo, useState } from 'preact/hooks';
 import { ApiError } from '../api';
-import type { Api, ExpensesList, Profile, WeekStatus } from '../api';
+import type { Api, CategoriesList, ExpensesList, Profile, WeekStatus } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, fmtPct, noteError, parseAmount } from '../fmt';
 import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
@@ -22,10 +22,11 @@ import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui'
 export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
   const wk = useData(() => api.get<WeekStatus>('/api/tma/week'), onFatal, []);
   const ex = useData(() => api.get<ExpensesList>('/api/tma/expenses'), onFatal, []);
+  const ct = useData(() => api.get<CategoriesList>('/api/tma/categories'), onFatal, []);
 
-  if (wk.loading || ex.loading) return <Loading />;
-  const err = wk.error ?? ex.error;
-  if (err || !wk.data || !ex.data) {
+  if (wk.loading || ex.loading || ct.loading) return <Loading />;
+  const err = wk.error ?? ex.error ?? ct.error;
+  if (err || !wk.data || !ex.data || !ct.data) {
     const v = errorView(err);
     return (
       <ErrorView
@@ -40,6 +41,7 @@ export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
   }
   const w = wk.data;
   const c = w.currency;
+  const catEmoji = new Map(ct.data.categories.map((x) => [x.id, x.emoji]));
 
   return (
     <>
@@ -95,6 +97,7 @@ export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
                 <div class="row">
                   <span>
                     {fmtDay(e.spent_on)}
+                    {e.category_id ? ` ${catEmoji.get(e.category_id) ?? ''}` : ''}
                     {e.note ? ` · ${e.note}` : ''}
                   </span>
                   <span>{fmtMinor(e.amount_minor, e.currency)}</span>
@@ -153,6 +156,7 @@ function ExpenseCard({
   const [amount, setAmount] = useState(String(item.amount_minor / 100));
   const [ccy, setCcy] = useState(item.currency);
   const [note, setNote] = useState(item.note ?? '');
+  const [catId, setCatId] = useState<number | null>(item.category_id);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -173,6 +177,7 @@ function ExpenseCard({
         amount: parseAmount(amount),
         currency: ccy.trim().toUpperCase(),
         note: note.trim() || null,
+        category_id: catId,
       });
       nav.flash('Трата обновлена');
       reload();
@@ -225,6 +230,9 @@ function ExpenseCard({
               onInput={(e) => setNote((e.target as HTMLInputElement).value)}
             />
           </Field>
+          <Field label="Категория">
+            <CategoryChips api={api} value={catId} onChange={setCatId} allowNone />
+          </Field>
           <FormError msg={err} />
           <button type="submit" class="btn" disabled={busy}>
             Сохранить
@@ -265,6 +273,45 @@ function ExpenseCard({
   );
 }
 
+// ── чипы категорий ──
+
+function CategoryChips({
+  api,
+  onFatal = () => {},
+  value,
+  onChange,
+  allowNone = false,
+}: {
+  api: Api;
+  onFatal?: () => void;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  allowNone?: boolean;
+}) {
+  const q = useData(() => api.get<CategoriesList>('/api/tma/categories'), onFatal, []);
+  if (q.loading || q.error || !q.data) return null;
+  return (
+    <div class="chips">
+      <button
+        type="button"
+        class={`chip${value === null ? ' on' : ''}`}
+        onClick={() => onChange(null)}
+      >
+        {allowNone ? '❔ Без категории' : '✨ Авто'}
+      </button>
+      {q.data.categories.map((x) => (
+        <button
+          type="button"
+          class={`chip${value === x.id ? ' on' : ''}`}
+          onClick={() => onChange(x.id)}
+        >
+          {x.emoji} {x.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── +Трата ──
 
 export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
@@ -275,6 +322,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
   const [amount, setAmount] = useState('');
   const [ccy, setCcy] = useState('');
   const [note, setNote] = useState('');
+  const [catId, setCatId] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -301,6 +349,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
         amount: parseAmount(amount),
         ...(ccy.trim() ? { currency: ccy.trim().toUpperCase() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(catId !== null ? { category_id: catId } : {}),
         client_id: clientId,
       });
       nav.flash('Трата записана');
@@ -342,6 +391,9 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
               value={note}
               onInput={(e) => setNote((e.target as HTMLInputElement).value)}
             />
+          </Field>
+          <Field label="Категория">
+            <CategoryChips api={api} onFatal={onFatal} value={catId} onChange={setCatId} />
           </Field>
           <FormError msg={err} />
           <button type="submit" class="btn" disabled={busy}>

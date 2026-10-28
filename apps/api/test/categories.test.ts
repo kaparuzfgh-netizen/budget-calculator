@@ -269,6 +269,44 @@ describe('TMA /api/tma/categories + report', () => {
   });
 });
 
+describe('TMA /api/tma/upcoming', () => {
+  it('форма, paid/overdue флаги, изоляция, biweekly исключён', async () => {
+    const { uid: a, token: ta } = await user(OWNER + 80);
+    const { uid: b, token: tb } = await user(OWNER + 81);
+    expect((await api('/api/tma/upcoming')).status).toBe(401);
+    const ra = scoped(env.DB, a);
+    // платёж просрочен (due 1-е), платёж впереди (due 31-е), кредит monthly due 15, biweekly — не входит
+    await ra.addCommitment({ name: 'Аренда', amount_minor: 70000, currency: 'USD', due_day: 1 });
+    const c2 = await ra.addCommitment({ name: 'Интернет', amount_minor: 500, currency: 'USD', due_day: 31 });
+    await ra.addDebt({ name: 'Ипотека', currency: 'USD', rate: 0.1, frequency: 'monthly', initial_balance_minor: 1000000, initial_payment_minor: 50000, epoch: '2026-10-01', due_day: 15, source_key: null });
+    await ra.addDebt({ name: 'Рассрочка', currency: 'USD', rate: 0, frequency: 'biweekly', initial_balance_minor: 100000, initial_payment_minor: 10000, epoch: '2026-10-01', due_day: 10, source_key: null });
+    await scoped(env.DB, b).addCommitment({ name: 'Чужое', amount_minor: 1, currency: 'USD', due_day: 2 });
+    // оплачиваем интернет — paid=true
+    await ra.addCommitmentPayment({ commitment_id: Number(c2.meta.last_row_id), amount_minor: 500, currency: 'USD', paid_on: '2026-10-20', source: 'manual', source_key: 'x' });
+    const res = await api('/api/tma/upcoming', { token: ta });
+    expect(res.status).toBe(200);
+    const j = (await res.json()) as { month: string; currency_hint: string; items: { kind: string; name: string; paid: boolean; overdue: boolean; due_on: string }[] };
+    expect(j.currency_hint).toBe('USD');
+    const names = j.items.map((x) => x.name);
+    expect(names).toContain('Аренда');
+    expect(names).toContain('Интернет');
+    expect(names).toContain('Ипотека');
+    expect(names).not.toContain('Рассрочка'); // biweekly не входит
+    expect(names).not.toContain('Чужое'); // tenant B
+    const ar = j.items.find((x) => x.name === 'Аренда')!;
+    expect(ar.overdue).toBe(true); // due 1-е < today, не оплачено
+    expect(ar.paid).toBe(false);
+    const inet = j.items.find((x) => x.name === 'Интернет')!;
+    expect(inet.paid).toBe(true);
+    // неоплаченные первыми, отсортированы по due_on
+    expect(j.items[0]!.paid).toBe(false);
+    expect(j.items[0]!.due_on <= (j.items.find((x) => !x.paid && x !== j.items[0])?.due_on ?? '9999')).toBe(true);
+    // у B пусто (нет платежей с due_day)
+    const jb = (await (await api('/api/tma/upcoming', { token: tb })).json()) as { items: { name: string }[] };
+    expect(jb.items.map((x) => x.name)).toEqual(['Чужое']);
+  });
+});
+
 // ── бот ──
 describe('бот: быстрый ввод, пикер категории, отчёт', () => {
   it('«500 кафе» → трата с категорией и обрезанной заметкой; «500» → пикер; «привет» — неизвестно', async () => {

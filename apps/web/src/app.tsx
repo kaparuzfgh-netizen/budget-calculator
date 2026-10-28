@@ -18,6 +18,8 @@ import { CommitmentAddScreen, CommitmentScreen, ProfileScreen } from './screens/
 import { DebtAddScreen, DebtsScreen, DebtScreen } from './screens/debts';
 import { LoanAddScreen, LoansScreen, LoanScreen } from './screens/loans';
 import { FxScreen } from './screens/fx';
+import { ReportScreen } from './screens/report';
+import { CategoriesScreen } from './screens/categories';
 
 export type Route =
   | { id: 'home' }
@@ -35,7 +37,9 @@ export type Route =
   | { id: 'loans' }
   | { id: 'loan'; loanId: number }
   | { id: 'loan-add' }
-  | { id: 'fx' };
+  | { id: 'fx' }
+  | { id: 'report' }
+  | { id: 'categories' };
 
 export interface Nav {
   push: (r: Route) => void;
@@ -134,6 +138,12 @@ export function App({ api, name, onFatal }: { api: Api; name: string | null; onF
       break;
     case 'fx':
       screen = <FxScreen {...props} />;
+      break;
+    case 'report':
+      screen = <ReportScreen {...props} />;
+      break;
+    case 'categories':
+      screen = <CategoriesScreen {...props} />;
       break;
     default:
       screen = <HomeScreen {...props} name={name} />;

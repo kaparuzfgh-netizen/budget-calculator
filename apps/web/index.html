@@ -85,6 +85,45 @@
       .inline .btn.sm { margin-top: 0; }
       .preview { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.08); }
       .ev-edit { margin-top: 6px; padding: 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; }
+      /* ── фаза 1b: хедер, прогресс, чипы, отчёт ── */
+      .hrow { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+      .hrow h1 { margin: 0; }
+      .avatar {
+        width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
+        background: var(--btn); color: var(--btn-text); font-size: 18px; font-weight: 600;
+      }
+      .quick { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+      .quick .btn { min-height: 44px; font-size: 14px; padding: 10px 6px; }
+      .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; margin: 4px 0 8px; }
+      .bar > i { display: block; height: 100%; background: var(--btn); border-radius: 4px; }
+      .bar > i.over { background: #e56a6a; }
+      .seg { display: flex; gap: 4px; background: var(--bg2); border-radius: 10px; padding: 4px; margin-bottom: 12px; }
+      .seg .btn { background: transparent; color: var(--text); padding: 8px 4px; font-size: 13px; min-height: 44px; }
+      .seg .btn.on { background: var(--btn); color: var(--btn-text); outline: 0; }
+      .tiles { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+      .tile { background: var(--bg2); border-radius: 12px; padding: 10px; text-align: center; }
+      .tile .v { font-size: 16px; font-weight: 600; }
+      .tile .l { font-size: 11px; color: var(--hint); text-transform: uppercase; }
+      .good { color: #6ac26a; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+      .chip {
+        padding: 8px 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,.14);
+        background: var(--bg2); color: var(--text); font-size: 13px; cursor: pointer; min-height: 44px;
+      }
+      .chip.on { background: var(--btn); color: var(--btn-text); border-color: transparent; }
+      .stack { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin: 6px 0 10px; }
+      .stack > i { display: block; height: 100%; }
+      .chart { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; padding: 8px 0 4px; min-height: 110px; }
+      .chart .col { display: flex; flex-direction: column; align-items: center; min-width: 18px; flex: 1 0 18px; }
+      .chart .colbar { display: flex; align-items: flex-end; gap: 2px; height: 88px; }
+      .chart .cb { width: 12px; border-radius: 2px 2px 0 0; display: flex; flex-direction: column-reverse; }
+      .chart .cb > i { display: block; width: 100%; }
+      .chart .cv { width: 3px; background: #6ac26a; border-radius: 2px; align-self: flex-end; }
+      .chart .cl { font-size: 9px; color: var(--hint); margin-top: 3px; }
+      .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+      .upay .btn.sm { margin-top: 0; padding: 6px 10px; }
+      .muted2 { opacity: .55; }
+      .overdue { color: #e56a6a; font-size: 13px; }
     </style>
   </head>
   <body>

@@ -92,6 +92,7 @@ export interface ExpenseItem {
   amount_minor: number;
   currency: string;
   note: string | null;
+  category_id: number | null;
 }
 export interface ExpensesList {
   week_start: string;
@@ -342,4 +343,73 @@ export function createApi(opts: ApiOpts): Api {
     patch: (path, body) => req('PATCH', path, body),
     del: (path) => req('DELETE', path),
   };
+}
+
+// ── категории / отчёты / upcoming (фаза 1b) ──
+
+export interface Category {
+  id: number;
+  name: string;
+  emoji: string;
+  preset_key: string | null;
+  archived: boolean;
+  sort: number;
+}
+export interface CategoriesList {
+  categories: Category[];
+}
+export interface UpcomingItem {
+  kind: 'commitment' | 'debt';
+  id: number;
+  name: string;
+  amount_minor: number;
+  currency: string;
+  due_on: string;
+  paid: boolean;
+  overdue: boolean;
+}
+export interface Upcoming {
+  month: string;
+  currency_hint: string;
+  items: UpcomingItem[];
+}
+export type ReportPeriod = 'week' | 'month' | 'quarter' | 'half' | 'year';
+export interface ReportCategory {
+  id: number | null;
+  name: string;
+  emoji: string;
+  amount: number;
+  share: number;
+  count: number;
+}
+export interface ReportBucket {
+  key: string;
+  label: string;
+  living: number;
+  other: number;
+  received: number;
+}
+export interface ReportTopExpense {
+  id: number;
+  spent_on: string;
+  amount: number;
+  note: string | null;
+  category_id: number | null;
+}
+export interface Report {
+  period: string;
+  offset: number;
+  from: string;
+  to: string;
+  label: string;
+  currency: string;
+  fx_as_of: string;
+  received: { income: number; loans_returned: number; total: number };
+  spent: { living: number; commitments: number; credits: number; loans_repaid: number; total: number };
+  net: number;
+  living_limit: { cap: number; used_pct: number };
+  categories: ReportCategory[];
+  buckets: ReportBucket[];
+  prev: { label: string; spent_total: number; received_total: number; living: number };
+  top_expenses: ReportTopExpense[];
 }
