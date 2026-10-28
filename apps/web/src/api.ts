@@ -226,6 +226,61 @@ export interface LoansList {
   owed_usd_minor: number | null;
 }
 
+// ── курсы /api/tma/fx* (шаг 8) ──
+
+export interface FxForecast {
+  low: number;
+  mid: number;
+  high: number;
+}
+export type FxSignalKind = 'convert' | 'split' | 'wait' | 'hold';
+/** Одна пара конвертации — поля 1:1 с FxAction из services/fx.ts. */
+export interface FxActionItem {
+  key: string;
+  label: string; // 'EUR → RUB'
+  purpose: string;
+  emoji: string;
+  current: number;
+  digits: number;
+  min: number;
+  max: number;
+  percentile: number;
+  rsi14: number;
+  change30d_pct: number;
+  vol30d_pct: number;
+  trend_up: boolean;
+  signal: FxSignalKind;
+  signal_text: string;
+  forecast7d: FxForecast;
+  forecast30d: FxForecast;
+  series: number[]; // последние ≤90 закрытий — для спарклайна
+}
+export interface FxAnalysisData {
+  ok: boolean;
+  note?: string;
+  generated_at: string;
+  actions: FxActionItem[];
+  skipped: string[];
+  disclaimer: string;
+}
+export interface ExchangeItem {
+  id: number;
+  from_ccy: string;
+  to_ccy: string;
+  amount_from_minor: number;
+  amount_to_minor: number;
+  rate: number; // to за 1 from
+  market_rate: number | null;
+  spent_on: string; // 'YYYY-MM-DD'
+  note: string;
+  created_at: string;
+}
+/** GET /api/tma/fx — экран целиком: анализ + журнал. */
+export interface FxScreenData {
+  analysis: FxAnalysisData;
+  exchanges: ExchangeItem[];
+}
+
 // ── клиент ──
 
 export interface Api {

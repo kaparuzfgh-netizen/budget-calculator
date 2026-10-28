@@ -36,6 +36,7 @@ import { runWeek } from '../bot/features';
 import { periodsPerYear } from '../domain/debt';
 import { todayInTz } from '../bot/parse';
 import { fmtMoney } from '../bot/format';
+import { runFxAlerts } from './fx';
 import type { InlineButton } from '../telegram/client';
 
 interface LocalParts {
@@ -334,6 +335,25 @@ export async function runReminders(
             return `  • ${when}: ${act} — ${fmtMoney(v.remaining, v.loan.currency)}`;
           });
         if (loanLines.length) await sendClaimed('loan', `⏰ Сроки по займам:\n${loanLines.join('\n')}`, LOANS_MK);
+      }
+
+      // (e) fx-алерты: то же окно 10:00–21:59, что и у платежей. Анализ считается
+      // один раз на пользователя (история на пару); кулдаун — ISO-неделя на
+      // пару+тип внутри checkFxAlerts (claim/release как у sendClaimed).
+      if (p.fx_alerts_enabled === 1 && lp.hour >= PAY_HOUR && lp.hour < PAY_HOUR_END) {
+        try {
+          const fxSent = await runFxAlerts(repo, p, provider, async (text, mk) => {
+            await tgU.sendMessage(telegramId, text, mk ? { replyMarkup: mk } : {});
+          }, now);
+          sent += fxSent.length;
+        } catch (e) {
+          if (e instanceof TelegramError && e.status === 403) {
+            await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0, fx_alerts_enabled: 0 });
+            console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
+          } else {
+            throw e;
+          }
+        }
       }
     } catch (e) {
       failed++;

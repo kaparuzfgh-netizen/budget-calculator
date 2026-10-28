@@ -35,7 +35,7 @@ const cb = (id: number, data: string) =>
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
   sent.length = 0; docs.length = 0;
-  for (const t of ['conversation_state', 'loan_events', 'loans', 'debt_events', 'debts', 'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments', 'profiles', 'consents', 'reminder_log', 'audit_log', 'processed_updates', 'invites', 'users'])
+  for (const t of ['conversation_state', 'loan_events', 'loans', 'debt_events', 'debts', 'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments', 'profiles', 'consents', 'reminder_log', 'audit_log', 'processed_updates', 'invites', 'exchanges', 'users'])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 async function onboarded(tgId: number) {
@@ -50,7 +50,7 @@ async function onboarded(tgId: number) {
 }
 /** Таблицы с колонкой user_id (PRAGMA/sqlite_master в workerd D1 запрещены — список статичен по миграциям). */
 function userIdTables(): string[] {
-  return ['consents', 'audit_log', 'profiles', 'commitments', 'commitment_payments', 'weekly_expenses', 'income_entries', 'debts', 'debt_events', 'loans', 'loan_events', 'conversation_state', 'reminder_log'];
+  return ['consents', 'audit_log', 'profiles', 'commitments', 'commitment_payments', 'weekly_expenses', 'income_entries', 'debts', 'debt_events', 'loans', 'loan_events', 'exchanges', 'conversation_state', 'reminder_log'];
 }
 
 describe('/export', () => {
@@ -70,6 +70,14 @@ describe('/export', () => {
       counterparty: 'Вася', direction: 'owe', amount_minor: 30000, currency: 'USD',
       due_on: '2026-11-15', note: null,
     });
+    await scoped(env.DB, uidA).addExchange({
+      from_ccy: 'EUR', to_ccy: 'RUB', amount_from_minor: 50000, amount_to_minor: 4850000,
+      market_rate: 97.1, spent_on: '2026-10-20', note: 'A-касса', source: 'manual', source_key: 'tg:x1',
+    });
+    await scoped(env.DB, uidB).addExchange({
+      from_ccy: 'USD', to_ccy: 'RUB', amount_from_minor: 10000, amount_to_minor: 970000,
+      market_rate: null, spent_on: '2026-10-21', note: 'B-данные-обмен', source: 'manual', source_key: 'tg:x2',
+    });
     await scoped(env.DB, uidB).addCommitment({ name: 'B-данные', amount_minor: 2, currency: 'USD', due_day: 2 });
     await scoped(env.DB, uidB).addDebt({
       name: 'B-долг', currency: 'USD', rate: 0.1, frequency: 'monthly',
@@ -86,9 +94,10 @@ describe('/export', () => {
       debt_events: unknown[];
       loans: { counterparty: string; user_id: number }[];
       loan_events: unknown[];
+      exchanges: { from_ccy: string; note: string; user_id: number }[];
       schema_version: number;
     };
-    expect(j.schema_version).toBe(3);
+    expect(j.schema_version).toBe(4);
     expect(j.profile.user_id).toBe(uidA);
     expect(j.commitments.map((c) => c.name)).toEqual(['A-тайное']);
     expect(j.commitment_payments).toHaveLength(1);
@@ -96,6 +105,9 @@ describe('/export', () => {
     expect('source_key' in (j.commitment_payments[0] as object)).toBe(false);
     expect(j.debts.map((d) => d.name)).toEqual(['A-ипотека']);
     expect(j.loans.map((l) => l.counterparty)).toEqual(['Вася']);
+    expect(j.exchanges).toHaveLength(1);
+    expect(j.exchanges[0]!.note).toBe('A-касса');
+    expect('source_key' in (j.exchanges[0] as object)).toBe(false);
     expect(docs[0]!.content).not.toContain('B-данные');
     expect(docs[0]!.content).not.toContain('B-долг');
     expect(docs[0]!.content).not.toMatch(/"(password|secret|token|sha256|hash|source_key)"\s*:/i);
@@ -131,6 +143,10 @@ describe('/delete_me', () => {
     await scoped(env.DB, uidA).addLoanEvent({
       loan_id: Number(lA.meta.last_row_id), amount_minor: 5000,
       event_on: '2024-03-01', source: 'manual', source_key: null,
+    });
+    await scoped(env.DB, uidA).addExchange({
+      from_ccy: 'EUR', to_ccy: 'RUB', amount_from_minor: 100, amount_to_minor: 9700,
+      market_rate: null, spent_on: '2024-03-01', note: '', source: 'manual', source_key: null,
     });
     await scoped(env.DB, uidA).claimReminder('export', 'x');
     await scoped(env.DB, uidB).addCommitment({ name: 'B', amount_minor: 2, currency: 'USD', due_day: 2 });

@@ -95,6 +95,7 @@ beforeEach(async () => {
     'debts',
     'loan_events',
     'loans',
+    'exchanges',
     'income_entries',
     'weekly_expenses',
     'commitment_payments',
@@ -132,7 +133,7 @@ async function onboarded(tgId: number, withCommit = true) {
 }
 /** whitelist: зарегистрированные пространства callback_data */
 const CB_OK =
-  /^(nv:(home|back:[A-Z_]+|go:[A-Z_]+)|pf:[a-z0-9:/_-]*|in:del:\d+$|in:del:(yes|no)$|inc:(add|list)$|ex:[a-z]+:\d+$|ex:(list|dyes)$|dbt:[a-z0-9:]+|ln:[a-z0-9:]+|vs:[a-z0-9:]+|ob:[a-z:]+)/i;
+  /^(nv:(home|back:[A-Z_]+|go:[A-Z_]+)|pf:[a-z0-9:/_-]*|in:del:\d+$|in:del:(yes|no)$|inc:(add|list)$|ex:[a-z]+:\d+$|ex:(list|dyes)$|dbt:[a-z0-9:]+|ln:[a-z0-9:]+|fxa:[a-z0-9:]+|vs:[a-z0-9:]+|ob:[a-z:]+)/i;
 function assertNavRow(expected: string[], actualLast: string[], screen: string) {
   expect(actualLast, `${screen}: нав-ряд ${JSON.stringify(actualLast)}`).toEqual(expected);
 }
@@ -211,6 +212,18 @@ function screenOf(): string {
   if (t.includes('Сумма и валюта')) return 'LOAN_ADD_AMOUNT';
   if (t.includes('Срок возврата')) return 'LOAN_ADD_DUE';
   if (t.includes('Заметка (или')) return 'LOAN_ADD_NOTE';
+  if (cbs.includes('fxa:dyes')) return 'FX_DEL';
+  if (cbs.includes('fxa:ed:amounts')) return 'FX_ITEM';
+  if (t.includes('Новые суммы —')) return 'FX_EDIT_AMOUNTS';
+  if (t.includes('Новая дата —')) return 'FX_EDIT_DATE';
+  if (t.includes('Новая заметка')) return 'FX_EDIT_NOTE';
+  if (t.includes('Из чего меняем')) return 'FX_ADD_FROM';
+  if (t.includes('Во что меняем')) return 'FX_ADD_TO';
+  if (t.includes('Суммы обмена —')) return 'FX_ADD_AMOUNTS';
+  if (t.includes('Дата обмена —')) return 'FX_ADD_DATE';
+  if (t.includes('Заметка к обмену')) return 'FX_ADD_NOTE';
+  if (t.includes('Журнал обменов')) return 'FX_LIST';
+  if (cbs.includes('fxa:list')) return 'FX_HUB';
   if (cbs.includes('ex:dyes')) return 'EXPENSE_DEL';
   if (t.includes('формат как при вводе')) return 'EXPENSE_EDIT_ASK';
   if (cbs.some((d) => d.startsWith('ex:e:'))) return 'EXPENSE';
@@ -669,10 +682,63 @@ describe('контракт навигации (walk)', () => {
     expect(screenOf()).toBe('LOANS');
     expectNav('LOANS');
 
+    // ── курсы: FX_HUB → FX_LIST → мастер обмена → FX_ITEM → правки/удаление ──
+    await msg(tgId, '/fx');
+    expect(screenOf()).toBe('FX_HUB');
+    expectNav('FX_HUB');
+    await cb(tgId, 'fxa:list');
+    expect(screenOf()).toBe('FX_LIST');
+    expectNav('FX_LIST');
+    // мастер записи: из чего → во что → суммы → дата → заметка → журнал (R3)
+    await cb(tgId, 'fxa:add');
+    expect(screenOf()).toBe('FX_ADD_FROM');
+    expectNav('FX_ADD_FROM');
+    await cb(tgId, 'fxa:af:EUR');
+    expect(screenOf()).toBe('FX_ADD_TO');
+    expectNav('FX_ADD_TO');
+    await cb(tgId, 'fxa:at:RUB');
+    expect(screenOf()).toBe('FX_ADD_AMOUNTS');
+    expectNav('FX_ADD_AMOUNTS');
+    await msg(tgId, '500 → 48500');
+    expect(screenOf()).toBe('FX_ADD_DATE');
+    expectNav('FX_ADD_DATE');
+    await cb(tgId, 'fxa:ad:today');
+    expect(screenOf()).toBe('FX_ADD_NOTE');
+    expectNav('FX_ADD_NOTE');
+    await cb(tgId, 'fxa:an:skip');
+    expect(screenOf()).toBe('FX_LIST'); // записано → журнал (R3)
+    expect(lastMsg().text).toContain('Записано');
+    const exid = (await scoped(env.DB, uid).listExchanges()).results[0]!.id;
+    // карточка обмена: [← FX_LIST][🏠]; кнопки правок/удаления
+    await cb(tgId, `fxa:v:${exid}`);
+    expect(screenOf()).toBe('FX_ITEM');
+    expectNav('FX_ITEM');
+    await cb(tgId, 'fxa:ed:amounts');
+    expect(screenOf()).toBe('FX_EDIT_AMOUNTS');
+    expectNav('FX_EDIT_AMOUNTS');
+    await msg(tgId, '400 → 39000');
+    expect(screenOf()).toBe('FX_ITEM'); // сохранено → карточка
+    await cb(tgId, 'fxa:ed:date');
+    expect(screenOf()).toBe('FX_EDIT_DATE');
+    expectNav('FX_EDIT_DATE');
+    await cb(tgId, 'fxa:et:today');
+    expect(screenOf()).toBe('FX_ITEM');
+    await cb(tgId, 'fxa:ed:note');
+    expect(screenOf()).toBe('FX_EDIT_NOTE');
+    expectNav('FX_EDIT_NOTE');
+    await msg(tgId, 'обмен в кассе');
+    expect(screenOf()).toBe('FX_ITEM');
+    // удаление: confirm → журнал
+    await cb(tgId, `fxa:del:${exid}`);
+    expect(screenOf()).toBe('FX_DEL');
+    expectNav('FX_DEL');
+    await cb(tgId, 'fxa:dyes');
+    expect(screenOf()).toBe('FX_LIST');
+
     // HOME из глубины за ≤3 нажатия: с карточки платежа
     await cb(tgId, 'nv:home');
     expect(screenOf()).toBe('HOME');
-  });
+  }, 60_000); // walk всех экранов длинный — под нагрузкой всего рана >20с
 
   it('PF_HOME рендерит ровно 6 кнопок разделов (регрессия)', async () => {
     const tgId = OWNER + 40;
@@ -750,6 +816,13 @@ describe('контракт навигации (walk)', () => {
       [/^ex:v:\d+$/, () => 'EXPENSE'],
       [/^ex:e:\d+$/, () => 'EXPENSE_EDIT_ASK'],
       [/^ex:del:\d+$/, () => 'EXPENSE_DEL'],
+      [/^fxa:list$/, () => 'FX_LIST'],
+      [/^fxa:add$/, () => 'FX_ADD_FROM'],
+      [/^fxa:v:\d+$/, () => 'FX_ITEM'],
+      [/^fxa:ed:amounts$/, () => 'FX_EDIT_AMOUNTS'],
+      [/^fxa:ed:date$/, () => 'FX_EDIT_DATE'],
+      [/^fxa:ed:note$/, () => 'FX_EDIT_NOTE'],
+      [/^fxa:del:\d+$/, () => 'FX_DEL'],
     ];
     // для каждого посещённого экрана проверяем, что каждая «button»-цель покрыта кнопкой
     const NAV = (to: string) => [`nv:back:${to}`, 'nv:home'];

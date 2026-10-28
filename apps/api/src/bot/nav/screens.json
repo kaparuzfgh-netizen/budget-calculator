@@ -497,6 +497,90 @@
       "depth": 2,
       "parent": "LOANS",
       "nav": "cancel"
+    },
+    {
+      "id": "FX_HUB",
+      "kind": "menu",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
+      "id": "FX_LIST",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "FX_HUB",
+      "nav": "back_home"
+    },
+    {
+      "id": "FX_ITEM",
+      "kind": "menu",
+      "depth": 3,
+      "parent": "FX_LIST",
+      "nav": "back_home"
+    },
+    {
+      "id": "FX_DEL",
+      "kind": "confirm",
+      "depth": 4,
+      "parent": "FX_ITEM",
+      "nav": "confirm"
+    },
+    {
+      "id": "FX_EDIT_AMOUNTS",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "FX_ITEM",
+      "nav": "cancel"
+    },
+    {
+      "id": "FX_EDIT_DATE",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "FX_ITEM",
+      "nav": "cancel"
+    },
+    {
+      "id": "FX_EDIT_NOTE",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "FX_ITEM",
+      "nav": "cancel"
+    },
+    {
+      "id": "FX_ADD_FROM",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "FX_LIST",
+      "nav": "cancel"
+    },
+    {
+      "id": "FX_ADD_TO",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "FX_LIST",
+      "nav": "cancel"
+    },
+    {
+      "id": "FX_ADD_AMOUNTS",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "FX_LIST",
+      "nav": "cancel"
+    },
+    {
+      "id": "FX_ADD_DATE",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "FX_LIST",
+      "nav": "cancel"
+    },
+    {
+      "id": "FX_ADD_NOTE",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "FX_LIST",
+      "nav": "cancel"
     }
   ],
   "edges": [
@@ -640,6 +724,32 @@
     ["LOAN_ADD_NAME", "LOANS"],
     ["LOAN_ADD_AMOUNT", "LOANS"],
     ["LOAN_ADD_DUE", "LOANS"],
-    ["LOAN_ADD_NOTE", "LOANS"]
+    ["LOAN_ADD_NOTE", "LOANS"],
+    ["HOME", "FX_HUB"],
+    ["FX_HUB", "FX_LIST"],
+    ["FX_HUB", "FX_ADD_FROM"],
+    ["FX_LIST", "FX_HUB"],
+    ["FX_LIST", "FX_ITEM"],
+    ["FX_LIST", "FX_ADD_FROM"],
+    ["FX_ITEM", "FX_LIST"],
+    ["FX_ITEM", "FX_EDIT_AMOUNTS"],
+    ["FX_ITEM", "FX_EDIT_DATE"],
+    ["FX_ITEM", "FX_EDIT_NOTE"],
+    ["FX_ITEM", "FX_DEL"],
+    ["FX_EDIT_AMOUNTS", "FX_ITEM"],
+    ["FX_EDIT_DATE", "FX_ITEM"],
+    ["FX_EDIT_NOTE", "FX_ITEM"],
+    ["FX_DEL", "FX_ITEM"],
+    ["FX_DEL", "FX_LIST"],
+    ["FX_ADD_FROM", "FX_ADD_TO"],
+    ["FX_ADD_TO", "FX_ADD_AMOUNTS"],
+    ["FX_ADD_AMOUNTS", "FX_ADD_DATE"],
+    ["FX_ADD_DATE", "FX_ADD_NOTE"],
+    ["FX_ADD_NOTE", "FX_LIST"],
+    ["FX_ADD_FROM", "FX_LIST"],
+    ["FX_ADD_TO", "FX_LIST"],
+    ["FX_ADD_AMOUNTS", "FX_LIST"],
+    ["FX_ADD_DATE", "FX_LIST"],
+    ["FX_ADD_NOTE", "FX_LIST"]
   ]
 }

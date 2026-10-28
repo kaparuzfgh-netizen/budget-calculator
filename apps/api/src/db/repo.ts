@@ -33,6 +33,8 @@ export interface ProfileRow {
   reminders_payments: number;
   /** Согласие на отправку скриншотов во внешний vision-провайдер (миграция 0012). */
   vision_enabled: number;
+  /** Валютные алерты (миграция 0013): окно ≥85 / ≤15 перцентиля, 1/нед на пару. */
+  fx_alerts_enabled: number;
 }
 
 export interface CommitmentRow {
@@ -135,6 +137,26 @@ export interface LoanEventRow {
   source_key: string | null;
 }
 
+/** Фактический обмен валют (шаг 8). rate = to за 1 from, market_rate — курс дня. */
+export interface ExchangeRow {
+  id: number;
+  user_id: number;
+  from_ccy: string;
+  to_ccy: string;
+  amount_from_minor: number;
+  amount_to_minor: number;
+  /** Курс сделки: amount_to/amount_from — пересчитывается при записи и правке. */
+  rate: number;
+  /** Рыночный курс на дату (to за 1 from); NULL — провайдер был недоступен. */
+  market_rate: number | null;
+  spent_on: string; // 'YYYY-MM-DD' локально
+  note: string;
+  source: string;
+  source_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Репозиторий, привязанный к конкретному пользователю. */
 export function scoped(db: Env['DB'], userId: number) {
   return {
@@ -163,7 +185,10 @@ export function scoped(db: Env['DB'], userId: number) {
       return db.prepare('SELECT * FROM profiles WHERE user_id = ?').bind(userId).first<ProfileRow>();
     },
     upsertProfile(
-      p: Omit<ProfileRow, 'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled'> & {
+      p: Omit<
+        ProfileRow,
+        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled'
+      > & {
         reminders_weekly?: number;
         reminders_payments?: number;
       },
@@ -391,7 +416,7 @@ export function scoped(db: Env['DB'], userId: number) {
     },
     /** /export — только собственные строки пользователя, без секретов/хэшей. */
     async exportUserData() {
-      const [profile, commitments, commitPays, expenses, income, debts, debtEvents, loans, loanEvents] =
+      const [profile, commitments, commitPays, expenses, income, debts, debtEvents, loans, loanEvents, exchanges] =
         await Promise.all([
           this.getProfile(),
           this.listCommitments(false),
@@ -402,6 +427,7 @@ export function scoped(db: Env['DB'], userId: number) {
           db.prepare('SELECT * FROM debt_events WHERE user_id = ? ORDER BY id').bind(userId).all<DebtEventRow>(),
           this.listLoans(),
           db.prepare('SELECT * FROM loan_events WHERE user_id = ? ORDER BY id').bind(userId).all<LoanEventRow>(),
+          this.listExchanges(),
         ]);
       const strip = <T extends Record<string, unknown>>(r: T) => {
         const { source_key, ...rest } = r; // update_id-идемпотентность не экспортируем
@@ -409,7 +435,7 @@ export function scoped(db: Env['DB'], userId: number) {
         return rest;
       };
       return {
-        schema_version: 3,
+        schema_version: 4,
         exported_at: new Date().toISOString(),
         profile: profile ? strip(profile as unknown as Record<string, unknown>) : null,
         commitments: commitments.results.map((c) => strip(c as unknown as Record<string, unknown>)),
@@ -420,6 +446,7 @@ export function scoped(db: Env['DB'], userId: number) {
         debt_events: debtEvents.results.map((e) => strip(e as unknown as Record<string, unknown>)),
         loans: loans.results.map((l) => strip(l as unknown as Record<string, unknown>)),
         loan_events: loanEvents.results.map((e) => strip(e as unknown as Record<string, unknown>)),
+        exchanges: exchanges.results.map((x) => strip(x as unknown as Record<string, unknown>)),
       };
     },
     /** /delete_me — все строки пользователя во всех таблицах с user_id (children first). */
@@ -430,6 +457,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'weekly_expenses',
         'loan_events',
         'loans',
+        'exchanges',
         'debt_events',
         'debts',
         'commitment_payments',
@@ -455,6 +483,7 @@ export function scoped(db: Env['DB'], userId: number) {
       reminders_weekly?: number;
       reminders_payments?: number;
       vision_enabled?: number;
+      fx_alerts_enabled?: number;
     }) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string)[] = [];
@@ -468,6 +497,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'reminders_weekly',
         'reminders_payments',
         'vision_enabled',
+        'fx_alerts_enabled',
       ] as const;
       for (const f of FIELDS) {
         if (patch[f] !== undefined) {
@@ -535,6 +565,91 @@ export function scoped(db: Env['DB'], userId: number) {
         )
         .bind(...(sinceIsoDate ? [userId, sinceIsoDate] : [userId]))
         .all<ExpenseRow>();
+    },
+
+    // ── журнал обменов валют (шаг 8) ──
+    /** Последние обмены (свежие первыми), верхняя граница — limit. */
+    listExchanges(limit = 50) {
+      return db
+        .prepare('SELECT * FROM exchanges WHERE user_id = ? ORDER BY spent_on DESC, id DESC LIMIT ?')
+        .bind(userId, limit)
+        .all<ExchangeRow>();
+    },
+    getExchange(id: number) {
+      return db.prepare('SELECT * FROM exchanges WHERE id = ? AND user_id = ?').bind(id, userId).first<ExchangeRow>();
+    },
+    /**
+     * Запись обмена. rate считается здесь (to/from), INSERT OR IGNORE —
+     * идемпотентность по partial UNIQUE (user_id, source_key); NULL-ключи
+     * ручных повторных записей не конфликтуют (как debts/loans).
+     */
+    addExchange(e: {
+      from_ccy: string;
+      to_ccy: string;
+      amount_from_minor: number;
+      amount_to_minor: number;
+      market_rate: number | null;
+      spent_on: string;
+      note: string;
+      source: string;
+      source_key: string | null;
+    }) {
+      const rate = e.amount_to_minor / e.amount_from_minor;
+      return db
+        .prepare(
+          `INSERT OR IGNORE INTO exchanges
+            (user_id, from_ccy, to_ccy, amount_from_minor, amount_to_minor, rate, market_rate, spent_on, note, source, source_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          userId,
+          e.from_ccy,
+          e.to_ccy,
+          e.amount_from_minor,
+          e.amount_to_minor,
+          rate,
+          e.market_rate,
+          e.spent_on,
+          e.note,
+          e.source,
+          e.source_key,
+        )
+        .run();
+    },
+    findExchangeByKey(sourceKey: string) {
+      return db
+        .prepare('SELECT * FROM exchanges WHERE user_id = ? AND source_key = ?')
+        .bind(userId, sourceKey)
+        .first<ExchangeRow>();
+    },
+    /**
+     * Правка обмена — только своей записи (чужие id молча).
+     * При смене любой суммы вызывающий ОБЯЗАН передать пересчитанный rate
+     * (to/from по новым значениям) — инвариант держится на границе repo.
+     */
+    patchExchange(
+      id: number,
+      patch: {
+        amount_from_minor?: number;
+        amount_to_minor?: number;
+        rate?: number;
+        spent_on?: string;
+        note?: string;
+        market_rate?: number | null;
+      },
+    ) {
+      const sets: string[] = ["updated_at = datetime('now')"];
+      const binds: (number | string | null)[] = [];
+      for (const k of ['amount_from_minor', 'amount_to_minor', 'rate', 'spent_on', 'note', 'market_rate'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(patch[k] ?? null);
+        }
+      binds.push(id, userId);
+      return db.prepare(`UPDATE exchanges SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    },
+    deleteExchange(id: number) {
+      return db.prepare('DELETE FROM exchanges WHERE id = ? AND user_id = ?').bind(id, userId).run();
     },
 
     // ── долги (кредиты/ипотеки, шаг 6) ──
@@ -913,7 +1028,7 @@ export function accessRepo(db: Env['DB']) {
     async listReminderCandidates(): Promise<number[]> {
       const r = await db
         .prepare(
-          'SELECT user_id FROM profiles WHERE onboarded_at IS NOT NULL AND (reminders_weekly = 1 OR reminders_payments = 1)',
+          'SELECT user_id FROM profiles WHERE onboarded_at IS NOT NULL AND (reminders_weekly = 1 OR reminders_payments = 1 OR fx_alerts_enabled = 1)',
         )
         .all<{ user_id: number }>();
       return r.results.map((x) => x.user_id);

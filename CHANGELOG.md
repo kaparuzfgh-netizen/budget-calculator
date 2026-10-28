@@ -5,6 +5,25 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Шаг 8: обмен валют — аналитика, алерты и журнал обменов.** Порт v1
+  `FXAnalytics.gs` один-в-один в `src/domain/fx.ts` (кросс через USD по
+  совпадающим датам, SMA20/50, RSI-14 простым средним, линейная регрессия,
+  перцентиль/вперед-прогноз 7·30д, сигналы convert/split/wait/hold по
+  порогам v1). `FxProvider` + `Frankfurter` получили опциональный
+  `history()` (фейк-провайдеры совместимы). Миграция `0013_fx.sql`:
+  `exchanges` (minor units, `rate`=to/from, `market_rate` по кэшу
+  Frankfurter, `source_key` идемпотентность) и `profiles.fx_alerts_enabled`.
+  Бот `/fx` + `💱 Курсы` в меню: `FX_HUB` с текстом анализа как в v1,
+  журнал `FX_LIST→FX_ITEM`, мастер записи `FX_ADD_*`, правки/удаление —
+  редьюсер `bot/fxan.ts`, `fxa:*` step-aware. Cron-алерты в окне
+  10:00–21:59: перцентиль ≥85 → «выгодное окно», ≤15 → «нижняя зона»,
+  кулдаун ISO-неделя через `claimReminder('fx', …)`, тумблер в
+  Профиль→Напоминания. Mini App: `GET /api/tma/fx` (анализ+журнал) и
+  `/api/tma/exchanges` CRUD за Bearer-JWT (`client_id` → duplicate,
+  чужой id → 404), экран `screens/fx.tsx` + кнопка на главной. Экспорт
+  (schema 4) и `/delete_me` включают обмены. Тесты: золотые значения
+  домена (`domain/fx.test.ts`), сквозные бот/repo/TMA/алерты/напоминания
+  (`fx.test.ts`), nav-реестр и privacy-таблицы расширены.
 - **Mini App: ядро экранов на Preact (веха G, продолжение).** `apps/web`
   переписан с чистого DOM на Preact 10 (зависимость `preact@10.26.9`,
   tsconfig: `jsx: react-jsx` + `jsxImportSource: preact`, без react-compat).

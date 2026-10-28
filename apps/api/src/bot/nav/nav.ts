@@ -82,7 +82,10 @@ export function homeMarkup(): ReplyMarkup {
         { text: '🏦 Кредиты', callback_data: navGo('DEBTS') },
         { text: '🤝 Долги', callback_data: navGo('LOANS') },
       ],
-      [{ text: '⚙️ Профиль', callback_data: navGo('PF_HOME') }],
+      [
+        { text: '💱 Курсы', callback_data: navGo('FX_HUB') },
+        { text: '⚙️ Профиль', callback_data: navGo('PF_HOME') },
+      ],
     ],
   };
 }

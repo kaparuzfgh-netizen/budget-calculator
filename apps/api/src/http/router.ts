@@ -18,6 +18,7 @@ const sha256HexStr = async (s: string): Promise<string> =>
 import { buildOverview } from '../tma/overview';
 import { registerTmaApi } from '../tma/api';
 import { registerTmaDebts } from '../tma/debts';
+import { registerTmaFx } from '../tma/fx';
 
 const APP_VERSION = '0.1.0';
 
@@ -170,6 +171,7 @@ export function createRouter(deps: RouterDeps = {}) {
   const fxProvider = deps.fx ?? createFrankfurter();
   registerTmaApi(app, tmaAuth, fxProvider);
   registerTmaDebts(app, tmaAuth, fxProvider);
+  registerTmaFx(app, tmaAuth, fxProvider);
 
   app.post('/telegram/webhook', async (c) => {
     const auth = await verifyWebhookSecret(

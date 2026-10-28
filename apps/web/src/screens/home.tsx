@@ -137,6 +137,9 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         <button type="button" class="btn" onClick={() => nav.push({ id: 'loans' })}>
           🤝 Долги
         </button>
+        <button type="button" class="btn" onClick={() => nav.push({ id: 'fx' })}>
+          💱 Курсы
+        </button>
         <button type="button" class="btn" onClick={() => nav.push({ id: 'profile' })}>
           ⚙️ Профиль
         </button>

@@ -197,6 +197,36 @@ flowchart TD
   LOAN_ADD_AMOUNT -- Отмена --> LOANS
   LOAN_ADD_DUE -- Отмена --> LOANS
   LOAN_ADD_NOTE -- Отмена --> LOANS
+
+  HOME --> FX_HUB["💱 Курсы: анализ пар + журнал"]
+  FX_HUB --> FX_LIST["📒 Журнал обменов"]
+  FX_HUB --> FX_ADD_FROM["Новый обмен: из чего"]
+  FX_LIST -- Назад --> FX_HUB
+  FX_LIST --> FX_ITEM["💱 Обмен: карточка"]
+  FX_LIST --> FX_ADD_FROM
+  FX_ITEM -- Назад --> FX_LIST
+  FX_ITEM --> FX_EDIT_AMOUNTS["✏️ Новые суммы"]
+  FX_ITEM --> FX_EDIT_DATE["✏️ Новая дата"]
+  FX_ITEM --> FX_EDIT_NOTE["✏️ Новая заметка"]
+  FX_ITEM --> FX_DEL["🗑 удалить? (подтверждение)"]
+  FX_EDIT_AMOUNTS -- Отмена --> FX_ITEM
+  FX_EDIT_AMOUNTS -. сохранено .-> FX_ITEM
+  FX_EDIT_DATE -- Отмена --> FX_ITEM
+  FX_EDIT_DATE -. сохранено .-> FX_ITEM
+  FX_EDIT_NOTE -- Отмена --> FX_ITEM
+  FX_EDIT_NOTE -. сохранено .-> FX_ITEM
+  FX_DEL -- Отмена --> FX_ITEM
+  FX_DEL -. удалено .-> FX_LIST
+  FX_ADD_FROM --> FX_ADD_TO["во что меняем"]
+  FX_ADD_TO --> FX_ADD_AMOUNTS["суммы «500 → 48200»"]
+  FX_ADD_AMOUNTS --> FX_ADD_DATE["дата обмена"]
+  FX_ADD_DATE --> FX_ADD_NOTE["заметка"]
+  FX_ADD_NOTE -. сохранено .-> FX_LIST
+  FX_ADD_FROM -- Отмена --> FX_LIST
+  FX_ADD_TO -- Отмена --> FX_LIST
+  FX_ADD_AMOUNTS -- Отмена --> FX_LIST
+  FX_ADD_DATE -- Отмена --> FX_LIST
+  FX_ADD_NOTE -- Отмена --> FX_LIST
 ```
 
 ## Реестр экранов
@@ -277,6 +307,18 @@ flowchart TD
 | LOAN_ADD_AMOUNT | prompt | 2 | LOANS | `[✖ Отмена]` → LOANS |
 | LOAN_ADD_DUE | prompt | 2 | LOANS | `[✖ Отмена]` → LOANS; кнопка `[Без срока]` |
 | LOAN_ADD_NOTE | prompt | 2 | LOANS | `[✖ Отмена]` → LOANS; кнопка `[Пропустить]`; сохранено → LOANS |
+| FX_HUB | menu | 1 | HOME | `[🏠 Меню]`; `[📒 Журнал]` `[➕ Записать]`; `/fx` |
+| FX_LIST | menu | 2 | FX_HUB | `[← Назад] [🏠 Меню]`; строки обменов → FX_ITEM + `[➕ Записать]` |
+| FX_ITEM | menu | 3 | FX_LIST | `[← Назад] [🏠 Меню]`; `[✏️ Суммы] [📅 Дата] [📝 Заметка] [🗑]` |
+| FX_DEL | confirm | 4 | FX_ITEM | `[Да] [✖ Отмена]` → FX_ITEM; «Да» → FX_LIST |
+| FX_EDIT_AMOUNTS | prompt | 4 | FX_ITEM | `[✖ Отмена]` → FX_ITEM; сохранено → FX_ITEM |
+| FX_EDIT_DATE | prompt | 4 | FX_ITEM | `[✖ Отмена]` → FX_ITEM; кнопка `[📅 Сегодня]`; сохранено → FX_ITEM |
+| FX_EDIT_NOTE | prompt | 4 | FX_ITEM | `[✖ Отмена]` → FX_ITEM; кнопка `[🧹 Очистить]`; сохранено → FX_ITEM |
+| FX_ADD_FROM | prompt | 3 | FX_LIST | `[✖ Отмена]` → FX_LIST; кнопки валют |
+| FX_ADD_TO | prompt | 3 | FX_LIST | `[✖ Отмена]` → FX_LIST; кнопки валют |
+| FX_ADD_AMOUNTS | prompt | 3 | FX_LIST | `[✖ Отмена]` → FX_LIST |
+| FX_ADD_DATE | prompt | 3 | FX_LIST | `[✖ Отмена]` → FX_LIST; кнопка `[📅 Сегодня]` |
+| FX_ADD_NOTE | prompt | 3 | FX_LIST | `[✖ Отмена]` → FX_LIST; кнопка `[Пропустить]`; сохранено → FX_LIST |
 
 **Примечание (Mini App):** запуск приложения — голубая menu-button у поля
 ввода (`setChatMenuButton {type:'web_app'} → MINI_APP_URL` из wrangler.toml),

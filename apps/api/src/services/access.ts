@@ -45,6 +45,16 @@ import {
   type LoanState,
 } from '../bot/loans';
 import { buildLoanCtx } from './loans';
+import {
+  advanceFx,
+  FX_SCREENS,
+  FX_STEPS,
+  fxCancelTarget,
+  renderFx,
+  type FxEffect,
+  type FxState,
+} from '../bot/fxan';
+import { buildFxCtx } from './fx';
 import { getScreen, homeMarkup, NAV_HOME } from '../bot/nav/nav';
 import type { FxProvider } from '../fx/provider';
 import { getFxRates } from '../fx/service';
@@ -94,6 +104,7 @@ const MENU: Record<string, string> = {
   '💵 Доход': '/income',
   '🏦 Кредиты': '/credits',
   '🤝 Долги': '/loans',
+  '💱 Курсы': '/fx',
   '⚙️ Профиль': '/profile',
 };
 /** pf-шаги, ждущие текстового ввода (остальные pf-шаги — навигация). */
@@ -135,6 +146,17 @@ const LOAN_TEXT_STEPS = new Set([
   'loan:repay',
   'loan:due',
   'loan:ev:edit',
+]);
+/** fx-шаги, ждущие текстового ввода (выбор валют — и кнопки, и текст). */
+const FX_TEXT_STEPS = new Set([
+  'fx:add:from',
+  'fx:add:to',
+  'fx:add:amounts',
+  'fx:add:date',
+  'fx:add:note',
+  'fx:e:amounts',
+  'fx:e:date',
+  'fx:e:note',
 ]);
 const STALE_MS = 24 * 3600 * 1000;
 
@@ -593,6 +615,107 @@ async function runLoans(msg: IncomingMessage, repo: ReturnType<typeof scoped>, d
   await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
 }
 
+// ── fx-флоу («Курсы»): контекст и выполнение эффектов ──
+const fxCtx = (repo: ReturnType<typeof scoped>, p: import('../db/repo').ProfileRow, deps: AccessDeps) =>
+  buildFxCtx(repo, p, deps.fx!, deps.now ?? new Date());
+
+async function runFxEffects(
+  effects: FxEffect[],
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+): Promise<void> {
+  const tg = deps.telegram;
+  for (const e of effects) {
+    if (e.kind === 'send') await tg.sendMessage(msg.chatId, e.text, e.markup ? { replyMarkup: e.markup } : {});
+    else if (e.kind === 'fx_add') {
+      // market_rate — текущий рынок из getFxRates (кэш+fallback); недоступен → null
+      let market: number | null = null;
+      try {
+        const r = await fxAdapter(deps).get([e.d.from, e.d.to]);
+        market = r.perUsd[e.d.to]! / r.perUsd[e.d.from]!;
+      } catch {
+        market = null;
+      }
+      await repo.addExchange({
+        from_ccy: e.d.from,
+        to_ccy: e.d.to,
+        amount_from_minor: e.d.amountFromMinor,
+        amount_to_minor: e.d.amountToMinor,
+        market_rate: market,
+        spent_on: e.d.spentOn,
+        note: e.d.note,
+        source: 'manual',
+        source_key: `tg:${msg.updateId}`,
+      });
+    } else if (e.kind === 'fx_patch') {
+      // пересчитываем rate при изменении сумм — читаем строку и мёрджим
+      const row = await repo.getExchange(e.id);
+      if (row) {
+        const patch: {
+          amount_from_minor?: number;
+          amount_to_minor?: number;
+          spent_on?: string;
+          note?: string;
+          rate?: number;
+        } = { ...e.patch };
+        if (patch.amount_from_minor !== undefined || patch.amount_to_minor !== undefined) {
+          const af = patch.amount_from_minor ?? row.amount_from_minor;
+          const at = patch.amount_to_minor ?? row.amount_to_minor;
+          if (af > 0) patch.rate = at / af;
+        }
+        await repo.patchExchange(e.id, patch);
+      }
+    } else if (e.kind === 'fx_del') await repo.deleteExchange(e.id);
+    else if (e.kind === 'render') {
+      // экран рендерится ПОСЛЕ мутаций — ctx перечитываем из БД
+      const p0 = await repo.getProfile();
+      if (p0) {
+        const ctx = await fxCtx(repo, p0, deps);
+        const r = renderFx(e.screen, e.data ?? {}, ctx);
+        await tg.sendMessage(msg.chatId, (e.prefix ?? '') + r.text, r.markup ? { replyMarkup: r.markup } : {});
+      }
+    }
+  }
+}
+
+async function applyFx(
+  r: { state: FxState | null; effects: FxEffect[] },
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+  expectedStep?: string,
+): Promise<void> {
+  if (r.state) {
+    if (expectedStep !== undefined) {
+      const w = await repo.setConversationExpected(r.state.step, JSON.stringify(r.state.data), expectedStep);
+      if (w.meta.changes === 0) return; // гонка — проигравший молчит
+    } else {
+      await repo.setConversation(r.state.step, JSON.stringify(r.state.data));
+    }
+  } else if (expectedStep !== undefined) {
+    const w = await repo.clearConversationExpected(expectedStep);
+    if (w.meta.changes === 0) return;
+  } else {
+    await repo.clearConversation();
+  }
+  await runFxEffects(r.effects, msg, repo, deps);
+}
+
+/** /fx — анализ курсов + журнал обменов (экран FX_HUB). */
+async function runFx(msg: IncomingMessage, repo: ReturnType<typeof scoped>, deps: AccessDeps): Promise<void> {
+  const tg = deps.telegram;
+  const p = await repo.getProfile();
+  if (!p) {
+    await tg.sendMessage(msg.chatId, 'Профиль не настроен — /start');
+    return;
+  }
+  const ctx = await fxCtx(repo, p, deps);
+  const r = renderFx('FX_HUB', {}, ctx);
+  await repo.setConversation(r.step, '{}'); // меню активно — кнопки живут 24ч
+  await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
+}
+
 /** Точка входа для известного пользователя: онбординг или команды. */
 async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps): Promise<void> {
   const repo = scoped(deps.db, user.id);
@@ -638,6 +761,20 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
         const ctx = await loanCtx(repo, profile, deps);
         const data = (conv.state as LoanState).data ?? {};
         const r = renderLoan(target, data, ctx);
+        await repo.setConversation(r.step, JSON.stringify(data));
+        await tg.sendMessage(msg.chatId, `Отменено.\n\n${r.text}`, r.markup ? { replyMarkup: r.markup } : {});
+        return;
+      }
+      if ((conv.state.step as string) in FX_STEPS) {
+        const target = fxCancelTarget(conv.state as FxState);
+        if (target === 'HOME') {
+          await repo.clearConversation();
+          await tg.sendMessage(msg.chatId, 'Настройка отменена.', { replyMarkup: homeMarkup() });
+          return;
+        }
+        const ctx = await fxCtx(repo, profile, deps);
+        const data = (conv.state as FxState).data ?? {};
+        const r = renderFx(target, data, ctx);
         await repo.setConversation(r.step, JSON.stringify(data));
         await tg.sendMessage(msg.chatId, `Отменено.\n\n${r.text}`, r.markup ? { replyMarkup: r.markup } : {});
         return;
@@ -763,6 +900,25 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
         return;
       }
       // навигационный loan-экран: произвольный текст — не ввод, состояние живёт
+      if (!text.startsWith('/') && !MENU[text]) {
+        await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
+        return;
+      }
+      // команда/кнопка с экрана или во время мастера — уходим к ней
+      await repo.clearConversation();
+    } else if (step in FX_STEPS) {
+      if (FX_TEXT_STEPS.has(step) && !text.startsWith('/') && !MENU[text]) {
+        // текст — ввод для шага обмена (валюта/суммы/дата/заметка)
+        const p0 = await repo.getProfile();
+        if (!p0) {
+          await repo.clearConversation();
+          return;
+        }
+        const ctx = await fxCtx(repo, p0, deps);
+        await applyFx(advanceFx(conv.state! as FxState, { type: 'text', text }, ctx), msg, repo, deps, step);
+        return;
+      }
+      // навигационный fx-экран: произвольный текст — не ввод, состояние живёт
       if (!text.startsWith('/') && !MENU[text]) {
         await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
         return;
@@ -919,6 +1075,10 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     await runLoans(msg, repo, deps);
     return;
   }
+  if (CMD('fx').test(cmd)) {
+    await runFx(msg, repo, deps);
+    return;
+  }
   if (CMD('profile').test(cmd)) {
     await runProfile(msg.chatId, tg, repo);
     return;
@@ -1025,6 +1185,7 @@ export async function handleCallback(
       INCOME_HUB: '/income',
       DEBTS: '/debts',
       LOANS: '/loans',
+      FX_HUB: '/fx',
     }[target];
     if (cmd) {
       await knownUser({ ...navMsg, text: cmd }, user, deps);
@@ -1046,6 +1207,16 @@ export async function handleCallback(
       const data = conv0 ? (JSON.parse(conv0.data) as LoanState['data']) : {};
       const ctx = await loanCtx(r, p0, deps);
       const r0 = renderLoan(target, data ?? {}, ctx);
+      await r.setConversation(r0.step, JSON.stringify(data ?? {}));
+      await deps.telegram.sendMessage(cb.chatId, r0.text, r0.markup ? { replyMarkup: r0.markup } : {});
+      return;
+    }
+    // fx-экраны — прямой рендер через renderFx (exchangeId из состояния диалога)
+    if (FX_SCREENS.has(target)) {
+      const conv0 = await r.getConversation();
+      const data = conv0 ? (JSON.parse(conv0.data) as FxState['data']) : {};
+      const ctx = await fxCtx(r, p0, deps);
+      const r0 = renderFx(target, data ?? {}, ctx);
       await r.setConversation(r0.step, JSON.stringify(data ?? {}));
       await deps.telegram.sendMessage(cb.chatId, r0.text, r0.markup ? { replyMarkup: r0.markup } : {});
       return;
@@ -1095,6 +1266,13 @@ export async function handleCallback(
     if (!(step in LOAN_STEPS)) return; // чужой шаг — молча
     const ctx = await loanCtx(r, p0, deps);
     await applyLoan(advanceLoan(st as LoanState, { type: 'callback', data: cb.data }, ctx), msg, r, deps, step);
+    return;
+  }
+  if (cb.data.startsWith('fxa:')) {
+    if (!p0?.onboarded_at || !conv) return; // без диалога кнопки обменов мертвы
+    if (!(step in FX_STEPS)) return; // чужой шаг — молча
+    const ctx = await fxCtx(r, p0, deps);
+    await applyFx(advanceFx(st as FxState, { type: 'callback', data: cb.data }, ctx), msg, r, deps, step);
     return;
   }
   // vs:* — сверка остатка со скриншота (vision, шаг 7): живёт только пока
