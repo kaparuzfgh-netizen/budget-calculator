@@ -41,6 +41,7 @@ export interface CommitmentRow {
   currency: string;
   due_day: number | null;
   active: number;
+  created_at: string;
 }
 
 export interface ExpenseRow {
@@ -76,6 +77,7 @@ export interface DebtRow {
   epoch: string; // 'YYYY-MM-DD'
   due_day: number | null;
   active: number;
+  created_at: string;
 }
 
 export interface DebtEventRow {

@@ -56,6 +56,9 @@ async function user(tgId: number, tz: string, opts: {
     await scoped(env.DB, uid).addLoan({
       counterparty: l.cp, direction: l.dir, amount_minor: l.minor, currency: l.ccy, due_on: l.due, note: null,
     });
+  // created_at по умолчанию «сейчас» — бэкдейтим, чтобы объект существовал к дате срока в тестах
+  await env.DB.prepare("UPDATE commitments SET created_at = ? WHERE user_id = ?").bind('2026-01-01 00:00:00', uid).run();
+  await env.DB.prepare("UPDATE debts SET created_at = ? WHERE user_id = ?").bind('2026-01-01 00:00:00', uid).run();
   return uid;
 }
 const run = (now: Date, deps?: { telegram?: TelegramClient }) => runReminders(env as Env, now, { telegram: deps?.telegram ?? tg, fx });
@@ -120,7 +123,7 @@ describe('runReminders — weekly', () => {
     expect(p11!.reminders_payments).toBe(0);
     // другой юзер до/после — цикл не сломан (sent содержит его сообщение)
   });
-  it('не-403 ошибка → claim освобождается и следующий прогон ретраит', async () => {
+  it('не-403 ошибка → claim освобождается и следующий час в окне ретраит', async () => {
     await user(700012, 'UTC');
     const boom: TelegramClient = {
       sendMessage: async () => { throw new Error('net down'); },
@@ -129,7 +132,15 @@ describe('runReminders — weekly', () => {
     };
     await run(new Date(Date.UTC(2026, 9, 25, 20, 0)), { telegram: boom });
     expect(sent).toHaveLength(0);
-    await run(new Date(Date.UTC(2026, 9, 25, 20, 0)), { telegram: tg }); // ретрай — шлёт
+    await run(new Date(Date.UTC(2026, 9, 25, 21, 0)), { telegram: tg }); // ретрай через час — шлёт
+    expect(sent).toHaveLength(1);
+  });
+  it('окно weekly: вс 19:00 — тишина; пн 20:00 — тишина; вс 23:00 — шлёт', async () => {
+    await user(700013, 'UTC');
+    await run(new Date(Date.UTC(2026, 9, 25, 19, 0))); // вс 19:00 — до окна
+    await run(new Date(Date.UTC(2026, 9, 26, 20, 0))); // пн 20:00 — не воскресенье
+    expect(sent).toHaveLength(0);
+    await run(new Date(Date.UTC(2026, 9, 25, 23, 0))); // вс 23:00 — край окна
     expect(sent).toHaveLength(1);
   });
 });
@@ -137,7 +148,7 @@ describe('runReminders — weekly', () => {
 describe('runReminders — платежи', () => {
   it('due_day через 2 дня → одно сообщение; 31-е: февраль кламп; due 1-е → конец пред. месяца', async () => {
     // due 31 окт → напоминание 29 окт; due 1 ноя → напоминание 30 окт (след. месяц!)
-    await user(700020, 'UTC', {
+    const uid20 = await user(700020, 'UTC', {
       commits: [
         { name: 'Аренда', minor: 70000, ccy: 'USD', due: 31 },
         { name: 'Связь', minor: 30000, ccy: 'USD', due: 1 },
@@ -145,6 +156,9 @@ describe('runReminders — платежи', () => {
         { name: 'Выключенный', minor: 10000, ccy: 'USD', due: 31, active: 0 },
       ],
     });
+    // «Связь» и «Страховка» заведены после своих октябрьских сроков — автопроводок не будет
+    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-05 00:00:00' WHERE user_id = ? AND name = 'Связь'").bind(uid20).run();
+    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-20 00:00:00' WHERE user_id = ? AND name = 'Страховка'").bind(uid20).run();
     await run(new Date(Date.UTC(2026, 9, 29, 10, 0))); // 29 окт: due 31 → за 2 дня
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain('Аренда');
@@ -153,6 +167,21 @@ describe('runReminders — платежи', () => {
     await run(new Date(Date.UTC(2026, 9, 30, 10, 0))); // 30 окт: due 1 ноя → за 2 дня
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain('Связь');
+  });
+  it('окно платежей: сбой в 10:00 → ретрай в 11:00; в 09:00 и 22:00 — тишина', async () => {
+    await user(700025, 'UTC', { commits: [{ name: 'Аренда', minor: 70000, ccy: 'USD', due: 31 }] });
+    const boom: TelegramClient = {
+      sendMessage: async () => { throw new Error('net down'); },
+      answerCallbackQuery: async () => {},
+      sendDocument: async () => {},
+    };
+    await run(new Date(Date.UTC(2026, 9, 29, 9, 0))); // до окна
+    await run(new Date(Date.UTC(2026, 9, 29, 10, 0)), { telegram: boom }); // сбой — claim снят
+    await run(new Date(Date.UTC(2026, 9, 29, 22, 0))); // после окна — ретрая нет
+    expect(sent).toHaveLength(0);
+    await run(new Date(Date.UTC(2026, 9, 29, 11, 0))); // ретрай в окне — шлёт
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain('Аренда');
   });
   it('изоляция: в сообщении юзера A нет данных юзера B; без due_day — игнор', async () => {
     await user(700030, 'UTC', { commits: [{ name: 'A-платёж', minor: 1, ccy: 'USD', due: 31 }] });
@@ -245,6 +274,65 @@ describe('runReminders — долги и займы (H4)', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('автопроводка долга: дата события = день срока; пропущенный тик → catch-up на след. день; повтор — нет; удалённое не воскресает', async () => {
+    const uid = await user(700055, 'UTC', {
+      debts: [{ name: 'Кредит', ccy: 'RUB', rate: 0.12, bal: 10000000, pay: 1100000, due: 28 }],
+    });
+    const repo = scoped(env.DB, uid);
+    const debtId = (await repo.listDebts()).results[0]!.id;
+    // крон пропустил день срока (28-е): прогон 29-го в 10:00 догоняет, событие датой 28-го
+    await run(new Date(Date.UTC(2026, 9, 29, 10, 0)));
+    let evs = (await repo.listDebtEvents(debtId)).results;
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({ kind: 'payment', source: 'auto', event_on: '2026-10-28', amount_minor: 1100000 });
+    expect(sent).toHaveLength(1);
+    // повторные прогоны этого месяца — ничего
+    await run(new Date(Date.UTC(2026, 9, 30, 10, 0)));
+    await run(new Date(Date.UTC(2026, 9, 31, 10, 0)));
+    expect((await repo.listDebtEvents(debtId)).results).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    // юзер удалил автособытие → ре-проводки в этом месяце нет (claim объект+месяц занят)
+    await repo.deleteDebtEvent(evs[0]!.id);
+    await run(new Date(Date.UTC(2026, 9, 31, 10, 0)));
+    expect((await repo.listDebtEvents(debtId)).results).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    // следующий месяц — проводка снова, датой срока
+    await run(new Date(Date.UTC(2026, 10, 28, 10, 0)));
+    evs = (await repo.listDebtEvents(debtId)).results;
+    expect(evs).toHaveLength(1);
+    expect(evs[0]!.event_on).toBe('2026-11-28');
+  });
+  it('автопроводка: объект заведён после срока месяца → в этом месяце не проводится; со след. — да', async () => {
+    const uid = await user(700056, 'UTC', {
+      commits: [{ name: 'Связь', minor: 30000, ccy: 'USD', due: 15 }],
+      debts: [{ name: 'Новый', ccy: 'RUB', rate: 0.12, bal: 1000000, pay: 50000, due: 15 }],
+    });
+    // заведены 20 октября — после срока 15 октября
+    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-20 00:00:00' WHERE user_id = ?").bind(uid).run();
+    await env.DB.prepare("UPDATE debts SET created_at = '2026-10-20 00:00:00' WHERE user_id = ?").bind(uid).run();
+    const repo = scoped(env.DB, uid);
+    const cid = (await repo.listCommitments()).results[0]!.id;
+    const did = (await repo.listDebts()).results[0]!.id;
+    await run(new Date(Date.UTC(2026, 9, 28, 10, 0))); // 28 окт: срок прошёл, но объекта не было
+    expect((await repo.listCommitmentPayments(cid)).results).toHaveLength(0);
+    expect((await repo.listDebtEvents(did)).results).toHaveLength(0);
+    expect(sent).toHaveLength(0);
+    await run(new Date(Date.UTC(2026, 10, 15, 10, 0))); // 15 ноя — первый реальный срок
+    expect((await repo.listCommitmentPayments(cid)).results).toHaveLength(1);
+    expect((await repo.listDebtEvents(did)).results).toHaveLength(1);
+  });
+  it('автопроводка долга: последний платёж усечён до остатка + проценты за период', async () => {
+    const uid = await user(700057, 'UTC', {
+      debts: [{ name: 'Хвост', ccy: 'RUB', rate: 0.12, bal: 500000, pay: 1100000, due: 31 }],
+    });
+    const repo = scoped(env.DB, uid);
+    const did = (await repo.listDebts()).results[0]!.id;
+    await run(new Date(Date.UTC(2026, 9, 31, 10, 0)));
+    const ev = (await repo.listDebtEvents(did)).results[0]!;
+    // min(11000, 5000 + 5000*0.12/12 = 5050) → ≤ 505000 minor
+    expect(ev.amount_minor).toBeLessThanOrEqual(505000);
+    expect(ev.amount_minor).toBeLessThan(1100000);
+  });
   it('автопроводка платежа: в день due_day пишется оплата (source=auto); повтор — дедуп; удалённое не воскресает; след. месяц — снова', async () => {
     const uid = await user(700080, 'UTC', {
       commits: [{ name: 'Квартплата', minor: 5000000, ccy: 'RUB', due: 5 }],

@@ -1,20 +1,28 @@
 /**
- * reminders.ts — cron-сервис напоминаний (веха D).
+ * reminders.ts — cron-сервис напоминаний (веха D, надёжность P1-1).
  * Для каждого онбоарденного с включёнными флагами считаем ЛОКАЛЬНОЕ время
- * (profile.timezone; невалидная → UTC) и шлём:
- *   a) weekly: воскресенье 20:00 local → «Итоги недели» (через runWeek)
- *   b) payment: 10:00 local → платежи (commitments и monthly-долги), чей
+ * (profile.timezone; невалидная → UTC) и шлём В ОКНАХ (часовой тик может
+ * пропасть — окно, а не точный час, даёт ретрай):
+ *   a) weekly: воскресенье 20:00–23:59 local → «Итоги недели» (через runWeek)
+ *   b) payment: 10:00–21:59 local → платежи (commitments и monthly-долги), чей
  *      дедлайн через 2 дня; платёж/долг, уже оплаченный в этом месяце,
  *      не напоминает
- *   c) auto_post: в день платежа (monthly-долг или активный commitment
- *      с due_day) пишется событие (source='auto', source_key
- *      'auto:<debt>:<YYYY-MM>' / 'auto:c:<id>:<YYYY-MM>') и ОДНО общее
- *      уведомление — вместе под флагом reminders_payments
- *   d) loan: 10:00 local → займы со сроком «сегодня» и «через 3 дня»
+ *   c) auto_post: в том же окне автопроводка monthly-долгов и активных
+ *      commitments с due_day, чей срок в этом месяце УЖЕ наступил
+ *      (catch-up за пропущенные дни). Дата события — день срока, не день
+ *      прогона. Claim на объект+месяц ('d:<id>:<YYYY-MM>' / 'c:<id>:<YYYY-MM>')
+ *      — удалённая юзером автозапись не воскресает до конца месяца, а
+ *      следующий месяц проводится снова. Объект, заведённый после даты
+ *      срока этого месяца, начнёт проводиться со следующего месяца.
+ *      Уведомление — одно на прогон, best-effort: записи уже корректны,
+ *      поэтому при не-403 ошибке отправки claim'ы и события остаются
+ *      (дублировать данные нельзя), а день считается failed.
+ *   d) loan: 10:00–21:59 local → займы со сроком «сегодня» и «через 3 дня»
  * Идемпотентность: reminder_log claim (INSERT OR IGNORE) — шлём только если
- * changes=1; 403 (бот заблокирован) → отключаем флаги; прочие ошибки →
- * снимаем claim — следующий часовой прогон повторит. Ошибка одного
- * пользователя не останавливает цикл. В логах — только счётчики и коды.
+ * changes=1; 403 (бот заблокирован) → отключаем флаги; прочие ошибки
+ * отправки (b/d) → снимаем claim — следующий часовой прогон в окне повторит.
+ * Ошибка одного пользователя не останавливает цикл. В логах — только
+ * счётчики и коды.
  */
 import { scoped, accessRepo } from '../db/repo';
 import { debtViews, debtView } from './debts';
@@ -25,6 +33,7 @@ import { createTelegramClient, TelegramError, sanitizeTelegramError, type Telegr
 import { createFrankfurter } from '../fx/frankfurter';
 import { getFxRates } from '../fx/service';
 import { runWeek } from '../bot/features';
+import { periodsPerYear } from '../domain/debt';
 import { todayInTz } from '../bot/parse';
 import { fmtMoney } from '../bot/format';
 import type { InlineButton } from '../telegram/client';
@@ -85,8 +94,9 @@ export function minus2days(y: number, m: number, d: number): { y: number; m: num
   return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
 }
 
-const WEEKLY_HOUR = 20;
-const PAY_HOUR = 10;
+const WEEKLY_HOUR = 20; // окно еженедельного итога: вс 20:00–23:59
+const PAY_HOUR = 10; // окно платежей: 10:00–21:59
+const PAY_HOUR_END = 22;
 const HOME_ROW_MK = { inline_keyboard: [[{ text: '🏠 Меню', callback_data: 'nv:home' }]] };
 const WEEKLY_MK: { inline_keyboard: InlineButton[][] } = {
   inline_keyboard: [
@@ -154,7 +164,7 @@ export async function runReminders(
       const tz = p.timezone;
 
       // ── еженедельный опрос: воскресенье 20:00 локально ──
-      if (p.reminders_weekly === 1 && lp.dow === 0 && lp.hour === WEEKLY_HOUR) {
+      if (p.reminders_weekly === 1 && lp.dow === 0 && lp.hour >= WEEKLY_HOUR) {
         const claim = await repo.claimReminder('weekly', lp.iso);
         if (claim.meta.changes === 1) {
           try {
@@ -172,8 +182,8 @@ export async function runReminders(
         } else skipped++;
       }
 
-      // ── платежи и сроки: 10:00 локально ──
-      if (p.reminders_payments === 1 && lp.hour === PAY_HOUR) {
+      // ── платежи и сроки: окно 10:00–21:59 локально ──
+      if (p.reminders_payments === 1 && lp.hour >= PAY_HOUR && lp.hour < PAY_HOUR_END) {
         /** claim → send → 403 гасит флаги / прочее → release+ретрай (общий цикл трёх уведомлений). */
         const sendClaimed = async (kind: string, text: string, mk: { inline_keyboard: InlineButton[][] }) => {
           const claim = await repo.claimReminder(kind, lp.iso);
@@ -223,56 +233,86 @@ export async function runReminders(
         );
         if (dueLines.length) await sendClaimed('payment', `⏰ Через 2 дня платежи:\n${dueLines.join('\n')}`, HOME_ROW_MK);
 
-        // (c) автопроводка: сегодня — день платежа monthly-долга или commitment (due_day клампится)
-        const dueToday = dvs.filter((v) => !paidThisMonth(v) && dueDateFor(v.debt.due_day!, lp.year, lp.month).d === lp.day);
-        const dueTodayCommits = commits.filter(
-          (c) => c.due_day && !commitPaidThisMonth(c.id) && dueDateFor(c.due_day, lp.year, lp.month).d === lp.day,
-        );
-        if (dueToday.length || dueTodayCommits.length) {
-          const claim = await repo.claimReminder('auto_post', lp.iso);
-          if (claim.meta.changes === 1) {
-            try {
-              const lines: string[] = [];
-              for (const v of dueToday) {
-                // дедуп по source_key — безопасно при ретрае; claim выше — защита от ре-проводки после удаления
-                await repo.addDebtEvent({
-                  debt_id: v.debt.id,
-                  kind: 'payment',
-                  amount_minor: Math.round(v.payment * 100),
-                  event_on: lp.iso,
-                  source: 'auto',
-                  source_key: `auto:${v.debt.id}:${monthKey}`,
-                });
-                const after = await debtView(repo, v.debt, lp.iso);
-                lines.push(`  • ${v.debt.name} — ${fmtMoney(v.payment, v.debt.currency)} → остаток ${fmtMoney(after.balance, v.debt.currency)}`);
-              }
-              for (const c of dueTodayCommits) {
-                await repo.addCommitmentPayment({
-                  commitment_id: c.id,
-                  amount_minor: c.amount_minor,
-                  currency: c.currency,
-                  paid_on: lp.iso,
-                  source: 'auto',
-                  source_key: `auto:c:${c.id}:${monthKey}`,
-                });
-                lines.push(`  • ${c.name} — ${fmtMoney(c.amount_minor / 100, c.currency)}`);
-              }
-              await tgU.sendMessage(
-                user.telegram_id,
-                `✅ Записал автоплатежи (изменить или удалить — в журнале):\n${lines.join('\n')}`,
-                { replyMarkup: autoPostMk(dueToday.length > 0, dueTodayCommits.length > 0) },
-              );
-              sent++;
-            } catch (e) {
-              if (e instanceof TelegramError && e.status === 403) {
-                await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0 });
-                console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
-              } else {
-                await repo.releaseReminder('auto_post', lp.iso);
-                throw e;
-              }
+        // (c) автопроводка: срок ЭТОГО месяца уже наступил (due_day клампится) —
+        // catch-up за пропущенные дни. Claim на объект+месяц защищает от
+        // ре-проводки после удаления записи юзером; дата события — день срока.
+        const isoOf = (d: { y: number; m: number; d: number }) =>
+          `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+        const lines: string[] = [];
+        let postedDebt = false;
+        let postedCommit = false;
+        for (const v of dvs) {
+          if (paidThisMonth(v)) continue;
+          const ddue = dueDateFor(v.debt.due_day!, lp.year, lp.month);
+          if (ddue.d > lp.day) continue; // срок этого месяца ещё не наступил
+          const evOn = isoOf(ddue);
+          if (v.debt.created_at.slice(0, 10) > evOn) continue; // долг заведён после срока — со след. месяца
+          const key = `d:${v.debt.id}:${monthKey}`;
+          const claim = await repo.claimReminder('auto_post', key);
+          if (claim.meta.changes !== 1) continue;
+          try {
+            // последний платёж короче графика: не выше «остаток + проценты за период» (P3-1)
+            const amt = Math.min(v.payment, v.balance + (v.balance * v.debt.rate) / periodsPerYear(v.debt.frequency));
+            await repo.addDebtEvent({
+              debt_id: v.debt.id,
+              kind: 'payment',
+              amount_minor: Math.round(amt * 100),
+              event_on: evOn,
+              source: 'auto',
+              source_key: `auto:${v.debt.id}:${monthKey}`,
+            });
+            const after = await debtView(repo, v.debt, lp.iso);
+            lines.push(`  • ${v.debt.name} — ${fmtMoney(amt, v.debt.currency)} → остаток ${fmtMoney(after.balance, v.debt.currency)}`);
+            postedDebt = true;
+          } catch (e) {
+            // запись не удалась — снимаем claim, следующий тик окна повторит
+            await repo.releaseReminder('auto_post', key);
+            throw e;
+          }
+        }
+        for (const c of commits) {
+          if (!c.due_day || commitPaidThisMonth(c.id)) continue;
+          const ddue = dueDateFor(c.due_day, lp.year, lp.month);
+          if (ddue.d > lp.day) continue;
+          const evOn = isoOf(ddue);
+          if (c.created_at.slice(0, 10) > evOn) continue;
+          const key = `c:${c.id}:${monthKey}`;
+          const claim = await repo.claimReminder('auto_post', key);
+          if (claim.meta.changes !== 1) continue;
+          try {
+            await repo.addCommitmentPayment({
+              commitment_id: c.id,
+              amount_minor: c.amount_minor,
+              currency: c.currency,
+              paid_on: evOn,
+              source: 'auto',
+              source_key: `auto:c:${c.id}:${monthKey}`,
+            });
+            lines.push(`  • ${c.name} — ${fmtMoney(c.amount_minor / 100, c.currency)}`);
+            postedCommit = true;
+          } catch (e) {
+            await repo.releaseReminder('auto_post', key);
+            throw e;
+          }
+        }
+        if (lines.length) {
+          try {
+            await tgU.sendMessage(
+              user.telegram_id,
+              `✅ Записал автоплатежи (изменить или удалить — в журнале):\n${lines.join('\n')}`,
+              { replyMarkup: autoPostMk(postedDebt, postedCommit) },
+            );
+            sent++;
+          } catch (e) {
+            if (e instanceof TelegramError && e.status === 403) {
+              await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0 });
+              console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
+            } else {
+              // уведомление best-effort: записи корректны, claim'ы не трогаем
+              failed++;
+              console.error(`reminders: user ${userId} auto_post notify failed (${sanitizeTelegramError(e)})`);
             }
-          } else skipped++;
+          }
         }
 
         // (d) займы со сроком: «сегодня» и «через 3 дня»
