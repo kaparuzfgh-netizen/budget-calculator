@@ -146,7 +146,16 @@ export async function runReminders(
   const tg = deps?.telegram ?? createTelegramClient({ token: env.TELEGRAM_BOT_TOKEN });
   const provider = deps?.fx ?? createFrankfurter();
   const fx = { get: (c: string[]) => getFxRates(env.DB, provider, c, now) };
-  const ids = await accessRepo(env.DB).listReminderCandidates();
+  const access = accessRepo(env.DB);
+  // P2-5 хозчистка — каждый часовой тик: пустой DELETE дёшев, а таблицы
+  // не растут бесконечно. Сбой чистки не должен стоить прогоном напоминаний.
+  try {
+    await access.cleanupProcessedUpdates();
+    await access.cleanupReminderLog();
+  } catch (e) {
+    console.warn(`reminders: cleanup failed (${sanitizeTelegramError(e)})`);
+  }
+  const ids = await access.listReminderCandidates();
   let sent = 0;
   let skipped = 0;
   let failed = 0;
@@ -158,8 +167,8 @@ export async function runReminders(
     try {
       const p = await repo.getProfile();
       if (!p?.onboarded_at) continue;
-      const user = await env.DB.prepare('SELECT telegram_id FROM users WHERE id = ? AND deleted_at IS NULL').bind(userId).first<{ telegram_id: number }>();
-      if (!user) continue;
+      const telegramId = await access.getTelegramId(userId); // P2-6: SQL только в repo.ts
+      if (telegramId === null) continue;
       const lp = localParts(p.timezone, now);
       const tz = p.timezone;
 
@@ -168,7 +177,7 @@ export async function runReminders(
         const claim = await repo.claimReminder('weekly', lp.iso);
         if (claim.meta.changes === 1) {
           try {
-            await runWeek(user.telegram_id, tgU, repo, fx, todayInTz(tz, now), '📅 <b>Итоги недели</b>\n\n', WEEKLY_MK);
+            await runWeek(telegramId, tgU, repo, fx, todayInTz(tz, now), '📅 <b>Итоги недели</b>\n\n', WEEKLY_MK);
             sent++;
           } catch (e) {
             if (e instanceof TelegramError && e.status === 403) {
@@ -192,7 +201,7 @@ export async function runReminders(
             return;
           }
           try {
-            await tgU.sendMessage(user.telegram_id, text, { replyMarkup: mk });
+            await tgU.sendMessage(telegramId, text, { replyMarkup: mk });
             sent++;
           } catch (e) {
             if (e instanceof TelegramError && e.status === 403) {
@@ -298,7 +307,7 @@ export async function runReminders(
         if (lines.length) {
           try {
             await tgU.sendMessage(
-              user.telegram_id,
+              telegramId,
               `✅ Записал автоплатежи (изменить или удалить — в журнале):\n${lines.join('\n')}`,
               { replyMarkup: autoPostMk(postedDebt, postedCommit) },
             );

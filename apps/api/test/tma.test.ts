@@ -8,13 +8,14 @@
  *  (c) изоляция: пользователь B не видит данные A (цифры — свои);
  *  (d) SPA smoke: GET / отдаёт index.html через биндинг ASSETS.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyD1Migrations, SELF } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
 import type { FxProvider } from '../src/fx/provider';
 import { scoped } from '../src/db/repo';
-import { monthInTz, todayInTz } from '../src/bot/parse';
+import { monthInTz, todayInTz, weekStartInTz } from '../src/bot/parse';
+import { buildOverview } from '../src/tma/overview';
 import { signJwt, verifyJwt } from '../src/tma/auth';
 
 const BOT_TOKEN = '123456:test-bot-token';
@@ -267,6 +268,56 @@ describe('JWT-гейт /api/tma/overview', () => {
     const rA = await overviewGet(await tokenFor(613));
     expect(rA.status).toBe(200);
     expect(JSON.stringify(await rA.json())).toContain('Аренда');
+  });
+});
+
+describe('P2-1: выборка трат ограничена текущими неделей/месяцем', () => {
+  it('overview: listExpenses зовётся с since = min(понедельник недели, 1-е месяца)', async () => {
+    const uid = await addUser(630, 'BND');
+    const repo = scoped(env.DB, uid);
+    const spy = vi.spyOn(repo, 'listExpenses');
+    const now = new Date();
+    const o = await buildOverview(repo, async () => ({ perUsd: { USD: 1 }, asOf: 'x', stale: false }), now);
+    expect(o).toBeTruthy();
+    expect(spy).toHaveBeenCalledTimes(1);
+    const since = spy.mock.calls[0]![0]!;
+    expect(since).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const mStart = `${monthInTz(TZ, now)}-01`;
+    const wStart = weekStartInTz(TZ, now);
+    expect(since).toBe(wStart < mStart ? wStart : mStart);
+  });
+
+  it('GET /api/tma/week: старая трата не читается (не доезжает до FX) и не раздувает месяц', async () => {
+    const uid = await addUser(631, 'W');
+    const repo = scoped(env.DB, uid);
+    // маркер-валюта ZZZ: будь строка прочитана — ушла бы в провайдер курсов
+    await repo.addExpense({
+      spent_on: '2000-01-15', amount_minor: 99900, currency: 'ZZZ',
+      note: null, source: 'manual', source_key: 'e-old',
+    });
+    await repo.addExpense({
+      spent_on: todayInTz(TZ, new Date()), amount_minor: 500, currency: 'EUR',
+      note: null, source: 'manual', source_key: 'e-new',
+    });
+    const ccys: string[][] = [];
+    const spyFx: FxProvider = {
+      latest: async (c) => {
+        ccys.push(c);
+        return { perUsd: { USD: 1, EUR: 0.9, RUB: 90 }, asOf: 'x' };
+      },
+    };
+    const app2 = createRouter({ fx: spyFx });
+    const r = await app2.fetch(
+      new Request('https://t/api/tma/week', { headers: { Authorization: `Bearer ${await tokenFor(631)}` } }),
+      tenv(),
+    );
+    expect(r.status).toBe(200);
+    const j = (await r.json()) as { month_spent_minor: number; week_spent_minor: number };
+    // 5 EUR → USD при perUsd.EUR=0.9: 5/0.9 ≈ 5.56 → 556 minor
+    expect(j.month_spent_minor).toBe(556);
+    expect(j.week_spent_minor).toBe(556);
+    expect(ccys.length).toBeGreaterThan(0); // FX-запрос был (новая трата в EUR)
+    expect(ccys.flat()).not.toContain('ZZZ'); // а двухлетнюю трату вообще не прочитали
   });
 });
 

@@ -1,8 +1,9 @@
 /** reminders.test.ts — cron-сервис runReminders (веха D). */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { runReminders, localParts, dueDateFor, minus2days } from '../src/services/reminders';
+import { runWeek } from '../src/bot/features';
 import { scoped } from '../src/db/repo';
 import { TelegramError, type TelegramClient } from '../src/telegram/client';
 import type { FxProvider } from '../src/fx/provider';
@@ -435,5 +436,42 @@ describe('runReminders — долги и займы (H4)', () => {
     await run(new Date(Date.UTC(2026, 9, 31, 10, 0)));
     const vasya = sent.find((m) => m.text.includes('Вася'));
     expect(vasya?.text).toContain('Сегодня');
+  });
+});
+
+describe('P2-5: хозчистка на каждом тике крона', () => {
+  it('старые processed_updates (>7д) и reminder_log (>400д) чистятся; свежие и kb_removed живут', async () => {
+    const uid = await user(700100, 'UTC', { weekly: 0, pay: 0 });
+    // kb_removed этого юзера бэкдейтим — проверяем иммунитет к чистке именно на старой строке
+    await env.DB.prepare("UPDATE reminder_log SET sent_at = datetime('now','-401 days') WHERE user_id = ?").bind(uid).run();
+    await env.DB.prepare("INSERT INTO reminder_log (user_id, kind, key, sent_at) VALUES (?, 'weekly', 'old', datetime('now','-401 days'))").bind(uid).run();
+    await env.DB.prepare("INSERT INTO reminder_log (user_id, kind, key, sent_at) VALUES (?, 'weekly', 'fresh', datetime('now','-1 days'))").bind(uid).run();
+    await env.DB.prepare("INSERT INTO processed_updates (update_id, created_at) VALUES (9101, datetime('now','-8 days'))").run();
+    await env.DB.prepare("INSERT INTO processed_updates (update_id, created_at) VALUES (9102, datetime('now','-1 days'))").run();
+    await run(new Date(Date.UTC(2026, 9, 28, 12, 0)));
+    const pu = (await env.DB.prepare('SELECT update_id FROM processed_updates ORDER BY update_id').all<{ update_id: number }>()).results.map((r) => r.update_id);
+    expect(pu).toEqual([9102]);
+    const rl = (await env.DB.prepare('SELECT kind, key FROM reminder_log WHERE user_id = ? ORDER BY kind, key').bind(uid).all<{ kind: string; key: string }>()).results;
+    expect(rl).toEqual([
+      { kind: 'kb_removed', key: 'v1' },
+      { kind: 'weekly', key: 'fresh' },
+    ]);
+  });
+});
+
+describe('P2-1: runWeek — граница выборки трат', () => {
+  it('listExpenses читает от min(понедельник недели, начало месяца), не всю историю', async () => {
+    const uid = await user(700101, 'UTC', { weekly: 0, pay: 0 });
+    const repo = scoped(env.DB, uid);
+    const fxGet = { get: async () => ({ perUsd: { USD: 1, RUB: 97 }, asOf: 'x', stale: false }) };
+    const spy = vi.spyOn(repo, 'listExpenses');
+    // вс 2026-10-25: неделя с 19.10, месяц с 01.10 → since = '2026-10-01'
+    await runWeek(700101, tg, repo, fxGet, '2026-10-25');
+    expect(spy).toHaveBeenLastCalledWith('2026-10-01');
+    // чт 2026-10-01: неделя началась ещё в сентябре (пн 28.09) → since уходит туда
+    await runWeek(700101, tg, repo, fxGet, '2026-10-01');
+    expect(spy).toHaveBeenLastCalledWith('2026-09-28');
+    spy.mockRestore();
+    void uid;
   });
 });

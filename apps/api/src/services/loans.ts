@@ -39,9 +39,16 @@ export async function loanView(repo: ScopedRepo, loan: LoanRow): Promise<LoanVie
 }
 
 export async function loanViews(repo: ScopedRepo): Promise<LoanView[]> {
-  const out: LoanView[] = [];
-  for (const l of (await repo.listLoans()).results) out.push(await loanView(repo, l));
-  return out;
+  // P2-2: все журналы одним запросом (не N+1); группировка по loan_id
+  // сохраняет порядок replay (ORDER BY loan_id, event_on, id).
+  const [loans, events] = await Promise.all([repo.listLoans(), repo.listLoanEventsAll()]);
+  const byLoan = new Map<number, LoanEventRow[]>();
+  for (const e of events.results) {
+    const arr = byLoan.get(e.loan_id);
+    if (arr) arr.push(e);
+    else byLoan.set(e.loan_id, [e]);
+  }
+  return loans.results.map((l) => toView(l, byLoan.get(l.id) ?? []));
 }
 
 const usdTotal = (views: LoanView[], perUsd: Record<string, number>) =>

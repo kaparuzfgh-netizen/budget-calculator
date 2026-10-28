@@ -15,6 +15,7 @@ import { round2, toMinor } from '../domain/money';
 import { checkRepay } from '../domain/loan';
 import { navRow } from './nav/nav';
 import { parseAmountDate, parseDayMonth } from './debts';
+import { LIMITS } from '../tma/common';
 
 export interface LoanAddDraft {
   direction?: 'owe' | 'owed' | undefined;
@@ -392,7 +393,13 @@ export function advanceLoan(
   };
   const view = () => all.find((x) => x.loan.id === d.loanId);
   const add = d.add ?? {};
-  const restartAdd = () => go('LOAN_ADD_DIR', { add: {} });
+  const restartAdd = () => {
+    // P2-2: открытые займы (closed_at IS NULL) — та же граница, что у REST countLoans
+    const active = all.filter((v) => v.loan.closed_at === null).length;
+    if (active >= LIMITS.maxLoans)
+      return ok(state, send(`Максимум ${LIMITS.maxLoans} займов — сначала удалите ненужный.`));
+    return go('LOAN_ADD_DIR', { add: {} });
+  };
 
   /** Финал мастера: запись займа + возврат в список (R3). */
   const finishAdd = (draft: LoanAddDraft) =>

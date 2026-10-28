@@ -78,6 +78,8 @@ export interface DebtRow {
   due_day: number | null;
   active: number;
   created_at: string;
+  /** Идемпотентность создания из Mini App ('tma:<client_id>'); NULL у бота/вручную. */
+  source_key: string | null;
 }
 
 export interface DebtEventRow {
@@ -104,6 +106,8 @@ export interface LoanRow {
   due_on: string | null; // 'YYYY-MM-DD' или NULL
   note: string | null;
   closed_at: string | null; // закрыт вручную — остаток прощён
+  /** Идемпотентность создания из Mini App ('tma:<client_id>'); NULL у бота/вручную. */
+  source_key: string | null;
 }
 
 /** Оплата регулярного платежа (журнал commitments): manual/auto + source_key. */
@@ -540,6 +544,12 @@ export function scoped(db: Env['DB'], userId: number) {
     getDebt(id: number) {
       return db.prepare('SELECT * FROM debts WHERE id = ? AND user_id = ?').bind(id, userId).first<DebtRow>();
     },
+    /**
+     * Создание долга. source_key ('tma:<client_id>') — только REST Mini App;
+     * partial UNIQUE(user_id, source_key) молча игнорирует NULL-ключи бота.
+     * INSERT OR IGNORE: при гонке повторный запрос даёт changes=0 —
+     * вызывающий достаёт существующую строку через findDebtByKey.
+     */
     addDebt(d: {
       name: string;
       currency: string;
@@ -549,12 +559,13 @@ export function scoped(db: Env['DB'], userId: number) {
       initial_payment_minor: number;
       epoch: string;
       due_day: number | null;
+      source_key?: string | null;
     }) {
       return db
         .prepare(
-          `INSERT INTO debts (user_id, name, currency, rate, frequency,
-            initial_balance_minor, initial_payment_minor, epoch, due_day)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO debts (user_id, name, currency, rate, frequency,
+            initial_balance_minor, initial_payment_minor, epoch, due_day, source_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           userId,
@@ -566,8 +577,20 @@ export function scoped(db: Env['DB'], userId: number) {
           d.initial_payment_minor,
           d.epoch,
           d.due_day,
+          d.source_key ?? null,
         )
         .run();
+    },
+    findDebtByKey(sourceKey: string) {
+      return db.prepare('SELECT * FROM debts WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<DebtRow>();
+    },
+    /** Активные долги — верхняя граница лимита (P2-2). */
+    async countDebts(): Promise<number> {
+      const r = await db
+        .prepare('SELECT COUNT(*) AS n FROM debts WHERE user_id = ? AND active = 1')
+        .bind(userId)
+        .first<{ n: number }>();
+      return r?.n ?? 0;
     },
     /** Точечные правки — все WHERE id=? AND user_id=? (чужие id молча игнорируются). */
     patchDebt(
@@ -602,6 +625,13 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM debt_events WHERE user_id = ? AND debt_id = ? ORDER BY event_on, id')
         .bind(userId, debtId)
+        .all<DebtEventRow>();
+    },
+    /** Все журналы разом — для plural-вью без N+1 (P2-2). Порядок: по долгу, дальше replay. */
+    listDebtEventsAll() {
+      return db
+        .prepare('SELECT * FROM debt_events WHERE user_id = ? ORDER BY debt_id, event_on, id')
+        .bind(userId)
         .all<DebtEventRow>();
     },
     /** INSERT OR IGNORE — идемпотентность по (user_id, source_key);
@@ -675,6 +705,10 @@ export function scoped(db: Env['DB'], userId: number) {
     getLoan(id: number) {
       return db.prepare('SELECT * FROM loans WHERE id = ? AND user_id = ?').bind(id, userId).first<LoanRow>();
     },
+    /**
+     * Создание займа. source_key ('tma:<client_id>') — только REST Mini App
+     * (см. addDebt): OR IGNORE + partial UNIQUE игнорирует NULL-ключи бота.
+     */
     addLoan(l: {
       counterparty: string;
       direction: 'owe' | 'owed';
@@ -682,14 +716,26 @@ export function scoped(db: Env['DB'], userId: number) {
       currency: string;
       due_on: string | null;
       note: string | null;
+      source_key?: string | null;
     }) {
       return db
         .prepare(
-          `INSERT INTO loans (user_id, counterparty, direction, amount_minor, currency, due_on, note)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO loans (user_id, counterparty, direction, amount_minor, currency, due_on, note, source_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(userId, l.counterparty, l.direction, l.amount_minor, l.currency, l.due_on, l.note)
+        .bind(userId, l.counterparty, l.direction, l.amount_minor, l.currency, l.due_on, l.note, l.source_key ?? null)
         .run();
+    },
+    findLoanByKey(sourceKey: string) {
+      return db.prepare('SELECT * FROM loans WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<LoanRow>();
+    },
+    /** Открытые займы (closed_at IS NULL) — верхняя граница лимита (P2-2). */
+    async countLoans(): Promise<number> {
+      const r = await db
+        .prepare('SELECT COUNT(*) AS n FROM loans WHERE user_id = ? AND closed_at IS NULL')
+        .bind(userId)
+        .first<{ n: number }>();
+      return r?.n ?? 0;
     },
     /** Точечная правка займа — все WHERE id=? AND user_id=? (чужие id молча). */
     patchLoan(id: number, patch: { due_on?: string | null; note?: string | null }) {
@@ -721,6 +767,13 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM loan_events WHERE user_id = ? AND loan_id = ? ORDER BY event_on, id')
         .bind(userId, loanId)
+        .all<LoanEventRow>();
+    },
+    /** Все журналы возвратов разом — для plural-вью без N+1 (P2-2). */
+    listLoanEventsAll() {
+      return db
+        .prepare('SELECT * FROM loan_events WHERE user_id = ? ORDER BY loan_id, event_on, id')
+        .bind(userId)
         .all<LoanEventRow>();
     },
     /** loan_id пишется только если заём принадлежит юзеру (EXISTS в INSERT). */
@@ -869,6 +922,14 @@ export function accessRepo(db: Env['DB']) {
         .first<UserRow>();
       return r ?? undefined;
     },
+    /** Telegram ID активного пользователя по user_id (cron-рассылка); null — удалён/нет. */
+    async getTelegramId(userId: number): Promise<number | null> {
+      const r = await db
+        .prepare('SELECT telegram_id FROM users WHERE id = ? AND deleted_at IS NULL')
+        .bind(userId)
+        .first<{ telegram_id: number }>();
+      return r?.telegram_id ?? null;
+    },
 
     createUser(tgId: number, displayName: string | null, role: 'owner' | 'member') {
       return db
@@ -941,6 +1002,48 @@ export function accessRepo(db: Env['DB']) {
     async markUpdateProcessed(updateId: number): Promise<boolean> {
       const r = await db.prepare('INSERT OR IGNORE INTO processed_updates (update_id) VALUES (?)').bind(updateId).run();
       return r.meta.changes === 1;
+    },
+
+    /**
+     * P2-5 хозяйственная чистка (cron, каждый тик — пустой DELETE дёшев):
+     * processed_updates старше 7 дней — окно ретраев Telegram давно прошло.
+     */
+    cleanupProcessedUpdates() {
+      return db.prepare("DELETE FROM processed_updates WHERE created_at < datetime('now','-7 days')").run();
+    },
+    /**
+     * reminder_log старше 400 дней, кроме 'kb_removed' — этот ключ
+     * «раз и навсегда», его удаление сломало бы идемпотентность миграции.
+     */
+    cleanupReminderLog() {
+      return db
+        .prepare("DELETE FROM reminder_log WHERE sent_at < datetime('now','-400 days') AND kind != 'kb_removed'")
+        .run();
+    },
+
+    /**
+     * Лимит частоты POST /api/tma/auth: не более 20 попыток за 10 минут с одного
+     * источника (ключ — SHA-256 hex от IP). При вставке чистим окна старше часа.
+     * Возвращает кол-во попыток в текущем 10-мин окне.
+     */
+    async bumpAuthRateLimit(ipKey: string, nowIso: string): Promise<number> {
+      const now = new Date(nowIso);
+      await db
+        .prepare('DELETE FROM rate_limit WHERE window_start < ?')
+        .bind(new Date(now.getTime() - 3600_000).toISOString())
+        .run();
+      const winStart = new Date(Math.floor(now.getTime() / 600_000) * 600_000).toISOString();
+      await db
+        .prepare(
+          `INSERT INTO rate_limit (bucket, count, window_start) VALUES (?, 1, ?)
+           ON CONFLICT(bucket) DO UPDATE SET
+             count = CASE WHEN window_start = excluded.window_start THEN count + 1 ELSE 1 END,
+             window_start = excluded.window_start`,
+        )
+        .bind(ipKey, winStart)
+        .run();
+      const row = await db.prepare('SELECT count FROM rate_limit WHERE bucket = ?').bind(ipKey).first<{ count: number }>();
+      return row?.count ?? 0;
     },
 
     audit(action: AuditAction, userId: number | null, meta: Record<string, unknown> = {}) {

@@ -73,9 +73,16 @@ export async function debtView(repo: ScopedRepo, debt: DebtRow, today: string): 
 }
 
 export async function debtViews(repo: ScopedRepo, today: string): Promise<DebtView[]> {
-  const out: DebtView[] = [];
-  for (const d of (await repo.listDebts()).results) out.push(await debtView(repo, d, today));
-  return out;
+  // P2-2: все журналы одним запросом (не N+1); группировка в памяти —
+  // ORDER BY debt_id, event_on, id сохраняет порядок replay каждого долга.
+  const [debts, events] = await Promise.all([repo.listDebts(), repo.listDebtEventsAll()]);
+  const byDebt = new Map<number, DebtEventRow[]>();
+  for (const e of events.results) {
+    const arr = byDebt.get(e.debt_id);
+    if (arr) arr.push(e);
+    else byDebt.set(e.debt_id, [e]);
+  }
+  return debts.results.map((d) => toView(d, byDebt.get(d.id) ?? [], today));
 }
 
 /**

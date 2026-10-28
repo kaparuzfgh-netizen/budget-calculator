@@ -181,6 +181,17 @@ export function monthInTz(tz: string, now: Date): string {
 }
 
 /** 'YYYY-MM-DD' по таймзоне — все «сегодня» вычисляем через Intl. */
+/**
+ * Понедельник ISO-недели, содержащей локальную дату 'YYYY-MM-DD' —
+ * то же правило (dow+6)%7, что и weekStartInTz, но вход уже локальный
+ * (таймзона не нужна). P2-1: нижняя граница выборки трат.
+ */
+export function weekStartOfIso(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
 /** Понедельник текущей недели (ISO) в таймзоне пользователя. */
 export function weekStartInTz(tz: string, now: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {

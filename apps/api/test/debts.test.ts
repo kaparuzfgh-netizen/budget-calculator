@@ -2,7 +2,7 @@
  * debts.test.ts — шаг 6 (веха H1): миграция debts/debt_events, редьюсер
  * advanceDebt, сервис replay, webhook-путь /debts и изоляция tenant.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
@@ -10,7 +10,7 @@ import type { SendMessageOpts, TelegramClient } from '../src/telegram/client';
 import type { FxProvider } from '../src/fx/provider';
 import { scoped, type DebtRow } from '../src/db/repo';
 import { advanceDebt, debtCancelTarget, parseDayMonth, renderDebt, type DebtState } from '../src/bot/debts';
-import { buildDebtCtx, debtView } from '../src/services/debts';
+import { buildDebtCtx, debtView, debtViews } from '../src/services/debts';
 import type { FxResult } from '../src/fx/service';
 
 const SECRET = 's3';
@@ -240,6 +240,23 @@ describe('services/debts: replay + проекция', () => {
     expect(v3.payment).toBeCloseTo(v2.payment, 2); // платёж не трогаем
     expect(v3.payoffDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
+
+  it('P2-2: debtViews читает журналы одним запросом — listDebtEvents не зовётся (нет N+1)', async () => {
+    const uid = await setupUser(OWNER + 97);
+    const repo = scoped(env.DB, uid);
+    const id1 = Number((await addDebt(uid)).meta.last_row_id);
+    const id2 = Number((await addDebt(uid, { ...DEBT, name: 'Второй' })).meta.last_row_id);
+    await repo.addDebtEvent({ debt_id: id1, kind: 'payment', amount_minor: 100, event_on: '2026-02-01', source: 'manual', source_key: 'e1' });
+    await repo.addDebtEvent({ debt_id: id2, kind: 'payment', amount_minor: 200, event_on: '2026-02-02', source: 'manual', source_key: 'e2' });
+    const spy = vi.spyOn(repo, 'listDebtEvents');
+    const views = await debtViews(repo, '2026-02-10');
+    expect(spy).not.toHaveBeenCalled();
+    expect(views).toHaveLength(2);
+    // replay-контракт тот же: события сгруппированы по долгам в порядке replay
+    expect(views.find((v) => v.debt.id === id1)!.events.map((e) => e.amount_minor)).toEqual([100]);
+    expect(views.find((v) => v.debt.id === id2)!.events.map((e) => e.amount_minor)).toEqual([200]);
+    spy.mockRestore();
+  });
 });
 
 describe('редьюсер advanceDebt (чистый)', () => {
@@ -301,6 +318,24 @@ describe('редьюсер advanceDebt (чистый)', () => {
     const add = eff.find((e) => e.kind === 'debt_add');
     if (add?.kind === 'debt_add') expect(add.d.frequency).toBe('biweekly');
     expect(add).toBeDefined();
+  });
+
+  it('лимит P2-2: на 20 активных «dbt:add» не стартует мастер — send с лимитом', async () => {
+    const uid = await setupUser(OWNER + 98);
+    const repo = scoped(env.DB, uid);
+    for (let i = 0; i < 20; i++) await repo.addDebt({ ...DEBT, name: `D${i}` });
+    // неактивный не занимает лимит
+    const inact = Number((await repo.addDebt({ ...DEBT, name: 'old' })).meta.last_row_id);
+    await repo.patchDebt(inact, { active: 0 });
+    const ctx = await ctxOf(uid);
+    expect(ctx.debts).toHaveLength(20);
+    const r = advanceDebt(st('debt'), { type: 'callback', data: 'dbt:add' }, ctx);
+    expect(r.state!.step).toBe('debt'); // остались на списке
+    expect(r.effects.some((e) => e.kind === 'send' && e.text.includes('20'))).toBe(true);
+    expect(r.effects.some((e) => e.kind === 'render')).toBe(false);
+    // из мастера «добавить снова» — та же граница
+    const r2 = advanceDebt(st('debt:add:rate', { add: {} }), { type: 'callback', data: 'dbt:add' }, ctx);
+    expect(r2.state!.step).toBe('debt:add:rate');
   });
 
   it('stale/чужие колбэки — state без изменений, effects пустые', async () => {

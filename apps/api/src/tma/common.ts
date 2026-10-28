@@ -18,6 +18,8 @@ export type TmaContext = Context<{ Bindings: Env; Variables: { tmaUser: UserRow 
 export const LIMITS = {
   maxAmount: 1e9, // как parseAmount max
   maxCommitments: 30,
+  maxDebts: 20, // P2-2: активные кредиты — реестр и replay не разрастаются
+  maxLoans: 100, // P2-2: открытые займы (closed_at IS NULL)
   maxNote: 200,
   maxName: 60,
   clientIdMax: 64,

@@ -290,3 +290,96 @@ describe('/api/tma/loans* — займы', () => {
     expect(card.status).toBe('open');
   });
 });
+
+describe('P2-3: идемпотентное создание по client_id', () => {
+  const debtBody = { name: 'Кредит', amount: 5000, currency: 'RUB', rate: 10, payment: 500 };
+
+  it('POST /debts: повтор с тем же client_id → 200 + тот же id; другой ключ → новый (201)', async () => {
+    const { uid, token } = await user(910011);
+    const repo = scoped(env.DB, uid);
+    const body = { ...debtBody, client_id: 'dd1' };
+    const r1 = await api('/api/tma/debts', { method: 'POST', token, body });
+    expect(r1.status).toBe(201);
+    const id1 = ((await r1.json()) as { id: number }).id;
+    const r2 = await api('/api/tma/debts', { method: 'POST', token, body });
+    expect(r2.status).toBe(200);
+    expect(await r2.json()).toMatchObject({ id: id1, duplicate: true });
+    const r3 = await api('/api/tma/debts', { method: 'POST', token, body: { ...debtBody, client_id: 'dd2' } });
+    expect(r3.status).toBe(201);
+    expect(((await r3.json()) as { id: number }).id).not.toBe(id1);
+    const list = (await (await api('/api/tma/debts', { token })).json()) as { debts: unknown[] };
+    expect(list.debts).toHaveLength(2);
+    // source_key реально лежит в строке: ключ 'tma:<client_id>' находит долг
+    expect((await repo.findDebtByKey('tma:dd1'))?.id).toBe(id1);
+  });
+
+  it('POST /debts: бот-созданный долг (без client_id) не конфликтует с ключами NULL', async () => {
+    const { uid, token } = await user(910012);
+    // долг как из бота — source_key NULL; два NULL не конфликтуют (partial UNIQUE)
+    const repo = scoped(env.DB, uid);
+    await repo.addDebt({ name: 'Бот', currency: 'USD', rate: 0.1, frequency: 'monthly', initial_balance_minor: 1000, initial_payment_minor: 100, epoch: '2026-01-01', due_day: null });
+    await repo.addDebt({ name: 'Бот2', currency: 'USD', rate: 0.1, frequency: 'monthly', initial_balance_minor: 1000, initial_payment_minor: 100, epoch: '2026-01-01', due_day: null });
+    const r = await api('/api/tma/debts', { method: 'POST', token, body: { ...debtBody } });
+    expect(r.status).toBe(201); // и REST без client_id тоже NULL — свободно
+  });
+
+  it('POST /loans: повтор с тем же client_id → 200 + тот же id; другой ключ → новый (201)', async () => {
+    const { token } = await user(910013);
+    const body = { counterparty: 'Вася', direction: 'owe', amount: 300, currency: 'USD', client_id: 'll1' };
+    const r1 = await api('/api/tma/loans', { method: 'POST', token, body });
+    expect(r1.status).toBe(201);
+    const id1 = ((await r1.json()) as { id: number }).id;
+    const r2 = await api('/api/tma/loans', { method: 'POST', token, body });
+    expect(r2.status).toBe(200);
+    expect(await r2.json()).toMatchObject({ id: id1, duplicate: true });
+    const r3 = await api('/api/tma/loans', { method: 'POST', token, body: { counterparty: 'Вася', direction: 'owe', amount: 300, currency: 'USD', client_id: 'll2' } });
+    expect(r3.status).toBe(201);
+    expect(((await r3.json()) as { id: number }).id).not.toBe(id1);
+    // заём другого юзера с тем же client_id — свой id (ключ в скоупе user_id)
+    const B = await user(910014);
+    const rB = await api('/api/tma/loans', { method: 'POST', token: B.token, body });
+    expect(rB.status).toBe(201);
+    expect(((await rB.json()) as { id: number }).id).not.toBe(id1);
+  });
+});
+
+describe('P2-2: верхние границы сущностей', () => {
+  it('долги: 20-й активный создаётся, 21-й → 400; неактивный не считается; дубль на лимите → 200', async () => {
+    const { uid, token } = await user(910015);
+    const repo = scoped(env.DB, uid);
+    for (let i = 0; i < 19; i++)
+      await repo.addDebt({ name: `D${i}`, currency: 'USD', rate: 0.1, frequency: 'monthly', initial_balance_minor: 1000, initial_payment_minor: 100, epoch: '2026-01-01', due_day: null });
+    // неактивный не занимает лимит
+    const inact = Number((await repo.addDebt({ name: 'old', currency: 'USD', rate: 0, frequency: 'monthly', initial_balance_minor: 1, initial_payment_minor: 1, epoch: '2026-01-01', due_day: null })).meta.last_row_id);
+    await repo.patchDebt(inact, { active: 0 });
+    const body = { name: 'Хвост', amount: 100, currency: 'USD', rate: 1, payment: 10, client_id: 'cap1' };
+    const r20 = await api('/api/tma/debts', { method: 'POST', token, body });
+    expect(r20.status).toBe(201); // 20-й активный — ок
+    const r21 = await api('/api/tma/debts', { method: 'POST', token, body: { name: 'Лишний', amount: 1, currency: 'USD', rate: 1, payment: 1 } });
+    expect(r21.status).toBe(400);
+    expect(((await r21.json()) as { error: { message: string } }).error.message).toContain('20');
+    // повтор 20-го с тем же client_id — дедуп раньше лимита → 200
+    const rdup = await api('/api/tma/debts', { method: 'POST', token, body });
+    expect(rdup.status).toBe(200);
+    expect(await rdup.json()).toMatchObject({ duplicate: true });
+  });
+
+  it('займы: 100-й открытый создаётся, 101-й → 400; закрытый не считается', async () => {
+    const { uid, token } = await user(910016);
+    // 100 открытых займов одним INSERT … SELECT — дёшево для сетапа
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 99)
+       INSERT INTO loans (user_id, counterparty, direction, amount_minor, currency)
+       SELECT ?, 'L' || n, 'owe', 100, 'USD' FROM seq`,
+    ).bind(uid).run();
+    const repo = scoped(env.DB, uid);
+    // закрытый не занимает лимит
+    const closedId = Number((await repo.addLoan({ counterparty: 'Закрыт', direction: 'owe', amount_minor: 1, currency: 'USD', due_on: null, note: null })).meta.last_row_id);
+    await repo.closeLoan(closedId);
+    const r100 = await api('/api/tma/loans', { method: 'POST', token, body: { counterparty: 'Сотый', direction: 'owe', amount: 1, currency: 'USD' } });
+    expect(r100.status).toBe(201); // 100-й открытый — ок
+    const r101 = await api('/api/tma/loans', { method: 'POST', token, body: { counterparty: 'Лишний', direction: 'owed', amount: 1, currency: 'USD' } });
+    expect(r101.status).toBe(400);
+    expect(((await r101.json()) as { error: { message: string } }).error.message).toContain('100');
+  });
+});

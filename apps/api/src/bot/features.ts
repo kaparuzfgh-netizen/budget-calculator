@@ -10,7 +10,7 @@ import type { CommitmentRow, IncomeEntryRow } from '../db/repo';
 import type { ReplyMarkup, TelegramClient } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
 import { fmtMoney, fmtPct } from './format';
-import { monthInTz, parseAmount, todayInTz, weekStartInTz } from './parse';
+import { monthInTz, parseAmount, todayInTz, weekStartInTz, weekStartOfIso } from './parse';
 import { renderPf, type PfCtx } from './profile';
 import { HOME_ROW } from './nav/nav';
 const HOME_MK = { inline_keyboard: [HOME_ROW] };
@@ -241,7 +241,11 @@ export async function runWeek(
     await tg.sendMessage(chatId, 'Сначала настройка — /start');
     return;
   }
-  const expenses = (await repo.listExpenses()).results;
+  // P2-1: weeklyStatus считает только неделю и месяц todayIso — читаем не всё,
+  // а от min(понедельник недели, начало месяца). todayIso уже локальная дата.
+  const weekStart = weekStartOfIso(todayIso);
+  const monthStart = `${todayIso.slice(0, 7)}-01`;
+  const expenses = (await repo.listExpenses(weekStart < monthStart ? weekStart : monthStart)).results;
   let fxr: FxResult;
   try {
     fxr = await fxFor(fx, [p.living_currency, ...expenses.map((e) => e.currency)]);

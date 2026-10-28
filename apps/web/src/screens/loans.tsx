@@ -424,6 +424,7 @@ export function LoanAddScreen({ api, nav }: ScreenProps) {
   const [note, setNote] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cid] = useState(() => crypto.randomUUID()); // client_id на форму — retry не задвоит (P2-3)
 
   const submit = async (ev: Event) => {
     ev.preventDefault();
@@ -442,6 +443,7 @@ export function LoanAddScreen({ api, nav }: ScreenProps) {
         currency: ccy.trim().toUpperCase(),
         due_on: due || null,
         note: note.trim() || null,
+        client_id: cid,
       });
       nav.flash('Заём добавлен');
       nav.back();

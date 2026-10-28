@@ -2,7 +2,7 @@
  * loans.test.ts — «Долги людям»: миграция loans/loan_events, редьюсер
  * advanceLoan, replay возвратов, webhook-путь /loans и изоляция tenant.
  */
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
@@ -10,7 +10,7 @@ import type { SendMessageOpts, TelegramClient } from '../src/telegram/client';
 import type { FxProvider } from '../src/fx/provider';
 import { scoped, type LoanRow } from '../src/db/repo';
 import { advanceLoan, loanCancelTarget, renderLoan, type LoanState } from '../src/bot/loans';
-import { buildLoanCtx, loanView } from '../src/services/loans';
+import { buildLoanCtx, loanView, loanViews } from '../src/services/loans';
 import { replayLoan } from '../src/domain/loan';
 import type { FxResult } from '../src/fx/service';
 
@@ -208,6 +208,26 @@ describe('services/loans: view и контекст', () => {
     expect(v.status).toBe('partial');
     expect(v.remaining).toBeCloseTo(200, 2);
   });
+
+  it('P2-2: loanViews читает журналы одним запросом — listLoanEvents не зовётся (нет N+1)', async () => {
+    const uid = await setupUser(OWNER + 97);
+    const repo = scoped(env.DB, uid);
+    const id1 = Number((await addLoan(uid)).meta.last_row_id);
+    const id2 = Number((await addLoan(uid, { ...LOAN, counterparty: 'Петя' })).meta.last_row_id);
+    await repo.addLoanEvent({ loan_id: id1, amount_minor: 10_000, event_on: '2026-10-01', source: 'manual', source_key: 'e1' });
+    await repo.addLoanEvent({ loan_id: id2, amount_minor: 20_000, event_on: '2026-10-02', source: 'manual', source_key: 'e2' });
+    const spy = vi.spyOn(repo, 'listLoanEvents');
+    const views = await loanViews(repo);
+    expect(spy).not.toHaveBeenCalled();
+    // replay-контракт тот же: события сгруппированы по займам в порядке replay
+    const v1 = views.find((v) => v.loan.id === id1)!;
+    const v2 = views.find((v) => v.loan.id === id2)!;
+    expect(v1.events.map((e) => e.amount_minor)).toEqual([10_000]);
+    expect(v2.events.map((e) => e.amount_minor)).toEqual([20_000]);
+    expect(v1.repaid).toBeCloseTo(100, 2);
+    expect(v2.repaid).toBeCloseTo(200, 2);
+    spy.mockRestore();
+  });
 });
 
 describe('редьюсер advanceLoan (чистый)', () => {
@@ -271,6 +291,26 @@ describe('редьюсер advanceLoan (чистый)', () => {
       expect(add.d.note).toBeNull();
     }
     expect(add).toBeDefined();
+  });
+
+  it('лимит P2-2: на 100 открытых «ln:add» не стартует мастер — send с лимитом', async () => {
+    const uid = await setupUser(OWNER + 96);
+    const repo = scoped(env.DB, uid);
+    // 99 открытых одним INSERT … SELECT + 1 обычный — дёшево для сетапа
+    await env.DB.prepare(
+      `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 99)
+       INSERT INTO loans (user_id, counterparty, direction, amount_minor, currency)
+       SELECT ?, 'L' || n, 'owe', 100, 'USD' FROM seq`,
+    ).bind(uid).run();
+    await addLoan(uid); // 100-й открытый
+    // закрытый не занимает лимит
+    const closedId = Number((await addLoan(uid, { ...LOAN, counterparty: 'Закрыт' })).meta.last_row_id);
+    await repo.closeLoan(closedId);
+    const ctx = await ctxOf(uid);
+    const r = advanceLoan(st('loan'), { type: 'callback', data: 'ln:add' }, ctx);
+    expect(r.state!.step).toBe('loan'); // остались на списке
+    expect(r.effects.some((e) => e.kind === 'send' && e.text.includes('100'))).toBe(true);
+    expect(r.effects.some((e) => e.kind === 'render')).toBe(false);
   });
 
   it('stale/чужие колбэки — state без изменений, effects пустые', async () => {

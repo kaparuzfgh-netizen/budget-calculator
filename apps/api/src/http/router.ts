@@ -10,28 +10,7 @@ import { getFxRates } from '../fx/service';
 import { createTelegramClient, sanitizeTelegramError, type TelegramClient } from '../telegram/client';
 import { signJwt, TMA_JWT_TTL_SEC, verifyInitData, verifyJwt } from '../tma/auth';
 
-/**
- * Лимит частоты POST /api/tma/auth: не более 20 попыток за 10 минут с одного
- * источника. Ключ — SHA-256 hex от CF-Connecting-IP (IP не хранится открытым).
- * При вставке чистим окна старше часа. Возвращает кол-во попыток в окне.
- */
-async function bumpRateLimit(db: Env['DB'], ipKey: string, now: Date): Promise<number> {
-  await db.prepare("DELETE FROM rate_limit WHERE window_start < ?")
-    .bind(new Date(now.getTime() - 3600_000).toISOString()).run();
-  const winStart = new Date(Math.floor(now.getTime() / 600_000) * 600_000).toISOString();
-  await db
-    .prepare(
-      `INSERT INTO rate_limit (bucket, count, window_start) VALUES (?, 1, ?)
-       ON CONFLICT(bucket) DO UPDATE SET
-         count = CASE WHEN window_start = excluded.window_start THEN count + 1 ELSE 1 END,
-         window_start = excluded.window_start`,
-    )
-    .bind(ipKey, winStart)
-    .run();
-  const row = await db.prepare('SELECT count FROM rate_limit WHERE bucket = ?').bind(ipKey).first<{ count: number }>();
-  return row?.count ?? 0;
-}
-
+// P2-6: rate-limit SQL живёт в accessRepo.bumpAuthRateLimit; здесь — только ключ.
 const sha256HexStr = async (s: string): Promise<string> =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))]
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -123,7 +102,7 @@ export function createRouter(deps: RouterDeps = {}) {
       return c.json({ ok: false, error: 'bad request' }, 400);
     }
     const ipKey = await sha256HexStr(c.req.header('CF-Connecting-IP') ?? 'unknown');
-    const attempts = await bumpRateLimit(c.env.DB, ipKey, new Date());
+    const attempts = await accessRepo(c.env.DB).bumpAuthRateLimit(ipKey, new Date().toISOString());
     if (attempts > 20) {
       console.warn('tma/auth: rate-limit сработал');
       c.header('Retry-After', '600');

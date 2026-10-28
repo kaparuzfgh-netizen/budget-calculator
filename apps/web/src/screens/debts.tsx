@@ -593,6 +593,7 @@ export function DebtAddScreen({ api, nav }: ScreenProps) {
   const [day, setDay] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cid] = useState(clientId); // стабильный client_id на форму — retry не задвоит (P2-3)
 
   const submit = async (ev: Event) => {
     ev.preventDefault();
@@ -616,6 +617,7 @@ export function DebtAddScreen({ api, nav }: ScreenProps) {
         payment: parseAmount(payment),
         frequency: freq,
         due_day: day.trim() ? Number(day.trim()) : null,
+        client_id: cid,
       });
       nav.flash('Кредит добавлен');
       nav.back();

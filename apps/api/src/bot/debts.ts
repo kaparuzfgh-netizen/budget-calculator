@@ -14,6 +14,7 @@ import { previewPrepay, previewPrepayShortenTerm } from '../domain/debt';
 import { fmtMoney, fmtPct } from './format';
 import { parseAmount } from './parse';
 import { round2, toMinor } from '../domain/money';
+import { LIMITS } from '../tma/common';
 import { navRow } from './nav/nav';
 
 export interface DebtAddDraft {
@@ -494,7 +495,12 @@ export function advanceDebt(
   };
   const view = () => ctx.debts.find((x) => x.debt.id === d.debtId);
   const add = d.add ?? {};
-  const restartAdd = () => go('DEBT_ADD_NAME', { add: {} });
+  const restartAdd = () => {
+    // P2-2: верхняя граница — дальше только удаление/правка (ctx.debts = активные)
+    if (ctx.debts.length >= LIMITS.maxDebts)
+      return ok(state, send(`Максимум ${LIMITS.maxDebts} кредитов — сначала удалите ненужный.`));
+    return go('DEBT_ADD_NAME', { add: {} });
+  };
 
   /** Финал мастера: запись долга + возврат в список (R3). */
   const finishAdd = (draft: DebtAddDraft) =>

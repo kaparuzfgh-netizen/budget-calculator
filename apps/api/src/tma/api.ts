@@ -152,8 +152,13 @@ export function registerTmaApi(
     try {
       const repo = repoOf(c);
       const p = await needProfile(c);
-      const today = todayInTz(p.timezone, new Date());
-      const expenses = (await repo.listExpenses()).results;
+      const now = new Date();
+      const today = todayInTz(p.timezone, now);
+      // P2-1: weeklyStatus нужны только текущие неделя и месяц — нижняя граница
+      // min(понедельник недели, начало месяца) в таймзоне пользователя.
+      const wStart = weekStartInTz(p.timezone, now);
+      const mStart = `${monthInTz(p.timezone, now)}-01`;
+      const expenses = (await repo.listExpenses(wStart < mStart ? wStart : mStart)).results;
       const fxr = await fxGet(c, fx)([p.living_currency, ...expenses.map((e) => e.currency)]);
       const inLiving = expenses.map((e) => ({
         date: e.spent_on,

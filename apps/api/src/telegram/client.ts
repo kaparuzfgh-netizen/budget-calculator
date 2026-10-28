@@ -75,6 +75,9 @@ interface TgApiResult {
   description?: string;
 }
 
+/** P2-4: зависший Telegram API не держит запрос до лимита рантайма. */
+const FETCH_TIMEOUT_MS = 8000;
+
 export function createTelegramClient(opts: { token: string; fetchImpl?: typeof fetch }): TelegramClient {
   const f = opts.fetchImpl ?? fetch;
   const call = async (method: string, body: unknown) => {
@@ -83,6 +86,8 @@ export function createTelegramClient(opts: { token: string; fetchImpl?: typeof f
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      // abort → обычная ошибка, обрабатываемая вызывающими как сбой отправки
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     let description = res.statusText;
     try {
@@ -99,7 +104,11 @@ export function createTelegramClient(opts: { token: string; fetchImpl?: typeof f
       const fd = new FormData();
       fd.append('chat_id', String(chatId));
       fd.append('document', new Blob([content], { type: mime }), filename);
-      const res = await f(`https://api.telegram.org/bot${opts.token}/sendDocument`, { method: 'POST', body: fd });
+      const res = await f(`https://api.telegram.org/bot${opts.token}/sendDocument`, {
+        method: 'POST',
+        body: fd,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
       const json = (await res.json()) as TgApiResult;
       if (!json.ok) throw new TelegramError(res.status, json.description ?? 'sendDocument failed');
     },

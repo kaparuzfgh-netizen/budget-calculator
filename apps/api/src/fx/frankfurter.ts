@@ -5,6 +5,9 @@ import { FxUnavailable, type FxLatest, type FxProvider } from './provider';
 // → массив [{date, base:'USD', quote:'EUR', rate:1.09}, ...]
 const ratesSchema = z.array(z.object({ date: z.string(), base: z.string(), quote: z.string(), rate: z.number() }));
 
+/** P2-4: внешний запрос не должен висеть до лимита рантайма (в cron пользователи идут последовательно). */
+const FETCH_TIMEOUT_MS = 8000;
+
 export function createFrankfurter(fetchImpl: typeof fetch = fetch): FxProvider {
   return {
     async latest(currencies: string[]): Promise<FxLatest> {
@@ -15,7 +18,8 @@ export function createFrankfurter(fetchImpl: typeof fetch = fetch): FxProvider {
         const url = `https://api.frankfurter.dev/v2/rates?base=USD&quotes=${quotes.join(',')}`;
         let json: unknown;
         try {
-          const res = await fetchImpl(url);
+          // таймаут = обычная ошибка → FxUnavailable ниже (TimeoutError — instanceof Error)
+          const res = await fetchImpl(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           json = await res.json();
         } catch (e) {

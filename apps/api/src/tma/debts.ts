@@ -46,6 +46,7 @@ const debtCreateSchema = z.object({
   frequency: z.enum(['monthly', 'biweekly']).default('monthly'),
   due_day: zDay,
   epoch: zIso.optional(), // старт графика; по умолчанию — сегодня в тз юзера
+  client_id: zClientId, // идемпотентность создания (P2-3) → debts.source_key
 });
 const debtPatchSchema = z.object({
   name: z.string().trim().min(1).max(LIMITS.maxName).optional(),
@@ -72,6 +73,7 @@ const loanCreateSchema = z.object({
   currency: zCcy,
   due_on: zIso.nullable().optional(),
   note: z.string().trim().max(LIMITS.maxNote).nullable().optional(),
+  client_id: zClientId, // идемпотентность создания (P2-3) → loans.source_key
 });
 const loanPatchSchema = z.object({
   due_on: zIso.nullable().optional(),
@@ -195,7 +197,17 @@ export function registerTmaDebts(
       if (!parsed.success) return c.json(bad('нужны name, amount>0, currency, rate 0–100, payment>0').body, 400);
       const p = await needProfile(c);
       const b = parsed.data;
-      const r = await repoOf(c).addDebt({
+      const repo = repoOf(c);
+      // P2-3: повтор с тем же client_id → 200 + старый id (как /expenses)
+      const key = b.client_id ? `tma:${b.client_id}` : null;
+      if (key) {
+        const dup = await repo.findDebtByKey(key);
+        if (dup) return okJson(c, { id: dup.id, duplicate: true });
+      }
+      // P2-2: верхняя граница активных долгов (как у commitments)
+      if ((await repo.countDebts()) >= LIMITS.maxDebts)
+        return c.json(err('limit', `Максимум ${LIMITS.maxDebts} кредитов`, 400).body, 400);
+      const r = await repo.addDebt({
         name: b.name,
         currency: b.currency,
         rate: b.rate / 100,
@@ -204,7 +216,13 @@ export function registerTmaDebts(
         initial_payment_minor: toMinor(b.payment),
         epoch: b.epoch ?? todayInTz(p.timezone, new Date()),
         due_day: b.due_day ?? null,
+        source_key: key,
       });
+      if (r.meta.changes === 0) {
+        // гонка: вставку проглотил UNIQUE — отдаём существующую строку
+        const dup = key ? await repo.findDebtByKey(key) : null;
+        return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+      }
       return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
     }),
   );
@@ -395,14 +413,29 @@ export function registerTmaDebts(
         return c.json(bad('нужны counterparty, direction (owe|owed), amount>0, currency').body, 400);
       await needProfile(c);
       const b = parsed.data;
-      const r = await repoOf(c).addLoan({
+      const repo = repoOf(c);
+      // P2-3: повтор с тем же client_id → 200 + старый id
+      const key = b.client_id ? `tma:${b.client_id}` : null;
+      if (key) {
+        const dup = await repo.findLoanByKey(key);
+        if (dup) return okJson(c, { id: dup.id, duplicate: true });
+      }
+      // P2-2: верхняя граница открытых займов
+      if ((await repo.countLoans()) >= LIMITS.maxLoans)
+        return c.json(err('limit', `Максимум ${LIMITS.maxLoans} займов`, 400).body, 400);
+      const r = await repo.addLoan({
         counterparty: b.counterparty,
         direction: b.direction,
         amount_minor: toMinor(b.amount),
         currency: b.currency,
         due_on: b.due_on ?? null,
         note: b.note ?? null,
+        source_key: key,
       });
+      if (r.meta.changes === 0) {
+        const dup = key ? await repo.findLoanByKey(key) : null;
+        return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+      }
       return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
     }),
   );

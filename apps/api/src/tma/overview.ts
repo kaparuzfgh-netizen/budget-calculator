@@ -10,7 +10,7 @@ import { convert, round2 } from '../domain/money';
 import type { FxResult } from '../fx/service';
 import type { ScopedRepo } from '../db/repo';
 import { resolveIncome } from '../bot/features';
-import { monthInTz, todayInTz } from '../bot/parse';
+import { monthInTz, todayInTz, weekStartInTz } from '../bot/parse';
 
 export interface OverviewCommitment {
   name: string;
@@ -57,7 +57,14 @@ export async function buildOverview(
   const today = todayInTz(p.timezone, now);
   const commits = (await repo.listCommitments()).results;
   const entries = (await repo.listIncomeEntries(month)).results;
-  const expenses = (await repo.listExpenses()).results;
+  // P2-1: weeklyStatus считает только текущую неделю и месяц — история не нужна.
+  // Неделя может начаться в прошлом месяце → берём более раннюю границу.
+  const since = (() => {
+    const mStart = `${month}-01`;
+    const wStart = weekStartInTz(p.timezone, now);
+    return wStart < mStart ? wStart : mStart;
+  })();
+  const expenses = (await repo.listExpenses(since)).results;
 
   const ccys = [
     p.income_currency,
