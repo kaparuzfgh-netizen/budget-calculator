@@ -5,6 +5,74 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Mini App: ядро экранов на Preact (веха G, продолжение).** `apps/web`
+  переписан с чистого DOM на Preact 10 (зависимость `preact@10.26.9`,
+  tsconfig: `jsx: react-jsx` + `jsxImportSource: preact`, без react-compat).
+  Стек экранов в state с панелью «← Назад»/«🏠 На главную»: Обзор (доход
+  с источником, платежи, неделя, месяц, burn rate из /week), План
+  (итоги в USD + «доход вручную» через query income&currency), Неделя
+  (сводка + список трат; карточка — PATCH сумма/валюта/заметка и DELETE
+  с подтверждением), +Трата (`client_id=crypto.randomUUID()` один раз на
+  открытие формы — идемпотентность), Доход (итог, добавить, удалить с
+  подтверждением), Профиль (PATCH типичный доход/лимит/таймзона с пресетами
+  и IANA-вводом; платежи: список, карточка PATCH amount·due_day·active,
+  DELETE с подтверждением, добавление). JWT только в памяти; при 401 —
+  один повторный auth и один повтор запроса. Сохранены экраны «не из
+  Telegram»/«нет доступа»/сеть+retry; fmtMoney — копия формата бота;
+  клиентская валидация тех же лимитов, что у API.
+- **Шаг 5: Telegram Mini App на Cloudflare — экран «Обзор».** SPA из
+  `apps/web` (Vite, тёмная тема из `themeParams`, `telegram-web-app.js`)
+  раздаётся тем же воркером через Workers Static Assets
+  (`wrangler.toml [assets]`, SPA-fallback, `run_worker_first` для
+  `/api/*`, `/telegram/*`, `/health`). Аутентификация: `POST /api/tma/auth`
+  — верификация `initData` (HMAC-SHA256 «WebAppData», Web Crypto,
+  `auth_date` ≤ 24ч, `user` обязателен, пользователь онбоарден) → JWT HS256
+  (`{tg_id}`, TTL 12ч). `GET /api/tma/overview` по Bearer-JWT: доход
+  месяца (факт/типичный через `resolveIncome`), обязательные платежи,
+  недельный бюджет + потрачено за неделю/месяц (`weeklyStatus`),
+  `fx_note` при устаревших курсах. Кнопка `[📱 Приложение]` (`web_app` →
+  `MINI_APP_URL` из `[vars]`) на экране HOME; в реестре — `external: true`.
+  `release.mjs`: шаг сборки `apps/web` перед `wrangler deploy` (план [1..6]).
+  Тесты: фикстура-подпись initData, отказы (подделка/старый/без user/чужой
+  токен), JWT-гейт (roundtrip, expired, чужой секрет), изоляция overview,
+  SPA-smoke через SELF.
+- **Веха E: REST API Mini App (паритет бота, ч.1).** `src/tma/api.ts` —
+  `/api/tma/plan|week|expenses|income|profile|commitments` за Bearer-JWT;
+  та же валидация (суммы ≤1e9, платежи ≤30, день 1-31, tz, zod); идемпотентность
+  `client_id` → `source_key=tma:<id>`; чужие id → 404; PATCH профиля пересчитывает
+  недельный бюджет ×12/52. Репо: `findExpenseByKey`, `findIncomeByKey`,
+  `patchCommitment` +`name`.
+- **Веха E: харденинг Mini App (шаг 5).** Миграция `0006` (`rate_limit`);
+  20 попыток/10 мин на `POST /api/tma/auth` по хэшу `CF-Connecting-IP`
+  (429 + `Retry-After`); security-заголовки на все ответы (nosniff,
+  no-referrer, no-store на API, CSP на SPA с `frame-ancestors telegram.org`);
+  одинаковый текст 403 для «нет пользователя»/«не онбоарден»; тесты
+  rate-limit/заголовков/JWT-незнакомца/replay.
+- **Веха E: правка и удаление трат.** `SPENT_DONE` получил
+  `[↩ Отменить] [✏️ Изменить]` (`ex:undo:<id>` — мгновенное удаление своей строки;
+  `ex:e:<id>` → промпт новой суммы). `WEEK` получил `[📋 Траты недели]` → новый экран
+  `EXPENSES_LIST` (≤20 записей недели, кнопка-строка → `EXPENSE` карточка с
+  `[✏️ Изменить] [🗑 Удалить]` → confirm `EXPENSE_DEL`). Команда `/expenses` открывает
+  список. Все id проверяются на владельца (`WHERE id=? AND user_id=?`, чужой/устаревший
+  колбэк — молча), `ex:*` принимаются и без разговора (conv очищен после записи),
+  рендеры через `render`-эффект — список всегда свежий. Репо: `getExpense`,
+  `patchExpense`, `deleteExpense`. `weekStartInTz` в parse.ts. Нав-тест проверяет,
+  что каждое ребро menu/result экрана имеет кнопку в разметке.
+- **Шаг 4б: напоминания и приватность (веха D):** миграция `0005`
+  (`reminder_log` + `profiles.reminders_weekly/reminders_payments`); cron `0 * * * *`
+  → `runReminders` — воскресный итог недели 20:00 локально и напоминания о платежах
+  за 2 дня 10:00 локально (idem claim через reminder_log; 403 → флаги выкл;
+  прочие ошибки → ретрай на следующем часе). Экраны `PF_REMINDERS` (тоглы),
+  `PF_DATA`, `PF_DELETE_ASK` в реестре навигации; `/export` — JSON собственных
+  строк как документ (rate-limit 1/мин через claimReminder); `/delete_me` —
+  batch-удаление всех `user_id`-строк + users. `sendDocument` в клиенте (FormData+Blob).
+- **Единая навигация (веха C3):** реестр `src/bot/nav/screens.json` +
+  `docs/ux/navigation.md` (тест doc-sync сверяет mermaid-схему с реестром);
+  экран HOME (`/menu`, `🏠 Меню`, `nv:home`); обязательные нав-ряды R1–R4
+  через `navRow()`; `[✖ Отмена]` на промптах; `[🏠 Меню]` на результатах
+  /plan, /week, трата, доход; R8 — честный ответ «Что-то пошло не так» +
+  🏠 при падении обработчика. `npm run release` — проверки → миграции →
+  deploy → /health (деплой отменяется при неприменённых миграциях).
 - **Шаг 4в: редактируемый профиль и переменный доход:** миграция `0004`
   (`income_entries` — факт дохода по месяцам в таймзоне юзера, `commitments.updated_at`);
   `income_minor` профиля = «типичный доход» (0 — не задан). `/income` — запись/список/
@@ -70,6 +138,18 @@
   в `scripts/build-bundle.js`, общий с smoke-тестами.
 - Установка в SETUP.md переписана под clasp-цикл; убран быстрый путь
   «вставить один файл» — вся установка и обновление идут одинаково.
+- **v2: нижняя reply-клавиатура выведена из контракта навигации (R5).**
+  Навигация — только inline-кнопки + `/menu`/`🏠 Меню`: финал онбординга шлёт
+  сводку с inline HOME вместо `keyboard`; `helpOnboarded` указывает на `/menu`.
+  Одноразовая миграция `kb_removed` (claim в `reminder_log`, миграций БД нет):
+  перед первым сообщением бот шлёт служебное «·» с `remove_keyboard` — у
+  старых пользователей клавиатура скрывается ровно один раз, при сбое —
+  ретрай на следующем сообщении. Все исходящие тексты (вебхук и cron) идут
+  через `tgWithKeyboardMigration`; `ReplyMarkup.remove_keyboard` в клиенте.
+- **v2: голая сумма больше не записывает трату.** Удалён fallback
+  «не команда → parseAmount → runSpent»: некомандный текст вне активного
+  шага отвечает «Не знаю такую команду — попробуй /help». Расход — только
+  через «➕ Трата» / `/spent` (промпт `spent_ask`).
 
 ### Добавлено
 - Tooling: `package.json` (dev: @google/clasp, eslint flat-config, prettier),

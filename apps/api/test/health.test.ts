@@ -15,8 +15,13 @@ describe('GET /health', () => {
     expect(Number.isNaN(Date.parse(body.time as string))).toBe(false);
   });
 
-  it('неизвестный путь → 404', async () => {
+  // Шаг 5: SPA-fallback — не-API GET идёт в assets → index.html (200).
+  it('неизвестный не-API путь → SPA index.html; неизвестный /api/* → 404 JSON', async () => {
     const res = await exports.default.fetch('https://test.local/nope');
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type') ?? '').toContain('text/html');
+    const api = await exports.default.fetch('https://test.local/api/nope');
+    expect(api.status).toBe(404);
+    expect(api.headers.get('content-type') ?? '').toContain('json');
   });
 });

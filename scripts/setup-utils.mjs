@@ -107,3 +107,9 @@ export function parseDatabaseId(tomlText) {
   const m = /^database_id\s*=\s*"([^"]+)"/m.exec(tomlText);
   return m ? m[1] : null;
 }
+
+/** Строковая переменная из wrangler.toml (name = "value"); null — не задана. */
+export function getTomlVar(tomlText, key) {
+  const m = new RegExp(`^\\s*${key}\\s*=\\s*"([^"]+)"`, 'm').exec(tomlText);
+  return m ? m[1] : null;
+}

@@ -1,0 +1,481 @@
+/**
+ * tma/api.ts — REST API Mini App (шаг 5, паритет бота).
+ * Все роуты за Bearer-JWT middleware; доступ только через scoped(user.id);
+ * суммы в minor units на границах; ошибки {error:{code,message}}.
+ * Парсинг/математика НЕ дублируются — переиспользуются bot/parse, domain/*,
+ * resolveIncome (features), weeklyStatus, computeWaterfall.
+ */
+import { z } from 'zod';
+import type { Hono, Next } from 'hono';
+import type { Env } from '../env';
+import type { ScopedRepo, UserRow } from '../db/repo';
+import type { FxResult } from '../fx/service';
+import type { FxProvider } from '../fx/provider';
+import { computeWaterfall } from '../domain/cashflow';
+import { weeklyStatus } from '../domain/budget';
+import { convert, round2, toMinor } from '../domain/money';
+
+const usd = (amount: number, ccy: string, pu: Record<string, number>) => convert(amount, ccy, 'USD', { perUsd: pu });
+import { resolveIncome } from '../bot/features';
+import { isValidTimezone, monthInTz, todayInTz, weekStartInTz } from '../bot/parse';
+import {
+  bad,
+  CCY_RE,
+  err,
+  fail,
+  fxGet,
+  idOf,
+  LIMITS,
+  needProfile,
+  notFound,
+  notOnboarded,
+  okJson,
+  profile,
+  repoOf,
+  zAmount,
+  zCcy,
+  zClientId,
+  zDay,
+  zIso,
+  zNote,
+  type TmaContext as C,
+} from './common';
+
+export { LIMITS };
+
+const moneySchema = z.object({ amount: zAmount, currency: zCcy.optional(), note: zNote, client_id: zClientId });
+const expensePatchSchema = z.object({
+  amount: zAmount.optional(),
+  currency: zCcy.optional(),
+  note: z.string().trim().max(LIMITS.maxNote).nullable().optional(),
+});
+const commitSchema = z.object({
+  name: z.string().trim().min(1).max(LIMITS.maxName),
+  amount: zAmount,
+  currency: zCcy.optional(),
+  due_day: zDay,
+  client_id: zClientId,
+});
+const commitPatchSchema = z.object({
+  name: z.string().trim().min(1).max(LIMITS.maxName).optional(),
+  amount: zAmount.optional(),
+  currency: zCcy.optional(),
+  due_day: z.number().int().min(1).max(31).nullable().optional(),
+  active: z.boolean().optional(),
+});
+const cpayPostSchema = z.object({
+  amount: zAmount.optional(),
+  paid_on: zIso.optional(),
+  client_id: zClientId,
+});
+const cpayPatchSchema = z.object({ amount: zAmount.optional(), paid_on: zIso.optional() });
+const profilePatchSchema = z.object({
+  typical_income: z.number().min(0).max(LIMITS.maxAmount).optional(),
+  income_currency: zCcy.optional(),
+  living_cap: zAmount.optional(),
+  living_currency: zCcy.optional(),
+  timezone: z.string().optional(),
+});
+
+export function registerTmaApi(
+  app: Hono<{ Bindings: Env; Variables: { tmaUser: UserRow } }>,
+  tmaAuth: (c: C, next: Next) => Promise<Response | void>,
+  fx: FxProvider,
+): void {
+
+  // ── GET /plan ──
+  app.get('/api/tma/plan', tmaAuth, async (c) => {
+    try {
+      const repo = repoOf(c);
+      const p = await needProfile(c);
+      const q = c.req.query();
+      const override =
+        q.income !== undefined && q.income !== ''
+          ? { amount: Number(q.income), currency: (q.currency ?? p.income_currency).toUpperCase() }
+          : undefined;
+      if (override && (!Number.isFinite(override.amount) || override.amount <= 0 || override.amount > LIMITS.maxAmount))
+        return c.json(bad('сумма дохода недопустима').body, 400);
+      if (override && !CCY_RE.test(override.currency)) return c.json(bad('валюта недопустима').body, 400);
+      const month = monthInTz(p.timezone, new Date());
+      const commits = (await repo.listCommitments()).results;
+      const entries = (await repo.listIncomeEntries(month)).results;
+      const fxr: FxResult = await fxGet(c, fx)([
+        p.income_currency,
+        p.living_currency,
+        ...(override ? [override.currency] : []),
+        ...entries.map((e) => e.currency),
+        ...commits.map((x) => x.currency),
+      ]);
+      const inc = resolveIncome({
+        entries,
+        typicalMinor: p.income_minor,
+        incomeCcy: p.income_currency,
+        perUsd: fxr.perUsd,
+        ...(override ? { override } : {}),
+      });
+      const mandatoryUsd = commits.reduce((s, x) => s + usd(x.amount_minor / 100, x.currency, fxr.perUsd), 0);
+      const w = computeWaterfall({
+        income: { amount: inc.amount, currency: inc.currency },
+        baseIncomeUsd: usd(p.income_minor / 100, p.income_currency, fxr.perUsd),
+        mandatoryUsd,
+        livingCap: { amount: p.living_cap_minor / 100, currency: p.living_currency },
+        bonusPrepayShare: p.bonus_prepay_share,
+        bonusDcaShare: p.bonus_dca_share,
+        dcaTargets: { USD: 1 },
+        fx: { perUsd: fxr.perUsd },
+      });
+      return okJson(c, {
+        month,
+        income_minor: Math.round(inc.amount * 100),
+        income_currency: inc.currency,
+        income_source: inc.source,
+        income_entries_count: inc.count,
+        mandatory_usd_minor: toMinor(round2(mandatoryUsd)),
+        living_usd_minor: toMinor(round2(w.livingUsd)),
+        surplus_usd_minor: toMinor(round2(w.surplusUsd)),
+        bonus:
+          p.bonus_prepay_share + p.bonus_dca_share > 0 && w.bonusDeltaUsd > 0
+            ? { delta_usd_minor: toMinor(round2(w.bonusDeltaUsd)), prepay_usd_minor: toMinor(round2(w.toPrepayUsd)), dca_usd_minor: toMinor(round2(w.toDcaUsd)) }
+            : null,
+        commitments: commits.map((x) => ({ name: x.name, amount_minor: x.amount_minor, currency: x.currency, due_day: x.due_day })),
+        fx_as_of: fxr.asOf,
+      });
+    } catch (e) {
+      const f = fail(e);
+      if (!f) throw e;
+      return c.json(f.body, f.status as 400);
+    }
+  });
+
+  // ── GET /week ──
+  app.get('/api/tma/week', tmaAuth, async (c) => {
+    try {
+      const repo = repoOf(c);
+      const p = await needProfile(c);
+      const today = todayInTz(p.timezone, new Date());
+      const expenses = (await repo.listExpenses()).results;
+      const fxr = await fxGet(c, fx)([p.living_currency, ...expenses.map((e) => e.currency)]);
+      const inLiving = expenses.map((e) => ({
+        date: e.spent_on,
+        amount: convert(e.amount_minor / 100, e.currency, p.living_currency, { perUsd: fxr.perUsd }),
+      }));
+      const s = weeklyStatus({
+        expenses: inLiving,
+        today,
+        monthlyCap: p.living_cap_minor / 100,
+        weeklyBudget: p.weekly_budget_minor / 100,
+      });
+      return okJson(c, {
+        currency: p.living_currency,
+        week_spent_minor: toMinor(round2(s.weekSpent)),
+        week_budget_minor: toMinor(round2(s.weekBudget)),
+        week_over: s.weekOver,
+        week_remaining_minor: toMinor(round2(s.weekRemaining)),
+        month_spent_minor: toMinor(round2(s.monthSpent)),
+        month_cap_minor: toMinor(round2(s.monthCap)),
+        burn_rate: s.burnRate,
+        daily_allowance_minor: toMinor(round2(s.dailyAllowance)),
+        days_left: s.daysLeft,
+        fx_as_of: fxr.asOf,
+      });
+    } catch (e) {
+      const f = fail(e);
+      if (!f) throw e;
+      return c.json(f.body, f.status as 400);
+    }
+  });
+
+  // ── expenses ──
+  app.get('/api/tma/expenses', tmaAuth, async (c) => {
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const start = weekStartInTz(p.timezone, new Date());
+    const rows = (await repo.listExpenses(start)).results.slice(-50).reverse();
+    return okJson(c, { week_start: start, expenses: rows.map((e) => ({ id: e.id, spent_on: e.spent_on, amount_minor: e.amount_minor, currency: e.currency, note: e.note })) });
+  });
+  app.post('/api/tma/expenses', tmaAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = moneySchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('нужны amount (>0) и допустимые currency/note').body, 400);
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const b = parsed.data;
+    const key = b.client_id ? `tma:${b.client_id}` : `tma:u:${crypto.randomUUID()}`;
+    if (b.client_id) {
+      const dup = await repo.findExpenseByKey(key);
+      if (dup) return okJson(c, { id: dup.id, duplicate: true });
+    }
+    const r = await repo.addExpense({
+      spent_on: todayInTz(p.timezone, new Date()),
+      amount_minor: toMinor(b.amount),
+      currency: b.currency ?? p.living_currency,
+      note: b.note ?? null,
+      source: 'manual',
+      source_key: key,
+    });
+    if (r.meta.changes === 0) {
+      const dup = b.client_id ? await repo.findExpenseByKey(key) : null;
+      return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+    }
+    return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
+  });
+  app.patch('/api/tma/expenses/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = expensePatchSchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('недопустимые поля').body, 400);
+    const repo = repoOf(c);
+    if (!(await repo.getExpense(id))) return c.json(notFound().body, 404);
+    const patch: { amount_minor?: number; currency?: string; note?: string | null } = {};
+    if (parsed.data.amount !== undefined) patch.amount_minor = toMinor(parsed.data.amount);
+    if (parsed.data.currency !== undefined) patch.currency = parsed.data.currency;
+    if (parsed.data.note !== undefined) patch.note = parsed.data.note;
+    await repo.patchExpense(id, patch);
+    return okJson(c, { ok: true });
+  });
+  app.delete('/api/tma/expenses/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const repo = repoOf(c);
+    const w = await repo.deleteExpense(id);
+    if (w.meta.changes === 0) return c.json(notFound().body, 404);
+    return okJson(c, { ok: true });
+  });
+
+  // ── income ──
+  app.get('/api/tma/income', tmaAuth, async (c) => {
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const month = monthInTz(p.timezone, new Date());
+    const entries = (await repo.listIncomeEntries(month)).results;
+    const fxr = await fxGet(c, fx)([p.income_currency, ...entries.map((e) => e.currency)]);
+    const total = entries.reduce((s, e) => s + convert(e.amount_minor / 100, e.currency, p.income_currency, { perUsd: fxr.perUsd }), 0);
+    return okJson(c, {
+      month,
+      total_minor: toMinor(round2(total)),
+      currency: p.income_currency,
+      entries: entries.map((e) => ({ id: e.id, amount_minor: e.amount_minor, currency: e.currency, note: e.note})),
+    });
+  });
+  app.post('/api/tma/income', tmaAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = moneySchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('нужны amount (>0) и допустимые currency/note').body, 400);
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const b = parsed.data;
+    const month = monthInTz(p.timezone, new Date());
+    const key = b.client_id ? `tma:${b.client_id}` : `tma:u:${crypto.randomUUID()}`;
+    if (b.client_id) {
+      const dup = await repo.findIncomeByKey(key);
+      if (dup) return okJson(c, { id: dup.id, duplicate: true });
+    }
+    const r = await repo.addIncomeEntry({
+      month,
+      amount_minor: toMinor(b.amount),
+      currency: b.currency ?? p.income_currency,
+      note: b.note ?? null,
+      source_key: key,
+    });
+    if (r.meta.changes === 0) {
+      const dup = b.client_id ? await repo.findIncomeByKey(key) : null;
+      return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+    }
+    return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
+  });
+  app.delete('/api/tma/income/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const repo = repoOf(c);
+    const w = await repo.deleteIncomeEntry(id);
+    if (w.meta.changes === 0) return c.json(notFound().body, 404);
+    return okJson(c, { ok: true });
+  });
+
+  // ── profile ──
+  app.get('/api/tma/profile', tmaAuth, async (c) => {
+    const p = await repoOf(c).getProfile();
+    if (!p) return c.json({ onboarded: false }, 200);
+    return okJson(c, {
+      onboarded: !!p.onboarded_at,
+      typical_income_minor: p.income_minor,
+      income_currency: p.income_currency,
+      living_cap_minor: p.living_cap_minor,
+      living_currency: p.living_currency,
+      weekly_budget_minor: p.weekly_budget_minor,
+      base_currency: p.base_currency,
+      timezone: p.timezone,
+      reminders_weekly: p.reminders_weekly,
+      reminders_payments: p.reminders_payments,
+    });
+  });
+  app.patch('/api/tma/profile', tmaAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = profilePatchSchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('недопустимые поля профиля').body, 400);
+    const repo = repoOf(c);
+    const p0 = await profile(repo);
+    if (!p0) return c.json(notOnboarded().body, 403);
+    const b = parsed.data;
+    if (b.timezone !== undefined && !isValidTimezone(b.timezone)) return c.json(bad('таймзона недопустима').body, 400);
+    const patch: Parameters<ScopedRepo['patchProfile']>[0] = {};
+    if (b.typical_income !== undefined) patch.income_minor = toMinor(b.typical_income);
+    if (b.income_currency !== undefined) patch.income_currency = b.income_currency;
+    if (b.living_currency !== undefined) patch.living_currency = b.living_currency;
+    if (b.living_cap !== undefined) {
+      const minor = toMinor(b.living_cap);
+      patch.living_cap_minor = minor;
+      patch.weekly_budget_minor = Math.round((minor * 12) / 52);
+    }
+    if (b.timezone !== undefined) patch.timezone = b.timezone;
+    if (!Object.keys(patch).length) return c.json(bad('нет полей для изменения').body, 400);
+    await repo.patchProfile(patch);
+    const np = await repo.getProfile();
+    return okJson(c, { ok: true, weekly_budget_minor: np!.weekly_budget_minor });
+  });
+
+  // ── commitments ──
+  app.get('/api/tma/commitments', tmaAuth, async (c) => {
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const month = monthInTz(p.timezone, new Date());
+    const rows = (await repo.listCommitments(false)).results;
+    // оплаты за ~год одним запросом: paid_this_month + last_paid_on без N запросов
+    const since = `${Number(month.slice(0, 4)) - 1}${month.slice(4)}-01`;
+    const pays = (await repo.listCommitmentPaymentsSince(since)).results;
+    return okJson(c, {
+      commitments: rows.map((x) => {
+        const mine = pays.filter((e) => e.commitment_id === x.id);
+        const last = mine.at(-1) ?? null;
+        return {
+          id: x.id,
+          name: x.name,
+          amount_minor: x.amount_minor,
+          currency: x.currency,
+          due_day: x.due_day,
+          active: x.active,
+          paid_this_month: mine.some((e) => e.paid_on.startsWith(month)),
+          last_paid_on: last ? last.paid_on : null,
+        };
+      }),
+    });
+  });
+  app.post('/api/tma/commitments', tmaAuth, async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = commitSchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('нужны name, amount (>0); due_day 1-31').body, 400);
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const existing = (await repo.listCommitments(false)).results;
+    if (existing.length >= LIMITS.maxCommitments) return c.json(err('limit', `Максимум ${LIMITS.maxCommitments} платежей`, 400).body, 400);
+    const b = parsed.data;
+    const r = await repo.addCommitment({
+      name: b.name,
+      amount_minor: toMinor(b.amount),
+      currency: b.currency ?? p.income_currency,
+      due_day: b.due_day ?? null,
+    });
+    return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
+  });
+  app.patch('/api/tma/commitments/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = commitPatchSchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('недопустимые поля').body, 400);
+    const repo = repoOf(c);
+    if (!(await repo.getCommitment(id))) return c.json(notFound().body, 404);
+    const b = parsed.data;
+    const patch: Parameters<ScopedRepo['patchCommitment']>[1] = {};
+    if (b.name !== undefined) patch.name = b.name;
+    if (b.amount !== undefined) patch.amount_minor = toMinor(b.amount);
+    if (b.currency !== undefined) patch.currency = b.currency;
+    if (b.due_day !== undefined) patch.due_day = b.due_day;
+    if (b.active !== undefined) patch.active = b.active ? 1 : 0;
+    await repo.patchCommitment(id, patch);
+    return okJson(c, { ok: true });
+  });
+  app.delete('/api/tma/commitments/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const repo = repoOf(c);
+    if (!(await repo.getCommitment(id))) return c.json(notFound().body, 404);
+    await repo.deleteCommitment(id);
+    return okJson(c, { ok: true });
+  });
+
+  // ── журнал оплат платежей (commitment_payments) ──
+  app.get('/api/tma/commitments/:id/payments', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    if (!(await repo.getCommitment(id))) return c.json(notFound().body, 404);
+    const rows = (await repo.listCommitmentPayments(id)).results;
+    return okJson(c, {
+      payments: rows.map((e) => ({ id: e.id, amount_minor: e.amount_minor, currency: e.currency, paid_on: e.paid_on, source: e.source })),
+    });
+  });
+  app.post('/api/tma/commitments/:id/payments', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = cpayPostSchema.safeParse(body);
+    if (!parsed.success) return c.json(bad('недопустимые amount/paid_on/client_id').body, 400);
+    const repo = repoOf(c);
+    const p = await profile(repo);
+    if (!p) return c.json(notOnboarded().body, 403);
+    const commit = await repo.getCommitment(id);
+    if (!commit) return c.json(notFound().body, 404);
+    const b = parsed.data;
+    const key = b.client_id ? `tma:${b.client_id}` : `tma:u:${crypto.randomUUID()}`;
+    if (b.client_id) {
+      const dup = await repo.findCommitmentPaymentByKey(key);
+      if (dup) return okJson(c, { id: dup.id, duplicate: true });
+    }
+    const r = await repo.addCommitmentPayment({
+      commitment_id: commit.id,
+      amount_minor: b.amount !== undefined ? toMinor(b.amount) : commit.amount_minor,
+      currency: commit.currency,
+      paid_on: b.paid_on ?? todayInTz(p.timezone, new Date()),
+      source: 'manual',
+      source_key: key,
+    });
+    if (r.meta.changes === 0) {
+      const dup = b.client_id ? await repo.findCommitmentPaymentByKey(key) : null;
+      return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+    }
+    return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
+  });
+  app.patch('/api/tma/commitment-payments/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = cpayPatchSchema.safeParse(body);
+    if (!parsed.success || !Object.keys(parsed.data).length) return c.json(bad('недопустимые поля').body, 400);
+    const repo = repoOf(c);
+    if (!(await repo.getCommitmentPayment(id))) return c.json(notFound().body, 404);
+    const b = parsed.data;
+    const patch: { amount_minor?: number; paid_on?: string } = {};
+    if (b.amount !== undefined) patch.amount_minor = toMinor(b.amount);
+    if (b.paid_on !== undefined) patch.paid_on = b.paid_on;
+    await repo.updateCommitmentPayment(id, patch);
+    return okJson(c, { ok: true });
+  });
+  app.delete('/api/tma/commitment-payments/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const repo = repoOf(c);
+    const w = await repo.deleteCommitmentPayment(id);
+    if (w.meta.changes === 0) return c.json(notFound().body, 404);
+    return okJson(c, { ok: true });
+  });
+}

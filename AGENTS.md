@@ -42,7 +42,9 @@
 4. **Cross-file globals**: `.gs`-файлы видят top-level `function`/`const`
    друг друга — нет импортов. ESLint поэтому линтит собранный
    `dist/BUNDLE.gs`, а не отдельные файлы.
-5. **GAS V8 ≠ Node**: нет `fetch`, `URLSearchParams`, `URL`, `atob`, `btoa`,
+5. **Mini App API:** `/api/tma/*` — Bearer-JWT, только scoped(user.id), суммы
+   minor units, идемпотентность `client_id`; правила — как у бота (та же валидация).
+6. **GAS V8 ≠ Node**: нет `fetch`, `URLSearchParams`, `URL`, `atob`, `btoa`,
    `crypto`, таймеров, `process`. Вместо — `UrlFetchApp`, `Utilities`,
    `PropertiesService` и т.д. Не предлагать web-API в `.gs`-коде.
    Известный баг: `URLSearchParams` в `TmaApi.gs/validateInitData_` —
@@ -83,6 +85,11 @@
     конвертация `toMinor/fromMinor` на границе repo. Курсы — только через
     `getFxRates` (D1-кэш 6ч + provider). Онбординг — чистый редьюсер
     `bot/onboarding.ts` (эффекты исполняет services/access.ts).
+18. **Навигация бота:** источник истины — `docs/ux/navigation.md` +
+    `src/bot/nav/screens.json` (zod-реестр). Любое изменение экранов
+    сначала вносится в оба; нав-ряды только через `navRow()` (R1–R4),
+    колбэки `nv:home`/`nv:back:<id>`/`nv:go:<id>` whitelist-ятся реестром.
+    Тест `nav.test.ts` сверяет реестр, mermaid-схему и ряды.
 18. **Профиль:** `income_minor` — «типичный доход» (0 = не задан); факт —
     `income_entries` по месяцам (`/income`). Правки профиля — редьюсер
     `bot/profile.ts` (`advancePf`); колбэки `pf:*`/`in:*` step-aware
@@ -90,3 +97,16 @@
     `WHERE id=? AND user_id=?` (чужие id молча игнорируются).
 16. Проверка `X-Telegram-Bot-Api-Secret-Token` — fail-closed (нет секрета в
     env → 503) и константная по времени (`src/http/security.ts`).
+19. **Mini App (шаг 5):** SPA — Workers Static Assets в том же воркере
+    (`wrangler.toml [assets]` → `../web/dist`, SPA-fallback;
+    `run_worker_first = ["/api/*", "/telegram/*", "/health"]`, иначе
+    SPA перехватит эти пути). Перед `wrangler deploy` — сборка `apps/web`
+    (в `scripts/release.mjs` уже есть). Auth: `POST /api/tma/auth {initData}`
+    — HMAC «WebAppData» по токену бота (Web Crypto), `auth_date` ≤ 24ч,
+    юзер onboarded → JWT HS256 `{tg_id}` на 12ч (`src/tma/auth.ts`);
+    дальше `Authorization: Bearer` на `/api/tma/*` (любой не-валидный → 401).
+    Запуск Mini App — menu-button у поля ввода (`setChatMenuButton`,
+    `web_app` → `MINI_APP_URL` из `[vars]`): ставится в `npm run setup` или
+    `node scripts/telegram-webhook.mjs menu <url>`. Inline-кнопки
+    «📱 Приложение» в экранах бота нет.
+

@@ -3,10 +3,92 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <title>Budget Companion</title>
+    <style>
+      /* Тёмная тема из Telegram themeParams; фолбэки — если скрипт не загрузился. */
+      :root {
+        --bg: var(--tg-theme-bg-color, #17212b);
+        --bg2: var(--tg-theme-secondary-bg-color, #232e3c);
+        --text: var(--tg-theme-text-color, #f5f5f5);
+        --hint: var(--tg-theme-hint-color, #708499);
+        --link: var(--tg-theme-link-color, #6ab3f3);
+        --btn: var(--tg-theme-button-color, #5288c1);
+        --btn-text: var(--tg-theme-button-text-color, #ffffff);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 15px;
+        line-height: 1.45;
+      }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      h2 { font-size: 14px; color: var(--hint); text-transform: uppercase; letter-spacing: .04em; margin: 20px 0 8px; }
+      .card { background: var(--bg2); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+      .row { display: flex; justify-content: space-between; gap: 8px; }
+      .row + .row { margin-top: 6px; }
+      .muted { color: var(--hint); }
+      .big { font-size: 22px; font-weight: 600; }
+      .warn { color: #e8a33d; }
+      .err { color: #e56a6a; }
+      .center { display: flex; min-height: 60vh; align-items: center; justify-content: center; text-align: center; }
+      button.retry {
+        margin-top: 12px; padding: 10px 18px; border: 0; border-radius: 10px;
+        background: var(--btn); color: var(--btn-text); font-size: 15px; cursor: pointer;
+      }
+      ul.plain { list-style: none; margin: 0; padding: 0; }
+      ul.plain li { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+      ul.plain li:last-child { border-bottom: 0; }
+      /* ── веха G: навигация, кнопки, формы ── */
+      .topbar { display: flex; justify-content: space-between; margin: -4px -8px 12px; }
+      .navbtn { background: none; border: 0; color: var(--link); font-size: 15px; padding: 8px; cursor: pointer; }
+      .btn {
+        display: block; width: 100%; padding: 12px; border: 0; border-radius: 10px;
+        background: var(--btn); color: var(--btn-text); font-size: 15px; cursor: pointer;
+      }
+      .btn:disabled { opacity: .55; cursor: default; }
+      .btn.ghost { background: transparent; color: var(--link); }
+      .btn.danger { background: transparent; color: #e56a6a; border: 1px solid rgba(229,106,106,.4); }
+      .btn.sm { width: auto; padding: 7px 12px; font-size: 13px; margin-top: 14px; }
+      .menu { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; }
+      .menu .btn { background: var(--bg2); color: var(--text); text-align: left; }
+      .row.spread { align-items: center; }
+      .row.spread h2 { margin: 14px 0 8px; }
+      .field { display: block; margin-bottom: 10px; min-width: 0; }
+      .field-label { display: block; font-size: 13px; color: var(--hint); margin-bottom: 4px; }
+      input, select {
+        width: 100%; padding: 10px 12px; border-radius: 10px;
+        border: 1px solid rgba(255,255,255,.14); background: var(--bg);
+        color: var(--text); font-size: 15px;
+      }
+      input:focus, select:focus { outline: 2px solid var(--btn); outline-offset: -1px; }
+      .inline { display: flex; gap: 8px; }
+      .inline > * { flex: 1; min-width: 0; }
+      .form-err { margin: 4px 0 8px; font-size: 14px; }
+      .flash {
+        position: sticky; top: 0; z-index: 5; background: var(--btn); color: var(--btn-text);
+        border-radius: 10px; padding: 10px 14px; margin-bottom: 10px;
+      }
+      .rowbtn { background: none; border: 0; color: var(--hint); cursor: pointer; font-size: 15px; padding: 2px 4px; }
+      .confirm { margin-top: 8px; padding: 10px; border: 1px solid rgba(229,106,106,.55); border-radius: 10px; }
+      .confirm p { margin: 0 0 8px; }
+      li.clickable { cursor: pointer; }
+      li.clickable:active { opacity: .7; }
+      li.off span { opacity: .55; }
+      /* ── H3: кредиты/займы — выбранная кнопка-режим, превью ЧДП, правка события ── */
+      .clickable { cursor: pointer; }
+      .btn.on { outline: 2px solid var(--btn); outline-offset: -1px; }
+      .inline .btn.sm { margin-top: 0; }
+      .preview { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,.08); }
+      .ev-edit { margin-top: 6px; padding: 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; }
+    </style>
   </head>
   <body>
     <main id="app"></main>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

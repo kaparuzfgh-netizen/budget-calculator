@@ -12,15 +12,28 @@ database_name = "budget-companion"
 database_id = "d886f0a1-de15-4880-a8be-dfff4a0a1c34"
 migrations_dir = "migrations"
 
+# ── Статика Mini App (Workers Static Assets, шаг 5) ────────────
+# SPA на Vite из apps/web → dist. Ассеты проверяются первыми; /api/*,
+# /telegram/* и /health всегда идут в воркер (иначе SPA-fallback
+# перехватил бы, например, GET /health в браузере → index.html).
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/telegram/*", "/health"]
+
 # ── Несекретные переменные ──────────────────────────────────────
 # Username бота без @ — для ссылок-приглашений https://t.me/<bot>?start=<code>.
+# MINI_APP_URL — куда ведёт кнопка «📱 Приложение» в /menu (web_app).
 [vars]
 TELEGRAM_BOT_USERNAME = "Helper_6666_bot"
+MINI_APP_URL = "https://budget-companion-api.fool-undef.workers.dev"
 
 # ── Cron-триггеры (шаг 4 миграции: напоминания, валютные алерты) ─
 # Раскомментировать, когда появится handler scheduled() в src/index.ts.
-# [triggers]
-# crons = ["0 20 * * 0"]   # воскресный опрос 20:00 — пример
+[triggers]
+# напоминания: каждый час UTC — дальше фильтр по локальному времени пользователя
+crons = ["0 * * * *"]
 
 # ── Секреты (НЕ в этом файле!) ──────────────────────────────────
 # Задаются через `wrangler secret put <NAME>` (и в CI через

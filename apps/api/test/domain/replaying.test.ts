@@ -36,6 +36,24 @@ describe('replay', () => {
     expect(preview.balanceAfter).toBeCloseTo(s.balance - 1, 6);
   });
 
+  it('prepay reduce_term: платёж фиксирован, остаточный срок сжимается', () => {
+    const base = replay(SBER, [{ kind: 'payment', amount: 44_282 }]);
+    const s = replay(SBER, [
+      { kind: 'payment', amount: 44_282 },
+      { kind: 'prepay', amount: 100_000, mode: 'reduce_term' },
+    ]);
+    expect(s.payment).toBeCloseTo(base.payment, 6); // платёж не тронут
+    expect(s.balance).toBeCloseTo(base.balance - 100_000, 6);
+    expect(s.remainingPeriods).toBeLessThan(base.remainingPeriods); // срок сжался
+    // и тот же журнал без mode — «платёж↓»: срок сохраняется, платёж падает
+    const rp = replay(SBER, [
+      { kind: 'payment', amount: 44_282 },
+      { kind: 'prepay', amount: 100_000, mode: 'reduce_payment' },
+    ]);
+    expect(rp.payment).toBeLessThan(base.payment);
+    expect(rp.remainingPeriods).toBeGreaterThan(s.remainingPeriods);
+  });
+
   it('reconcile: платёж не меняется, периоды пересчитываются', () => {
     const before = replay(SBER, [{ kind: 'payment', amount: 44_282 }]);
     const after = replay(SBER, [

@@ -41,9 +41,14 @@ export function derivePeriods(balance: number, annualRate: number, ppy: number, 
 
 export type DebtEventKind = 'payment' | 'prepay' | 'reconcile';
 
+/** Режим ЧДП: платёж↓ (срок сохраняется) | срок↓ (платёж фиксирован). */
+export type PrepayMode = 'reduce_payment' | 'reduce_term';
+
 export interface DebtEvent {
   kind: DebtEventKind;
   amount: number;
+  /** Только для prepay; undefined — старые записи = reduce_payment. */
+  mode?: PrepayMode | undefined;
 }
 
 export interface DebtParams {
@@ -83,8 +88,14 @@ export function replay(params: DebtParams, events: DebtEvent[]): DebtState {
       made += 1;
     } else if (ev.kind === 'prepay') {
       balance = Math.max(0, balance - ev.amount);
-      const nLeft = Math.max(0, n0Eff - made);
-      payment = annuityPayment(balance, params.rate, ppy, nLeft); // срок сохраняется
+      if (ev.mode === 'reduce_term') {
+        // «срок↓»: платёж не трогаем — остаточный срок сжимается (как у reconcile)
+        n0Eff = made + derivePeriods(balance, params.rate, ppy, payment);
+      } else {
+        // «платёж↓» (и старые записи без mode): срок сохраняется, платёж пересчитывается
+        const nLeft = Math.max(0, n0Eff - made);
+        payment = annuityPayment(balance, params.rate, ppy, nLeft);
+      }
     } else if (ev.kind === 'reconcile') {
       // сверка с банком: факт главнее; платёж не меняется, срок пересчитывается
       balance = Math.max(0, ev.amount);

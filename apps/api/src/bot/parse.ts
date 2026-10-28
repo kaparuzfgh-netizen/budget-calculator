@@ -3,6 +3,99 @@ import { DomainError } from '../domain/errors';
 
 const CCY_RE = /^[A-Za-z]{3,5}$/;
 
+/**
+ * Разговорные обозначения валют → ISO-код (ключи — lowercase).
+ * Покрывает кириллицу («руб», «сом», «тенге»…), символы ($, ₽, €…) и
+ * короткие сокращения («р», «тг», «грн»). Неизвестный токен — НЕ валюта,
+ * уходит обратно в заметку.
+ */
+const CCY_ALIAS: Record<string, string> = {
+  usd: 'USD',
+  dollar: 'USD',
+  bucks: 'USD',
+  $: 'USD',
+  доллар: 'USD',
+  доллара: 'USD',
+  долларов: 'USD',
+  бакс: 'USD',
+  бакса: 'USD',
+  баксов: 'USD',
+  баксы: 'USD',
+  eur: 'EUR',
+  euro: 'EUR',
+  '€': 'EUR',
+  евро: 'EUR',
+  rub: 'RUB',
+  rur: 'RUB',
+  '₽': 'RUB',
+  руб: 'RUB',
+  рубль: 'RUB',
+  рубля: 'RUB',
+  рубли: 'RUB',
+  рублей: 'RUB',
+  р: 'RUB',
+  kgs: 'KGS',
+  сом: 'KGS',
+  сома: 'KGS',
+  сомы: 'KGS',
+  сомов: 'KGS',
+  kzt: 'KZT',
+  тенге: 'KZT',
+  тг: 'KZT',
+  '₸': 'KZT',
+  uah: 'UAH',
+  грн: 'UAH',
+  гривна: 'UAH',
+  гривны: 'UAH',
+  гривен: 'UAH',
+  '₴': 'UAH',
+  gel: 'GEL',
+  лари: 'GEL',
+  '₾': 'GEL',
+  uzs: 'UZS',
+  сум: 'UZS',
+  сума: 'UZS',
+  сумов: 'UZS',
+  amd: 'AMD',
+  драм: 'AMD',
+  драма: 'AMD',
+  драмов: 'AMD',
+  '֏': 'AMD',
+  azn: 'AZN',
+  манат: 'AZN',
+  маната: 'AZN',
+  манатов: 'AZN',
+  '₼': 'AZN',
+  byn: 'BYN',
+  cny: 'CNY',
+  юань: 'CNY',
+  юаня: 'CNY',
+  юаней: 'CNY',
+  '¥': 'CNY',
+  jpy: 'JPY',
+  йена: 'JPY',
+  иены: 'JPY',
+  иен: 'JPY',
+  gbp: 'GBP',
+  фунт: 'GBP',
+  фунта: 'GBP',
+  фунтов: 'GBP',
+  '£': 'GBP',
+  try: 'TRY',
+  лира: 'TRY',
+  лиры: 'TRY',
+  лир: 'TRY',
+  '₺': 'TRY',
+  pln: 'PLN',
+  злотый: 'PLN',
+  злотых: 'PLN',
+  chf: 'CHF',
+  франк: 'CHF',
+  франка: 'CHF',
+  франков: 'CHF',
+};
+const CCY_WORD = '[A-Za-zА-Яа-яЁё]{1,15}|[$€₽£¥₸₴₾֏₼₺]';
+
 export interface ParsedAmount {
   amount: number;
   currency?: string | undefined;
@@ -11,21 +104,28 @@ export interface ParsedAmount {
 
 /**
  * "<amount> [currency] [note…]" — сумма: "1 234,50" | "1234.5" | "3200 kgs кофе".
- * Валюта — 3–5 букв сразу после числа. Остальной хвост — заметка.
+ * Валюта — токен сразу после числа (слитно «500р» тоже ок): ISO-код, русское
+ * название («руб», «сом»…) или символ. Неузнанный токен уходит в заметку.
  */
 export function parseAmount(text: string, max = 1e9): ParsedAmount {
   const t = text.trim().replace(/[\s\u00A0]+/g, ' ');
-  const m = /^([+-]?\d[\d ]*(?:[.,]\d+)?)(?:\s+([A-Za-z]{3,5}))?(?:\s+(.*))?$/.exec(t);
+  const m = new RegExp(`^([+-]?\\d[\\d ]*(?:[.,]\\d+)?)\\s*(${CCY_WORD})?[.]?(?:\\s+(.*))?$`).exec(t);
   if (!m) throw new DomainError('PARSE', 'Не понял сумму. Пример: 250 или 250 kgs кофе');
   const amount = Number(m[1]!.replace(/ /g, '').replace(',', '.'));
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new DomainError('PARSE', 'Сумма должна быть положительным числом');
   }
   if (amount > max) throw new DomainError('PARSE', `Сумма слишком большая (>${max})`);
-  const note = (m[3] ?? '').trim();
+  const tok = m[2];
+  let currency: string | undefined;
+  let note = (m[3] ?? '').trim();
+  if (tok) {
+    currency = CCY_ALIAS[tok.toLowerCase()] ?? (CCY_RE.test(tok) ? tok.toUpperCase() : undefined);
+    if (!currency) note = note ? `${tok} ${note}` : tok;
+  }
   return {
     amount,
-    currency: m[2] ? m[2].toUpperCase() : undefined,
+    currency,
     ...(note ? { note } : {}),
   };
 }
@@ -81,6 +181,23 @@ export function monthInTz(tz: string, now: Date): string {
 }
 
 /** 'YYYY-MM-DD' по таймзоне — все «сегодня» вычисляем через Intl. */
+/** Понедельник текущей недели (ISO) в таймзоне пользователя. */
+export function weekStartInTz(tz: string, now: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: isValidTimezone(tz) ? tz : 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+  }).formatToParts(now);
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  const dow = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[m.weekday as 'Sun'] ?? 0;
+  const local = new Date(Date.UTC(Number(m.year), Number(m.month) - 1, Number(m.day)));
+  local.setUTCDate(local.getUTCDate() - ((dow + 6) % 7));
+  return local.toISOString().slice(0, 10);
+}
+
 export function todayInTz(tz: string, now: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,

@@ -5,6 +5,8 @@
  *   node scripts/telegram-webhook.mjs set <https-url>   — setWebhook
  *   node scripts/telegram-webhook.mjs info            — getWebhookInfo (URL замаскирован)
  *   node scripts/telegram-webhook.mjs delete          — deleteWebhook
+ *   node scripts/telegram-webhook.mjs menu <app-url>    — setChatMenuButton (web_app у поля ввода)
+ *   node scripts/telegram-webhook.mjs menu off          — вернуть стандартную меню-кнопку
  *
  * TELEGRAM_BOT_TOKEN и TELEGRAM_WEBHOOK_SECRET берутся из env; если их нет —
  * спрашиваются интерактивно со СКРЫТЫМ вводом (без эха). Значения никогда
@@ -34,8 +36,8 @@ async function tgCall(token, method, payload) {
 
 async function main() {
   const [, , cmd, urlArg] = process.argv;
-  if (!['set', 'info', 'delete'].includes(cmd)) {
-    console.error('Использование: telegram-webhook.mjs set <https-url> | info | delete');
+  if (!['set', 'info', 'delete', 'menu'].includes(cmd)) {
+    console.error('Использование: telegram-webhook.mjs set <https-url> | info | delete | menu <app-url|off>');
     process.exit(2);
   }
 
@@ -56,6 +58,17 @@ async function main() {
       const i = await tgCall(token, 'getWebhookInfo');
       console.log(`url: ${i.url ? maskUrl(i.url) : '(не задан)'}`);
       console.log(`pending: ${i.pending_update_count ?? 0}, last_error: ${i.last_error_message ?? '—'}`);
+    } else if (cmd === 'menu') {
+      if (urlArg === 'off') {
+        await tgCall(token, 'setChatMenuButton', { menu_button: { type: 'default' } });
+        console.log('✅ Меню-кнопка сброшена на стандартную');
+      } else {
+        if (!urlArg) throw new Error('нужен аргумент: https-URL Mini App (или off)');
+        await tgCall(token, 'setChatMenuButton', {
+          menu_button: { type: 'web_app', text: '💰 Бюджет', web_app: { url: urlArg } },
+        });
+        console.log(`✅ Меню-кнопка «💰 Бюджет» → ${maskUrl(urlArg)} (у всех чатов с ботом)`);
+      }
     } else {
       await tgCall(token, 'deleteWebhook', { drop_pending_updates: true });
       console.log('✅ Вебхук удалён');

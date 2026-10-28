@@ -12,6 +12,7 @@ import { createTelegramClient, TelegramError, type SendMessageOpts, type Telegra
 import type { FxProvider } from '../src/fx/provider';
 import { TEXT } from '../src/bot/commands';
 import { advance, startOnboarding, type ObState } from '../src/bot/onboarding';
+import { monthInTz } from '../src/bot/parse';
 import { scoped } from '../src/db/repo';
 import { maskChunk } from '../../../scripts/hidden-utils.mjs';
 
@@ -42,13 +43,14 @@ function assertTgHtml(t: string) {
 
 const SECRET = 's3';
 const OWNER = 555000111;
-const sent: { chatId: number; text: string }[] = [];
+const sent: { chatId: number; text: string; markup?: SendMessageOpts['replyMarkup'] }[] = [];
 const tg: TelegramClient = {
-  sendMessage: async (c, t, _o?: SendMessageOpts) => {
+  sendMessage: async (c, t, o?: SendMessageOpts) => {
     assertTgHtml(t); // ВСЕ исходящие сообщения проверяются на валидность HTML
-    sent.push({ chatId: Number(c), text: t });
+    sent.push({ chatId: Number(c), text: t, markup: o?.replyMarkup });
   },
   answerCallbackQuery: async () => {},
+  sendDocument: async () => {},
 };
 const fx: FxProvider = { latest: async () => ({ perUsd: { USD: 1, EUR: 1 / 1.09, RUB: 97 }, asOf: '2026-10-20' }) };
 const app = createRouter({ telegram: tg, fx });
@@ -71,7 +73,7 @@ const cb = (tgId: number, data: string, id?: number) =>
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
   sent.length = 0;
-  for (const t of ['conversation_state', 'weekly_expenses', 'commitments', 'profiles', 'consents', 'fx_rates', 'processed_updates', 'audit_log', 'invites', 'users']) {
+  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'commitment_payments', 'commitments', 'profiles', 'consents', 'fx_rates', 'processed_updates', 'audit_log', 'invites', 'reminder_log', 'users']) {
     await env.DB.prepare(`DELETE FROM ${t}`).run();
   }
 });
@@ -127,6 +129,7 @@ describe('симптом 1: HTML-валидность всех текстов', 
     const boom: TelegramClient = {
       sendMessage: async () => { throw new TelegramError(400, 'Bad Request: can\'t parse entities'); },
       answerCallbackQuery: async () => {},
+      sendDocument: async () => {},
     };
     const app2 = createRouter({ telegram: boom, fx });
     await makeOnboarded(OWNER + 11);
@@ -157,7 +160,8 @@ describe('симптом 2: двойные ответы', () => {
     const b2 = sent.length;
     await msg(OWNER + 20, '/cancel');
     expect(sent.length - b2).toBe(1); // только «отменена»
-    await makeOnboarded(OWNER + 21);
+    const uid21 = await makeOnboarded(OWNER + 21);
+    await scoped(env.DB, uid21).claimReminder('kb_removed', 'v1'); // kb-миграция уже пройдена — считаем только ответы
     const b3 = sent.length;
     await msg(OWNER + 21, '➕ Трата');
     expect(sent.length - b3).toBe(1); // только «Сколько потратили?»
@@ -247,5 +251,112 @@ describe('редьюсер: step-aware callback', () => {
     expect(r.effects).toEqual([]);
     const r2 = advance(startOnboarding().state, { type: 'callback', data: 'ob:com:done' });
     expect(r2.effects).toEqual([]);
+  });
+});
+
+describe('голая сумма — быстрый ввод траты убран', () => {
+  it('«344» и «500 kgs» вне промпта → «Не знаю такую команду», трата НЕ пишется', async () => {
+    const uid = await makeOnboarded(OWNER + 30);
+    await msg(OWNER + 30, '344');
+    expect(sent.at(-1)!.text).toBe(TEXT.unknownCommand);
+    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(0);
+    await msg(OWNER + 30, '500 kgs');
+    expect(sent.at(-1)!.text).toBe(TEXT.unknownCommand);
+    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(0);
+  });
+
+  it('«344» в spent_ask → трата; «344» в income_ask → доход (промпты не тронуты)', async () => {
+    const uid = await makeOnboarded(OWNER + 31);
+    await msg(OWNER + 31, '➕ Трата');
+    expect(sent.at(-1)!.text).toContain('Сколько потратили');
+    await msg(OWNER + 31, '344');
+    expect(sent.at(-1)!.text).toContain('Записал');
+    const exp = (await scoped(env.DB, uid).listExpenses()).results;
+    expect(exp).toHaveLength(1);
+    expect(exp[0]!.amount_minor).toBe(34400);
+    // income_ask через INCOME_HUB → «➕ Добавить доход»
+    await msg(OWNER + 31, '/income');
+    await cb(OWNER + 31, 'inc:add');
+    expect(sent.at(-1)!.text).toContain('Сколько получили');
+    await msg(OWNER + 31, '344');
+    const inc = (await scoped(env.DB, uid).listIncomeEntries(monthInTz('Asia/Bishkek', new Date()))).results;
+    expect(inc).toHaveLength(1);
+    expect(inc[0]!.amount_minor).toBe(34400);
+  });
+});
+
+describe('миграция нижней клавиатуры (kb_removed)', () => {
+  const removals = () =>
+    sent.filter((m) => (m.markup as { remove_keyboard?: boolean } | undefined)?.remove_keyboard === true);
+
+  it('remove_keyboard уходит ровно один раз на пользователя (дедуп через claim)', async () => {
+    await makeOnboarded(OWNER + 40);
+    await msg(OWNER + 40, '/help');
+    await msg(OWNER + 40, '/week');
+    const rm = removals();
+    expect(rm).toHaveLength(1);
+    expect(rm[0]!.text).toBe('·');
+    expect(sent.at(-1)!.text).not.toBe('·'); // основное сообщение дошло после «·»
+    // колбэк-ветка тоже молчит про клавиатуру — claim уже стоит
+    await cb(OWNER + 40, 'nv:home');
+    expect(removals()).toHaveLength(1);
+    expect(sent.at(-1)!.text).toBe('Главное меню');
+  });
+
+  it('сбой remove_keyboard → claim откатывается и ретраится на следующем сообщении', async () => {
+    await makeOnboarded(OWNER + 41);
+    let attempts = 0;
+    let failRemoval = true;
+    const flaky: TelegramClient = {
+      sendMessage: async (c, t, o) => {
+        if (o?.replyMarkup && 'remove_keyboard' in o.replyMarkup) {
+          attempts++;
+          if (failRemoval) throw new Error('net down');
+        }
+        sent.push({ chatId: Number(c), text: t });
+      },
+      answerCallbackQuery: async () => {},
+      sendDocument: async () => {},
+    };
+    const app2 = createRouter({ telegram: flaky, fx });
+    const post2 = (body: unknown) =>
+      app2.fetch(
+        new Request('https://t/telegram/webhook', {
+          method: 'POST',
+          headers: { 'X-Telegram-Bot-Api-Secret-Token': SECRET, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+        tenv(),
+      );
+    const msg2 = (tgId: number, text: string) =>
+      post2({
+        update_id: u++,
+        message: { message_id: 1, text, chat: { id: tgId, type: 'private' }, from: { id: tgId, first_name: 'U' } },
+      });
+    await msg2(OWNER + 41, '/help'); // «·» упала → claim откачен, help дошёл
+    expect(attempts).toBe(1);
+    expect(sent.at(-1)!.text).toContain('/plan');
+    failRemoval = false;
+    await msg2(OWNER + 41, '/help'); // ретрай миграции — теперь успешно
+    expect(attempts).toBe(2);
+    expect(sent.filter((m) => m.text === '·')).toHaveLength(1);
+    await msg2(OWNER + 41, '/help'); // claim стоит — больше не пытается
+    expect(attempts).toBe(2);
+  });
+
+  it('свежий пользователь проходит онбординг; в разметке только inline', async () => {
+    await env.DB.prepare("INSERT INTO users (telegram_id, role) VALUES (?, 'member')").bind(OWNER + 42).run();
+    await msg(OWNER + 42, '/start');
+    await cb(OWNER + 42, 'ob:terms:ok');
+    await cb(OWNER + 42, 'ob:ic:EUR');
+    await msg(OWNER + 42, '6200');
+    await msg(OWNER + 42, '60000');
+    await cb(OWNER + 42, 'ob:tz:UTC');
+    await cb(OWNER + 42, 'ob:com:skip');
+    expect(sent.at(-1)!.text).toContain('Профиль сохранён');
+    // ни одно сообщение не несёт reply keyboard; сводка — с inline-навигацией
+    const markups = sent.map((m) => m.markup as Record<string, unknown> | undefined);
+    expect(markups.every((m) => !(m && 'keyboard' in m))).toBe(true);
+    expect(markups.at(-1)).toHaveProperty('inline_keyboard');
   });
 });

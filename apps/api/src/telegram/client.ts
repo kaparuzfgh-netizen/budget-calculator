@@ -44,6 +44,8 @@ export interface InlineButton {
   text: string;
   callback_data?: string; // ≤64 байт
   url?: string;
+  /** Открывает Mini App (WebApp) — у такой кнопки callback_data нет. */
+  web_app?: { url: string };
 }
 
 export interface ReplyMarkup {
@@ -51,6 +53,8 @@ export interface ReplyMarkup {
   keyboard?: string[][];
   resize_keyboard?: boolean;
   is_persistent?: boolean;
+  /** Явно скрыть ранее показанную reply-клавиатуру (миграция kb_removed). */
+  remove_keyboard?: boolean;
 }
 
 export interface SendMessageOpts {
@@ -62,6 +66,8 @@ export interface SendMessageOpts {
 export interface TelegramClient {
   sendMessage(chatId: number | string, text: string, opts?: SendMessageOpts): Promise<void>;
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
+  /** Документ (multipart, Workers-compatible FormData+Blob). */
+  sendDocument(chatId: number | string, filename: string, content: string | Uint8Array, mime?: string): Promise<void>;
 }
 
 interface TgApiResult {
@@ -89,6 +95,14 @@ export function createTelegramClient(opts: { token: string; fetchImpl?: typeof f
   };
 
   return {
+    async sendDocument(chatId, filename, content, mime = 'application/json') {
+      const fd = new FormData();
+      fd.append('chat_id', String(chatId));
+      fd.append('document', new Blob([content], { type: mime }), filename);
+      const res = await f(`https://api.telegram.org/bot${opts.token}/sendDocument`, { method: 'POST', body: fd });
+      const json = (await res.json()) as TgApiResult;
+      if (!json.ok) throw new TelegramError(res.status, json.description ?? 'sendDocument failed');
+    },
     async sendMessage(chatId, text, o) {
       const body = {
         chat_id: chatId,

@@ -25,6 +25,7 @@ const tg: TelegramClient = {
   answerCallbackQuery: async (id) => {
     cbAcked.push(id);
   },
+  sendDocument: async () => {},
 };
 const fx: FxProvider = {
   latest: async (ccys) => ({
@@ -85,6 +86,7 @@ beforeEach(async () => {
   for (const t of [
     'conversation_state',
     'weekly_expenses',
+    'commitment_payments',
     'commitments',
     'profiles',
     'consents',
@@ -202,7 +204,7 @@ describe('команды бюджета', () => {
       update_id: u2,
       message: {
         message_id: u2,
-        text: '3200 kgs кофе',
+        text: '/spent 3200 kgs кофе',
         chat: { id: OWNER + 2, type: 'private' },
         from: { id: OWNER + 2, first_name: 'U' },
       },
@@ -302,6 +304,24 @@ describe('редьюсер и парсеры (юниты)', () => {
     expect(() => parseAmount('abc')).toThrow();
     expect(() => parseAmount('-5')).toThrow();
     expect(() => parseAmount('1e10')).toThrow();
+  });
+
+  it('parseAmount: разговорные валюты — «500 руб», «500р», «2000 сом», «700€», «300 баксов»', () => {
+    expect(parseAmount('500 руб')).toMatchObject({ amount: 500, currency: 'RUB' });
+    expect(parseAmount('500р')).toMatchObject({ amount: 500, currency: 'RUB' });
+    expect(parseAmount('500 рублей')).toMatchObject({ amount: 500, currency: 'RUB' });
+    expect(parseAmount('500 р.')).toMatchObject({ amount: 500, currency: 'RUB' });
+    expect(parseAmount('2000 сом')).toMatchObject({ amount: 2000, currency: 'KGS' });
+    expect(parseAmount('2 000 сомов')).toMatchObject({ amount: 2000, currency: 'KGS' });
+    expect(parseAmount('300 баксов')).toMatchObject({ amount: 300, currency: 'USD' });
+    expect(parseAmount('700€')).toMatchObject({ amount: 700, currency: 'EUR' });
+    expect(parseAmount('50 000 тенге')).toMatchObject({ amount: 50000, currency: 'KZT' });
+    expect(parseAmount('900 грн')).toMatchObject({ amount: 900, currency: 'UAH' });
+    // не валюта — уходит в заметку, как раньше
+    expect(parseAmount('320 кофе')).toMatchObject({ amount: 320, note: 'кофе' });
+    expect(parseAmount('320 кофе')).not.toMatchObject({ currency: expect.anything() });
+    expect(parseAmount('500 с гарантией')).toMatchObject({ amount: 500, note: 'с гарантией' });
+    expect(parseAmount('500 сом за телефон')).toMatchObject({ amount: 500, currency: 'KGS', note: 'за телефон' });
   });
 
   it('parseCommitmentLine / fmtMoney / tz', () => {

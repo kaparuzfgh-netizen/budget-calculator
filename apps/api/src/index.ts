@@ -1,4 +1,5 @@
 import { createRouter } from './http/router';
+import { runReminders } from './services/reminders';
 import type { Env } from './env';
 
 const app = createRouter();
@@ -6,6 +7,8 @@ const app = createRouter();
 export default {
   fetch: app.fetch,
 
-  /** Cron-триггеры (шаг 4 миграции). Раскомментировать вместе с [triggers]. */
-  // async scheduled(_event: ScheduledEvent, _env: Env, _ctx: ExecutionContext) {},
+  /** Cron: ежечасно — напоминания по локальному времени пользователей. */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runReminders(env, new Date()));
+  },
 } satisfies ExportedHandler<Env>;

@@ -1,0 +1,636 @@
+{
+  "screens": [
+    {
+      "id": "HOME",
+      "kind": "root",
+      "depth": 0,
+      "parent": null,
+      "nav": "reply"
+    },
+    {
+      "id": "PLAN",
+      "kind": "result",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
+      "id": "WEEK",
+      "kind": "result",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
+      "id": "SPENT_ASK",
+      "kind": "prompt",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "cancel"
+    },
+    {
+      "id": "SPENT_DONE",
+      "kind": "result",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
+      "id": "INCOME_HUB",
+      "kind": "menu",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home",
+      "altParent": "PF_INCOME"
+    },
+    {
+      "id": "INCOME_ASK",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "INCOME_HUB",
+      "nav": "cancel"
+    },
+    {
+      "id": "INCOME_LIST",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "INCOME_HUB",
+      "nav": "back_home"
+    },
+    {
+      "id": "INCOME_DEL",
+      "kind": "confirm",
+      "depth": 3,
+      "parent": "INCOME_LIST",
+      "nav": "confirm"
+    },
+    {
+      "id": "PF_HOME",
+      "kind": "menu",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
+      "id": "PF_INCOME",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "PF_HOME",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_TYPICAL_ASK",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "PF_INCOME",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_LIVING",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "PF_HOME",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_LIVING_ASK",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "PF_LIVING",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_COMMITS",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "PF_HOME",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_COMMIT",
+      "kind": "menu",
+      "depth": 3,
+      "parent": "PF_COMMITS",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_COMMIT_ADD",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "PF_COMMITS",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_COMMIT_AMOUNT",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "PF_COMMIT",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_COMMIT_DAY",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "PF_COMMIT",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_COMMIT_DEL",
+      "kind": "confirm",
+      "depth": 4,
+      "parent": "PF_COMMIT",
+      "nav": "confirm"
+    },
+    {
+      "id": "PF_CPAY",
+      "kind": "menu",
+      "depth": 4,
+      "parent": "PF_COMMIT",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_CPAY_EDIT",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "PF_COMMIT",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_CPAY_DEL",
+      "kind": "confirm",
+      "depth": 4,
+      "parent": "PF_COMMIT",
+      "nav": "confirm"
+    },
+    {
+      "id": "PF_LOCALE",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "PF_HOME",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_LOCALE_PICK",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "PF_LOCALE",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_REMINDERS",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "PF_HOME",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_DATA",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "PF_HOME",
+      "nav": "back_home"
+    },
+    {
+      "id": "PF_DELETE_ASK",
+      "kind": "confirm",
+      "depth": 3,
+      "parent": "PF_DATA",
+      "nav": "confirm"
+    },
+    {
+      "id": "EXPENSES_LIST",
+      "kind": "menu",
+      "depth": 3,
+      "parent": "WEEK",
+      "nav": "back_home"
+    },
+    {
+      "id": "EXPENSE",
+      "kind": "menu",
+      "depth": 4,
+      "parent": "EXPENSES_LIST",
+      "nav": "back_home"
+    },
+    {
+      "id": "EXPENSE_DEL",
+      "kind": "confirm",
+      "depth": 5,
+      "parent": "EXPENSE",
+      "nav": "confirm"
+    },
+    {
+      "id": "EXPENSE_EDIT_ASK",
+      "kind": "prompt",
+      "depth": 5,
+      "parent": "EXPENSE",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBTS",
+      "kind": "menu",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
+      "id": "DEBT",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "back_home"
+    },
+    {
+      "id": "DEBT_DEL",
+      "kind": "confirm",
+      "depth": 3,
+      "parent": "DEBT",
+      "nav": "confirm"
+    },
+    {
+      "id": "DEBT_PAY",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "DEBT",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_PREPAY_ASK",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "DEBT",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_PREPAY",
+      "kind": "confirm",
+      "depth": 3,
+      "parent": "DEBT",
+      "nav": "confirm"
+    },
+    {
+      "id": "DEBT_RECON",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "DEBT",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_EDIT",
+      "kind": "menu",
+      "depth": 3,
+      "parent": "DEBT",
+      "nav": "back_home"
+    },
+    {
+      "id": "DEBT_EDIT_RATE",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "DEBT_EDIT",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_EDIT_PAYMENT",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "DEBT_EDIT",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_EDIT_DUE",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "DEBT_EDIT",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_HIST",
+      "kind": "result",
+      "depth": 3,
+      "parent": "DEBT",
+      "nav": "back_home"
+    },
+    {
+      "id": "DEBT_EVENT",
+      "kind": "menu",
+      "depth": 4,
+      "parent": "DEBT_HIST",
+      "nav": "back_home"
+    },
+    {
+      "id": "DEBT_EVENT_EDIT",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "DEBT_HIST",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_EVENT_DEL",
+      "kind": "confirm",
+      "depth": 4,
+      "parent": "DEBT_HIST",
+      "nav": "confirm"
+    },
+    {
+      "id": "DEBT_ADD_NAME",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_ADD_BALANCE",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_ADD_RATE",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_ADD_PAYMENT",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_ADD_FREQ",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_ADD_DUE",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
+      "id": "DEBT_ADD_EPOCH",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOANS",
+      "kind": "menu",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
+      "id": "LOANS_CLOSED",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "LOANS",
+      "nav": "back_home"
+    },
+    {
+      "id": "LOAN",
+      "kind": "menu",
+      "depth": 2,
+      "parent": "LOANS",
+      "nav": "back_home"
+    },
+    {
+      "id": "LOAN_REPAY",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "LOAN",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOAN_DUE_EDIT",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "LOAN",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOAN_CLOSE",
+      "kind": "confirm",
+      "depth": 3,
+      "parent": "LOAN",
+      "nav": "confirm"
+    },
+    {
+      "id": "LOAN_DEL",
+      "kind": "confirm",
+      "depth": 3,
+      "parent": "LOAN",
+      "nav": "confirm"
+    },
+    {
+      "id": "LOAN_HIST",
+      "kind": "result",
+      "depth": 3,
+      "parent": "LOAN",
+      "nav": "back_home"
+    },
+    {
+      "id": "LOAN_EVENT",
+      "kind": "menu",
+      "depth": 4,
+      "parent": "LOAN_HIST",
+      "nav": "back_home"
+    },
+    {
+      "id": "LOAN_EVENT_EDIT",
+      "kind": "prompt",
+      "depth": 4,
+      "parent": "LOAN_HIST",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOAN_EVENT_DEL",
+      "kind": "confirm",
+      "depth": 4,
+      "parent": "LOAN_HIST",
+      "nav": "confirm"
+    },
+    {
+      "id": "LOAN_ADD_DIR",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "LOANS",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOAN_ADD_NAME",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "LOANS",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOAN_ADD_AMOUNT",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "LOANS",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOAN_ADD_DUE",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "LOANS",
+      "nav": "cancel"
+    },
+    {
+      "id": "LOAN_ADD_NOTE",
+      "kind": "prompt",
+      "depth": 2,
+      "parent": "LOANS",
+      "nav": "cancel"
+    }
+  ],
+  "edges": [
+    ["HOME", "PLAN"],
+    ["HOME", "WEEK"],
+    ["HOME", "SPENT_ASK"],
+    ["SPENT_ASK", "SPENT_DONE"],
+    ["SPENT_ASK", "HOME"],
+    ["HOME", "INCOME_HUB"],
+    ["INCOME_HUB", "INCOME_ASK"],
+    ["INCOME_ASK", "INCOME_HUB"],
+    ["INCOME_HUB", "INCOME_LIST"],
+    ["INCOME_LIST", "INCOME_HUB"],
+    ["INCOME_LIST", "INCOME_DEL"],
+    ["INCOME_DEL", "INCOME_LIST"],
+    ["HOME", "PF_HOME"],
+    ["PF_HOME", "PF_INCOME"],
+    ["PF_INCOME", "PF_TYPICAL_ASK"],
+    ["PF_TYPICAL_ASK", "PF_INCOME"],
+    ["PF_INCOME", "INCOME_HUB"],
+    ["INCOME_HUB", "PF_INCOME"],
+    ["PF_HOME", "PF_LIVING"],
+    ["PF_LIVING", "PF_LIVING_ASK"],
+    ["PF_LIVING_ASK", "PF_LIVING"],
+    ["PF_HOME", "PF_COMMITS"],
+    ["PF_COMMITS", "PF_COMMIT"],
+    ["PF_COMMITS", "PF_COMMIT_ADD"],
+    ["PF_COMMIT_ADD", "PF_COMMITS"],
+    ["PF_COMMIT", "PF_COMMIT_AMOUNT"],
+    ["PF_COMMIT", "PF_COMMIT_DAY"],
+    ["PF_COMMIT_AMOUNT", "PF_COMMIT"],
+    ["PF_COMMIT_DAY", "PF_COMMIT"],
+    ["PF_COMMIT", "PF_COMMIT_DEL"],
+    ["PF_COMMIT_DEL", "PF_COMMIT"],
+    ["PF_COMMIT_DEL", "PF_COMMITS"],
+    ["PF_COMMIT", "PF_CPAY"],
+    ["PF_CPAY", "PF_COMMIT"],
+    ["PF_CPAY", "PF_CPAY_EDIT"],
+    ["PF_CPAY", "PF_CPAY_DEL"],
+    ["PF_CPAY_EDIT", "PF_COMMIT"],
+    ["PF_CPAY_DEL", "PF_COMMIT"],
+    ["PF_COMMIT", "PF_COMMITS"],
+    ["PF_HOME", "PF_LOCALE"],
+    ["PF_LOCALE", "PF_LOCALE_PICK"],
+    ["PF_LOCALE_PICK", "PF_LOCALE"],
+    ["PF_HOME", "PF_REMINDERS"],
+    ["PF_HOME", "PF_DATA"],
+    ["PF_DATA", "PF_DELETE_ASK"],
+    ["PF_DELETE_ASK", "PF_DATA"],
+    ["WEEK", "EXPENSES_LIST"],
+    ["EXPENSES_LIST", "EXPENSE"],
+    ["EXPENSE", "EXPENSE_EDIT_ASK"],
+    ["EXPENSE", "EXPENSE_DEL"],
+    ["EXPENSE_EDIT_ASK", "EXPENSE"],
+    ["EXPENSE_DEL", "EXPENSE"],
+    ["EXPENSE_DEL", "EXPENSES_LIST"],
+    ["SPENT_DONE", "EXPENSE_EDIT_ASK"],
+    ["HOME", "DEBTS"],
+    ["DEBTS", "DEBT"],
+    ["DEBTS", "DEBT_ADD_NAME"],
+    ["DEBT", "DEBT_DEL"],
+    ["DEBT", "DEBT_PAY"],
+    ["DEBT", "DEBT_PREPAY_ASK"],
+    ["DEBT", "DEBT_RECON"],
+    ["DEBT", "DEBT_EDIT"],
+    ["DEBT", "DEBT_HIST"],
+    ["DEBT", "DEBTS"],
+    ["DEBT_DEL", "DEBT"],
+    ["DEBT_DEL", "DEBTS"],
+    ["DEBT_PAY", "DEBT"],
+    ["DEBT_PREPAY_ASK", "DEBT"],
+    ["DEBT_PREPAY_ASK", "DEBT_PREPAY"],
+    ["DEBT_PREPAY", "DEBT"],
+    ["DEBT_RECON", "DEBT"],
+    ["DEBT_EDIT", "DEBT"],
+    ["DEBT_EDIT", "DEBT_EDIT_RATE"],
+    ["DEBT_EDIT", "DEBT_EDIT_PAYMENT"],
+    ["DEBT_EDIT", "DEBT_EDIT_DUE"],
+    ["DEBT_EDIT_RATE", "DEBT_EDIT"],
+    ["DEBT_EDIT_RATE", "DEBT"],
+    ["DEBT_EDIT_PAYMENT", "DEBT_EDIT"],
+    ["DEBT_EDIT_PAYMENT", "DEBT"],
+    ["DEBT_EDIT_DUE", "DEBT_EDIT"],
+    ["DEBT_EDIT_DUE", "DEBT"],
+    ["DEBT_HIST", "DEBT"],
+    ["DEBT_HIST", "DEBT_EVENT"],
+    ["DEBT_EVENT", "DEBT_HIST"],
+    ["DEBT_EVENT", "DEBT_EVENT_EDIT"],
+    ["DEBT_EVENT", "DEBT_EVENT_DEL"],
+    ["DEBT_EVENT_EDIT", "DEBT_EVENT"],
+    ["DEBT_EVENT_EDIT", "DEBT_HIST"],
+    ["DEBT_EVENT_DEL", "DEBT_HIST"],
+    ["DEBT_ADD_NAME", "DEBT_ADD_BALANCE"],
+    ["DEBT_ADD_BALANCE", "DEBT_ADD_RATE"],
+    ["DEBT_ADD_RATE", "DEBT_ADD_PAYMENT"],
+    ["DEBT_ADD_PAYMENT", "DEBT_ADD_FREQ"],
+    ["DEBT_ADD_FREQ", "DEBT_ADD_DUE"],
+    ["DEBT_ADD_FREQ", "DEBT_ADD_EPOCH"],
+    ["DEBT_ADD_DUE", "DEBTS"],
+    ["DEBT_ADD_EPOCH", "DEBTS"],
+    ["DEBT_ADD_NAME", "DEBTS"],
+    ["DEBT_ADD_BALANCE", "DEBTS"],
+    ["DEBT_ADD_RATE", "DEBTS"],
+    ["DEBT_ADD_PAYMENT", "DEBTS"],
+    ["DEBT_ADD_FREQ", "DEBTS"],
+    ["DEBT_ADD_DUE", "DEBTS"],
+    ["DEBT_ADD_EPOCH", "DEBTS"],
+    ["HOME", "LOANS"],
+    ["LOANS", "LOANS_CLOSED"],
+    ["LOANS", "LOAN"],
+    ["LOANS_CLOSED", "LOANS"],
+    ["LOANS_CLOSED", "LOAN"],
+    ["LOANS", "LOAN_ADD_DIR"],
+    ["LOAN", "LOANS"],
+    ["LOAN", "LOAN_REPAY"],
+    ["LOAN", "LOAN_DUE_EDIT"],
+    ["LOAN", "LOAN_CLOSE"],
+    ["LOAN", "LOAN_DEL"],
+    ["LOAN", "LOAN_HIST"],
+    ["LOAN_HIST", "LOAN"],
+    ["LOAN_HIST", "LOAN_EVENT"],
+    ["LOAN_EVENT", "LOAN_HIST"],
+    ["LOAN_EVENT", "LOAN_EVENT_EDIT"],
+    ["LOAN_EVENT", "LOAN_EVENT_DEL"],
+    ["LOAN_EVENT_EDIT", "LOAN_EVENT"],
+    ["LOAN_EVENT_EDIT", "LOAN_HIST"],
+    ["LOAN_EVENT_DEL", "LOAN_HIST"],
+    ["LOAN_REPAY", "LOAN"],
+    ["LOAN_DUE_EDIT", "LOAN"],
+    ["LOAN_CLOSE", "LOAN"],
+    ["LOAN_DEL", "LOAN"],
+    ["LOAN_DEL", "LOANS"],
+    ["LOAN_ADD_DIR", "LOAN_ADD_NAME"],
+    ["LOAN_ADD_NAME", "LOAN_ADD_AMOUNT"],
+    ["LOAN_ADD_AMOUNT", "LOAN_ADD_DUE"],
+    ["LOAN_ADD_DUE", "LOAN_ADD_NOTE"],
+    ["LOAN_ADD_NOTE", "LOANS"],
+    ["LOAN_ADD_DIR", "LOANS"],
+    ["LOAN_ADD_NAME", "LOANS"],
+    ["LOAN_ADD_AMOUNT", "LOANS"],
+    ["LOAN_ADD_DUE", "LOANS"],
+    ["LOAN_ADD_NOTE", "LOANS"]
+  ]
+}

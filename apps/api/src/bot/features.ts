@@ -7,11 +7,17 @@ import { weeklyStatus } from '../domain/budget';
 import { convert, round2 } from '../domain/money';
 import type { FxResult } from '../fx/service';
 import type { CommitmentRow, IncomeEntryRow } from '../db/repo';
-import type { TelegramClient } from '../telegram/client';
+import type { ReplyMarkup, TelegramClient } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
 import { fmtMoney, fmtPct } from './format';
-import { monthInTz, parseAmount } from './parse';
-import { MAIN_MENU_KB, profileMenuText, type PfCtx } from './profile';
+import { monthInTz, parseAmount, todayInTz, weekStartInTz } from './parse';
+import { renderPf, type PfCtx } from './profile';
+import { HOME_ROW } from './nav/nav';
+const HOME_MK = { inline_keyboard: [HOME_ROW] };
+/** WEEK: кнопка списка трат + навигация домой. */
+const WEEK_MK: ReplyMarkup = {
+  inline_keyboard: [[{ text: '📋 Траты недели', callback_data: 'ex:list' }], HOME_ROW],
+};
 
 const FX_FAIL = 'Курсы временно недоступны, попробуйте позже';
 
@@ -150,7 +156,7 @@ export async function runPlan(
   lines.push(
     `<i>Курсы на ${escapeHtml(fxr.asOf || '—')}${fxr.stale ? ' — курсы устарели, провайдер недоступен' : ''}</i>`,
   );
-  await tg.sendMessage(chatId, lines.join('\n'));
+  await tg.sendMessage(chatId, lines.join('\n'), { replyMarkup: HOME_MK });
 }
 
 export async function runSpent(
@@ -200,6 +206,16 @@ export async function runSpent(
     source_key: sourceKey,
   });
   if (r.meta.changes === 0) return; // дубликат update_id — молча
+  const exId = Number(r.meta.last_row_id);
+  const spentMk: ReplyMarkup = {
+    inline_keyboard: [
+      [
+        { text: '↩ Отменить', callback_data: `ex:undo:${exId}` },
+        { text: '✏️ Изменить', callback_data: `ex:e:${exId}` },
+      ],
+      HOME_ROW,
+    ],
+  };
   await runWeek(
     chatId,
     tg,
@@ -207,6 +223,7 @@ export async function runSpent(
     fx,
     todayIso,
     `Записал: ${fmtMoney(a.amount, ccy)}${a.note ? ` (${escapeHtml(a.note)})` : ''}\n\n`,
+    spentMk,
   );
 }
 
@@ -217,6 +234,7 @@ export async function runWeek(
   fx: FxLike,
   todayIso: string,
   prefix = '',
+  markup?: ReplyMarkup,
 ): Promise<void> {
   const p = await repo.getProfile();
   if (!p?.onboarded_at) {
@@ -250,7 +268,7 @@ export async function runWeek(
     `💵 В день до конца месяца: ${fmtMoney(round2(s.dailyAllowance), c)} (${s.daysLeft} дн.)`,
   ];
   if (!expenses.length) lines.push('Пока нет трат — запишите через «➕ Трата».');
-  await tg.sendMessage(chatId, prefix + lines.join('\n'));
+  await tg.sendMessage(chatId, prefix + lines.join('\n'), { replyMarkup: markup ?? WEEK_MK });
 }
 
 /** /income — факт дохода за ТЕКУЩИЙ месяц в таймзоне пользователя. */
@@ -262,18 +280,18 @@ export async function runIncome(
   text: string,
   sourceKey: string,
   monthIso: string,
-): Promise<void> {
+): Promise<boolean> {
   const p = await repo.getProfile();
   if (!p?.onboarded_at) {
     await tg.sendMessage(chatId, 'Сначала настройка — /start');
-    return;
+    return false;
   }
   let a;
   try {
     a = parseAmount(text);
   } catch (e) {
     await tg.sendMessage(chatId, (e as Error).message);
-    return;
+    return false;
   }
   const ccy = a.currency ?? p.income_currency;
   const r = await repo.addIncomeEntry({
@@ -283,44 +301,8 @@ export async function runIncome(
     note: a.note ?? null,
     source_key: sourceKey,
   });
-  if (r.meta.changes === 0) return; // дубликат update_id — молча
-  const entries = (await repo.listIncomeEntries(monthIso)).results;
-  let total = '';
-  try {
-    const fxr = await fxFor(fx, [p.income_currency, ...entries.map((e) => e.currency)]);
-    const sum = entries.reduce(
-      (s, e) => s + convert(e.amount_minor / 100, e.currency, p.income_currency, { perUsd: fxr.perUsd }),
-      0,
-    );
-    total = ` — итого за ${monthIso}: ${fmtMoney(round2(sum), p.income_currency)}`;
-  } catch {
-    total = ' — курсы недоступны, итог позже';
-  }
-  await tg.sendMessage(
-    chatId,
-    `Записал доход: ${fmtMoney(a.amount, ccy)}${a.note ? ` (${escapeHtml(a.note)})` : ''}${total}\n/plan покажет расклад.`,
-  );
-}
-
-/** /income без аргументов — список записей месяца с кнопками удаления. */
-export async function runIncomeList(chatId: number, tg: TelegramClient, repo: Repo, monthIso: string): Promise<void> {
-  const entries = (await repo.listIncomeEntries(monthIso)).results;
-  const incomeSectionText = entries.length
-    ? entries
-        .map((e) => `  • ${fmtMoney(e.amount_minor / 100, e.currency)}${e.note ? ` (${escapeHtml(e.note)})` : ''}`)
-        .join('\n')
-    : '  записей за месяц нет';
-  await repo.setConversation('pf:income_list', '{}');
-  await tg.sendMessage(chatId, `💵 Доход за ${monthIso}:\n${incomeSectionText}`, {
-    replyMarkup: {
-      inline_keyboard: entries.map((e) => [
-        {
-          text: `🗑 ${fmtMoney(e.amount_minor / 100, e.currency)}${e.note ? ` ${e.note}` : ''}`,
-          callback_data: `in:del:${e.id}`,
-        },
-      ]),
-    },
-  });
+  if (r.meta.changes === 0) return false; // дубликат update_id — молча
+  return true;
 }
 
 export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo): Promise<void> {
@@ -329,11 +311,20 @@ export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo)
     await tg.sendMessage(chatId, 'Профиль не настроен — /start');
     return;
   }
+  const now = new Date();
+  const month = monthInTz(p.timezone, now);
   const ctx: PfCtx = {
     profile: p,
     commitments: (await repo.listCommitments(false)).results,
-    incomeEntries: (await repo.listIncomeEntries(monthInTz(p.timezone, new Date()))).results,
+    commitPayments: (
+      await repo.listCommitmentPaymentsSince(`${Number(month.slice(0, 4)) - 1}${month.slice(4)}-01`)
+    ).results,
+    incomeEntries: (await repo.listIncomeEntries(month)).results,
+    expenses: (await repo.listExpenses(weekStartInTz(p.timezone, now))).results,
+    month,
+    today: todayInTz(p.timezone, now),
   };
-  await repo.setConversation('pf', '{}'); // меню активно — кнопки живут 24ч
-  await tg.sendMessage(chatId, profileMenuText(ctx), { replyMarkup: MAIN_MENU_KB });
+  const r = renderPf('PF_HOME', {}, ctx);
+  await repo.setConversation(r.step, '{}'); // меню активно — кнопки живут 24ч
+  await tg.sendMessage(chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
 }

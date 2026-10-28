@@ -20,6 +20,7 @@ const fakeTelegram: TelegramClient = {
     sent.push({ chatId: Number(chatId), text });
   },
   async answerCallbackQuery() {},
+      sendDocument: async () => {},
 };
 
 const app = createRouter({ telegram: fakeTelegram });
@@ -61,6 +62,7 @@ async function cleanDb() {
   for (const t of [
     'conversation_state',
     'weekly_expenses',
+    'commitment_payments',
     'commitments',
     'profiles',
     'consents',
@@ -69,6 +71,7 @@ async function cleanDb() {
     'audit_log',
     'invites',
     'users',
+    'reminder_log',
   ]) {
     await env.DB.prepare(`DELETE FROM ${t}`).run();
   }
@@ -144,7 +147,10 @@ describe('формат апдейтов', () => {
   it('дубликат update_id обрабатывается один раз', async () => {
     expect((await post(msg(20, OWNER_TG, 'привет'))).status).toBe(200);
     expect((await post(msg(20, OWNER_TG, 'привет'))).status).toBe(200);
-    expect(sent.length).toBe(1); // владелец создан один раз, один ответ
+    // владелец создан один раз: «·» (миграция remove_keyboard) + приветствие
+    expect(sent.length).toBe(2);
+    expect(sent[0]!.text).toBe('·');
+    expect(sent.at(-1)!.text).toContain('владелец');
   });
 });
 
@@ -264,6 +270,7 @@ describe('доступ', () => {
         throw new Error(`boom ${SECRET} ${'token-xyz'} приватный-текст`);
       },
       async answerCallbackQuery() {},
+      async sendDocument() {},
     };
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bad = createRouter({ telegram: boom });

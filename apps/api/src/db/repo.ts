@@ -29,6 +29,8 @@ export interface ProfileRow {
   bonus_prepay_share: number;
   bonus_dca_share: number;
   onboarded_at: string | null;
+  reminders_weekly: number;
+  reminders_payments: number;
 }
 
 export interface CommitmentRow {
@@ -62,6 +64,69 @@ export interface IncomeEntryRow {
   source_key: string | null;
 }
 
+export interface DebtRow {
+  id: number;
+  user_id: number;
+  name: string;
+  currency: string;
+  rate: number; // годовая, доля (0.119)
+  frequency: 'monthly' | 'biweekly';
+  initial_balance_minor: number;
+  initial_payment_minor: number;
+  epoch: string; // 'YYYY-MM-DD'
+  due_day: number | null;
+  active: number;
+}
+
+export interface DebtEventRow {
+  id: number;
+  user_id: number;
+  debt_id: number;
+  kind: 'payment' | 'prepay' | 'reconcile';
+  amount_minor: number;
+  event_on: string; // 'YYYY-MM-DD' локально
+  /** Режим ЧДП: 'reduce_payment' | 'reduce_term' | null (старые записи). */
+  mode: 'reduce_payment' | 'reduce_term' | null;
+  source: 'manual' | 'auto';
+  source_key: string | null;
+}
+
+/** Личный заём («Долги людям»): 'owe' — я должен, 'owed' — мне должны. */
+export interface LoanRow {
+  id: number;
+  user_id: number;
+  counterparty: string;
+  direction: 'owe' | 'owed';
+  amount_minor: number;
+  currency: string;
+  due_on: string | null; // 'YYYY-MM-DD' или NULL
+  note: string | null;
+  closed_at: string | null; // закрыт вручную — остаток прощён
+}
+
+/** Оплата регулярного платежа (журнал commitments): manual/auto + source_key. */
+export interface CommitmentPaymentRow {
+  id: number;
+  user_id: number;
+  commitment_id: number;
+  amount_minor: number;
+  currency: string;
+  paid_on: string; // 'YYYY-MM-DD' локально
+  source: 'manual' | 'auto';
+  source_key: string | null;
+}
+
+export interface LoanEventRow {
+  id: number;
+  user_id: number;
+  loan_id: number;
+  kind: 'repay';
+  amount_minor: number;
+  event_on: string; // 'YYYY-MM-DD' локально
+  source: 'manual' | 'auto';
+  source_key: string | null;
+}
+
 /** Репозиторий, привязанный к конкретному пользователю. */
 export function scoped(db: Env['DB'], userId: number) {
   return {
@@ -89,12 +154,18 @@ export function scoped(db: Env['DB'], userId: number) {
     getProfile() {
       return db.prepare('SELECT * FROM profiles WHERE user_id = ?').bind(userId).first<ProfileRow>();
     },
-    upsertProfile(p: Omit<ProfileRow, 'user_id'>) {
+    upsertProfile(
+      p: Omit<ProfileRow, 'user_id' | 'reminders_weekly' | 'reminders_payments'> & {
+        reminders_weekly?: number;
+        reminders_payments?: number;
+      },
+    ) {
       return db
         .prepare(
           `INSERT INTO profiles (user_id, base_currency, income_currency, living_currency, timezone,
-            income_minor, living_cap_minor, weekly_budget_minor, bonus_prepay_share, bonus_dca_share, onboarded_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            income_minor, living_cap_minor, weekly_budget_minor, bonus_prepay_share, bonus_dca_share, onboarded_at,
+            reminders_weekly, reminders_payments)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 1), COALESCE(?, 1))
            ON CONFLICT(user_id) DO UPDATE SET base_currency=excluded.base_currency,
              income_currency=excluded.income_currency, living_currency=excluded.living_currency,
              timezone=excluded.timezone, income_minor=excluded.income_minor,
@@ -114,6 +185,8 @@ export function scoped(db: Env['DB'], userId: number) {
           p.bonus_prepay_share,
           p.bonus_dca_share,
           p.onboarded_at,
+          p.reminders_weekly ?? null,
+          p.reminders_payments ?? null,
         )
         .run();
     },
@@ -141,10 +214,14 @@ export function scoped(db: Env['DB'], userId: number) {
     /** Точечные правки — все WHERE id=? AND user_id=? (чужие id молча игнорируются). */
     patchCommitment(
       id: number,
-      patch: { amount_minor?: number; currency?: string; due_day?: number | null; active?: number },
+      patch: { amount_minor?: number; currency?: string; due_day?: number | null; active?: number; name?: string },
     ) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string | null)[] = [];
+      if (patch.name !== undefined) {
+        sets.push('name = ?');
+        binds.push(patch.name);
+      }
       if (patch.amount_minor !== undefined) {
         sets.push('amount_minor = ?');
         binds.push(patch.amount_minor);
@@ -167,8 +244,12 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(...binds)
         .run();
     },
+    /** Удаление платежа вместе с журналом оплат (batch = одна транзакция). */
     deleteCommitment(id: number) {
-      return db.prepare('DELETE FROM commitments WHERE id = ? AND user_id = ?').bind(id, userId).run();
+      return db.batch([
+        db.prepare('DELETE FROM commitment_payments WHERE user_id = ? AND commitment_id = ?').bind(userId, id),
+        db.prepare('DELETE FROM commitments WHERE id = ? AND user_id = ?').bind(id, userId),
+      ]);
     },
     countCommitments() {
       return db
@@ -178,6 +259,82 @@ export function scoped(db: Env['DB'], userId: number) {
     },
     deactivateAllCommitments() {
       return db.prepare('UPDATE commitments SET active = 0 WHERE user_id = ?').bind(userId).run();
+    },
+
+    // ── журнал оплат регулярных платежей ──
+    /** Оплаты одного платежа в порядке даты (paid_on, id). */
+    listCommitmentPayments(commitmentId: number) {
+      return db
+        .prepare('SELECT * FROM commitment_payments WHERE user_id = ? AND commitment_id = ? ORDER BY paid_on, id')
+        .bind(userId, commitmentId)
+        .all<CommitmentPaymentRow>();
+    },
+    /** Все оплаты юзера с paid_on >= isoDate («оплачено в этом месяце» без N запросов). */
+    listCommitmentPaymentsSince(isoDate: string) {
+      return db
+        .prepare('SELECT * FROM commitment_payments WHERE user_id = ? AND paid_on >= ? ORDER BY paid_on, id')
+        .bind(userId, isoDate)
+        .all<CommitmentPaymentRow>();
+    },
+    /** INSERT OR IGNORE — идемпотентность по (user_id, source_key);
+     *  commitment_id пишется только если платёж принадлежит юзеру (EXISTS). */
+    addCommitmentPayment(e: {
+      commitment_id: number;
+      amount_minor: number;
+      currency: string;
+      paid_on: string;
+      source: 'manual' | 'auto';
+      source_key: string | null;
+    }) {
+      return db
+        .prepare(
+          `INSERT OR IGNORE INTO commitment_payments (user_id, commitment_id, amount_minor, currency, paid_on, source, source_key)
+           SELECT ?, ?, ?, ?, ?, ?, ?
+           WHERE EXISTS (SELECT 1 FROM commitments WHERE id = ? AND user_id = ?)`,
+        )
+        .bind(
+          userId,
+          e.commitment_id,
+          e.amount_minor,
+          e.currency,
+          e.paid_on,
+          e.source,
+          e.source_key,
+          e.commitment_id,
+          userId,
+        )
+        .run();
+    },
+    findCommitmentPaymentByKey(sourceKey: string) {
+      return db
+        .prepare('SELECT * FROM commitment_payments WHERE user_id = ? AND source_key = ?')
+        .bind(userId, sourceKey)
+        .first<CommitmentPaymentRow>();
+    },
+    getCommitmentPayment(id: number) {
+      return db
+        .prepare('SELECT * FROM commitment_payments WHERE id = ? AND user_id = ?')
+        .bind(id, userId)
+        .first<CommitmentPaymentRow>();
+    },
+    /** Точечная правка оплаты — только своей записи (чужие id молча). */
+    updateCommitmentPayment(id: number, patch: { amount_minor?: number; paid_on?: string }) {
+      const sets: string[] = [];
+      const binds: (number | string)[] = [];
+      for (const k of ['amount_minor', 'paid_on'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(patch[k]!);
+        }
+      if (!sets.length) return Promise.resolve({ success: true, meta: { changes: 0 } } as D1Result);
+      binds.push(id, userId);
+      return db
+        .prepare(`UPDATE commitment_payments SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+        .bind(...binds)
+        .run();
+    },
+    deleteCommitmentPayment(id: number) {
+      return db.prepare('DELETE FROM commitment_payments WHERE id = ? AND user_id = ?').bind(id, userId).run();
     },
 
     // ── факт дохода по месяцам ──
@@ -211,6 +368,74 @@ export function scoped(db: Env['DB'], userId: number) {
       return db.prepare('DELETE FROM income_entries WHERE id = ? AND user_id = ?').bind(id, userId).run();
     },
 
+    // ── reminder_log: идемпотентность отправки и рейт-лимит /export ──
+    claimReminder(kind: string, key: string) {
+      return db
+        .prepare('INSERT OR IGNORE INTO reminder_log (user_id, kind, key) VALUES (?, ?, ?)')
+        .bind(userId, kind, key)
+        .run();
+    },
+    releaseReminder(kind: string, key: string) {
+      return db
+        .prepare('DELETE FROM reminder_log WHERE user_id = ? AND kind = ? AND key = ?')
+        .bind(userId, kind, key)
+        .run();
+    },
+    /** /export — только собственные строки пользователя, без секретов/хэшей. */
+    async exportUserData() {
+      const [profile, commitments, commitPays, expenses, income, debts, debtEvents, loans, loanEvents] =
+        await Promise.all([
+          this.getProfile(),
+          this.listCommitments(false),
+          db.prepare('SELECT * FROM commitment_payments WHERE user_id = ? ORDER BY id').bind(userId).all<CommitmentPaymentRow>(),
+          this.listExpenses(),
+          db.prepare('SELECT * FROM income_entries WHERE user_id = ? ORDER BY id').bind(userId).all<IncomeEntryRow>(),
+          this.listDebts(false),
+          db.prepare('SELECT * FROM debt_events WHERE user_id = ? ORDER BY id').bind(userId).all<DebtEventRow>(),
+          this.listLoans(),
+          db.prepare('SELECT * FROM loan_events WHERE user_id = ? ORDER BY id').bind(userId).all<LoanEventRow>(),
+        ]);
+      const strip = <T extends Record<string, unknown>>(r: T) => {
+        const { source_key, ...rest } = r; // update_id-идемпотентность не экспортируем
+        void source_key;
+        return rest;
+      };
+      return {
+        schema_version: 3,
+        exported_at: new Date().toISOString(),
+        profile: profile ? strip(profile as unknown as Record<string, unknown>) : null,
+        commitments: commitments.results.map((c) => strip(c as unknown as Record<string, unknown>)),
+        commitment_payments: commitPays.results.map((e) => strip(e as unknown as Record<string, unknown>)),
+        weekly_expenses: expenses.results.map((e) => strip(e as unknown as Record<string, unknown>)),
+        income_entries: income.results.map((e) => strip(e as unknown as Record<string, unknown>)),
+        debts: debts.results.map((d) => strip(d as unknown as Record<string, unknown>)),
+        debt_events: debtEvents.results.map((e) => strip(e as unknown as Record<string, unknown>)),
+        loans: loans.results.map((l) => strip(l as unknown as Record<string, unknown>)),
+        loan_events: loanEvents.results.map((e) => strip(e as unknown as Record<string, unknown>)),
+      };
+    },
+    /** /delete_me — все строки пользователя во всех таблицах с user_id (children first). */
+    deleteAllUserData() {
+      const tables = [
+        'conversation_state',
+        'income_entries',
+        'weekly_expenses',
+        'loan_events',
+        'loans',
+        'debt_events',
+        'debts',
+        'commitment_payments',
+        'commitments',
+        'profiles',
+        'consents',
+        'reminder_log',
+        'audit_log',
+      ];
+      const stmts = tables.map((t) => db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).bind(userId));
+      stmts.push(db.prepare('DELETE FROM users WHERE id = ?').bind(userId));
+      return db.batch(stmts);
+    },
+
     /** Точечная правка профиля — whitelist полей, всегда WHERE user_id. */
     patchProfile(patch: {
       income_minor?: number;
@@ -219,6 +444,8 @@ export function scoped(db: Env['DB'], userId: number) {
       income_currency?: string;
       living_currency?: string;
       timezone?: string;
+      reminders_weekly?: number;
+      reminders_payments?: number;
     }) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string)[] = [];
@@ -229,6 +456,8 @@ export function scoped(db: Env['DB'], userId: number) {
         'income_currency',
         'living_currency',
         'timezone',
+        'reminders_weekly',
+        'reminders_payments',
       ] as const;
       for (const f of FIELDS) {
         if (patch[f] !== undefined) {
@@ -259,6 +488,36 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(userId, e.spent_on, e.amount_minor, e.currency, e.note, e.source, e.source_key)
         .run();
     },
+    findExpenseByKey(sourceKey: string) {
+      return db.prepare('SELECT * FROM weekly_expenses WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<ExpenseRow>();
+    },
+    findIncomeByKey(sourceKey: string) {
+      return db.prepare('SELECT * FROM income_entries WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<IncomeEntryRow>();
+    },
+    getExpense(id: number) {
+      return db
+        .prepare('SELECT * FROM weekly_expenses WHERE id = ? AND user_id = ?')
+        .bind(id, userId)
+        .first<ExpenseRow>();
+    },
+    /** Правка траты — только своей записи. */
+    patchExpense(id: number, patch: { amount_minor?: number; currency?: string; note?: string | null }) {
+      const sets: string[] = [];
+      const binds: (number | string | null)[] = [];
+      for (const k of ['amount_minor', 'currency', 'note'] as const)
+        if (k in patch) {
+          sets.push(`${k} = ?`);
+          binds.push(patch[k] ?? null);
+        }
+      if (!sets.length) return db.prepare('SELECT 1').run();
+      return db
+        .prepare(`UPDATE weekly_expenses SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+        .bind(...binds, id, userId)
+        .run();
+    },
+    deleteExpense(id: number) {
+      return db.prepare('DELETE FROM weekly_expenses WHERE id = ? AND user_id = ?').bind(id, userId).run();
+    },
     listExpenses(sinceIsoDate?: string) {
       return db
         .prepare(
@@ -266,6 +525,243 @@ export function scoped(db: Env['DB'], userId: number) {
         )
         .bind(...(sinceIsoDate ? [userId, sinceIsoDate] : [userId]))
         .all<ExpenseRow>();
+    },
+
+    // ── долги (кредиты/ипотеки, шаг 6) ──
+    listDebts(activeOnly = true) {
+      return db
+        .prepare(`SELECT * FROM debts WHERE user_id = ?${activeOnly ? ' AND active = 1' : ''} ORDER BY id`)
+        .bind(userId)
+        .all<DebtRow>();
+    },
+    /** Один долг — строго свой (WHERE id AND user_id). */
+    getDebt(id: number) {
+      return db.prepare('SELECT * FROM debts WHERE id = ? AND user_id = ?').bind(id, userId).first<DebtRow>();
+    },
+    addDebt(d: {
+      name: string;
+      currency: string;
+      rate: number;
+      frequency: 'monthly' | 'biweekly';
+      initial_balance_minor: number;
+      initial_payment_minor: number;
+      epoch: string;
+      due_day: number | null;
+    }) {
+      return db
+        .prepare(
+          `INSERT INTO debts (user_id, name, currency, rate, frequency,
+            initial_balance_minor, initial_payment_minor, epoch, due_day)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          userId,
+          d.name,
+          d.currency,
+          d.rate,
+          d.frequency,
+          d.initial_balance_minor,
+          d.initial_payment_minor,
+          d.epoch,
+          d.due_day,
+        )
+        .run();
+    },
+    /** Точечные правки — все WHERE id=? AND user_id=? (чужие id молча игнорируются). */
+    patchDebt(
+      id: number,
+      patch: {
+        name?: string;
+        rate?: number;
+        initial_payment_minor?: number;
+        due_day?: number | null;
+        active?: number;
+      },
+    ) {
+      const sets: string[] = ["updated_at = datetime('now')"];
+      const binds: (number | string | null)[] = [];
+      for (const k of ['name', 'rate', 'initial_payment_minor', 'due_day', 'active'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(patch[k] ?? null);
+        }
+      binds.push(id, userId);
+      return db.prepare(`UPDATE debts SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    },
+    /** Удаление долга вместе с его журналом (batch = одна транзакция). */
+    deleteDebt(id: number) {
+      return db.batch([
+        db.prepare('DELETE FROM debt_events WHERE user_id = ? AND debt_id = ?').bind(userId, id),
+        db.prepare('DELETE FROM debts WHERE id = ? AND user_id = ?').bind(id, userId),
+      ]);
+    },
+    /** Журнал долга в порядке replay (дата, затем порядок записи). */
+    listDebtEvents(debtId: number) {
+      return db
+        .prepare('SELECT * FROM debt_events WHERE user_id = ? AND debt_id = ? ORDER BY event_on, id')
+        .bind(userId, debtId)
+        .all<DebtEventRow>();
+    },
+    /** INSERT OR IGNORE — идемпотентность по (user_id, source_key);
+     *  debt_id пишется только если долг принадлежит юзеру (EXISTS). */
+    addDebtEvent(e: {
+      debt_id: number;
+      kind: 'payment' | 'prepay' | 'reconcile';
+      amount_minor: number;
+      event_on: string;
+      mode?: 'reduce_payment' | 'reduce_term' | null;
+      source: 'manual' | 'auto';
+      source_key: string;
+    }) {
+      return db
+        .prepare(
+          `INSERT OR IGNORE INTO debt_events (user_id, debt_id, kind, amount_minor, event_on, mode, source, source_key)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?
+           WHERE EXISTS (SELECT 1 FROM debts WHERE id = ? AND user_id = ?)`,
+        )
+        .bind(
+          userId,
+          e.debt_id,
+          e.kind,
+          e.amount_minor,
+          e.event_on,
+          e.mode ?? null,
+          e.source,
+          e.source_key,
+          e.debt_id,
+          userId,
+        )
+        .run();
+    },
+    findDebtEventByKey(sourceKey: string) {
+      return db
+        .prepare('SELECT * FROM debt_events WHERE user_id = ? AND source_key = ?')
+        .bind(userId, sourceKey)
+        .first<DebtEventRow>();
+    },
+    getDebtEvent(id: number) {
+      return db.prepare('SELECT * FROM debt_events WHERE id = ? AND user_id = ?').bind(id, userId).first<DebtEventRow>();
+    },
+    /** Точечная правка события — реplay пересчитает состояние. Чужие id молча. */
+    updateDebtEvent(
+      id: number,
+      patch: { amount_minor?: number; event_on?: string; mode?: 'reduce_payment' | 'reduce_term' | null },
+    ) {
+      const sets: string[] = [];
+      const binds: (number | string | null)[] = [];
+      for (const k of ['amount_minor', 'event_on', 'mode'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(patch[k] ?? null);
+        }
+      if (!sets.length) return Promise.resolve({ success: true, meta: { changes: 0 } } as D1Result);
+      binds.push(id, userId);
+      return db.prepare(`UPDATE debt_events SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    },
+    deleteDebtEvent(id: number) {
+      return db.prepare('DELETE FROM debt_events WHERE id = ? AND user_id = ?').bind(id, userId).run();
+    },
+
+    // ── личные займы («Долги людям») ──
+    /** Все займы: сначала открытые, внутри — по id. */
+    listLoans() {
+      return db
+        .prepare('SELECT * FROM loans WHERE user_id = ? ORDER BY closed_at IS NOT NULL, id')
+        .bind(userId)
+        .all<LoanRow>();
+    },
+    getLoan(id: number) {
+      return db.prepare('SELECT * FROM loans WHERE id = ? AND user_id = ?').bind(id, userId).first<LoanRow>();
+    },
+    addLoan(l: {
+      counterparty: string;
+      direction: 'owe' | 'owed';
+      amount_minor: number;
+      currency: string;
+      due_on: string | null;
+      note: string | null;
+    }) {
+      return db
+        .prepare(
+          `INSERT INTO loans (user_id, counterparty, direction, amount_minor, currency, due_on, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(userId, l.counterparty, l.direction, l.amount_minor, l.currency, l.due_on, l.note)
+        .run();
+    },
+    /** Точечная правка займа — все WHERE id=? AND user_id=? (чужие id молча). */
+    patchLoan(id: number, patch: { due_on?: string | null; note?: string | null }) {
+      const sets: string[] = ["updated_at = datetime('now')"];
+      const binds: (number | string | null)[] = [];
+      for (const k of ['due_on', 'note'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(patch[k] ?? null);
+        }
+      binds.push(id, userId);
+      return db.prepare(`UPDATE loans SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    },
+    /** Закрыть вручную (остаток прощается). Уже закрытый — no-op (changes=0). */
+    closeLoan(id: number) {
+      return db
+        .prepare(`UPDATE loans SET closed_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND user_id = ? AND closed_at IS NULL`)
+        .bind(id, userId)
+        .run();
+    },
+    /** Удаление займа с журналом (batch = одна транзакция). */
+    deleteLoan(id: number) {
+      return db.batch([
+        db.prepare('DELETE FROM loan_events WHERE user_id = ? AND loan_id = ?').bind(userId, id),
+        db.prepare('DELETE FROM loans WHERE id = ? AND user_id = ?').bind(id, userId),
+      ]);
+    },
+    listLoanEvents(loanId: number) {
+      return db
+        .prepare('SELECT * FROM loan_events WHERE user_id = ? AND loan_id = ? ORDER BY event_on, id')
+        .bind(userId, loanId)
+        .all<LoanEventRow>();
+    },
+    /** loan_id пишется только если заём принадлежит юзеру (EXISTS в INSERT). */
+    addLoanEvent(e: {
+      loan_id: number;
+      amount_minor: number;
+      event_on: string;
+      source: 'manual' | 'auto';
+      source_key: string | null;
+    }) {
+      return db
+        .prepare(
+          `INSERT OR IGNORE INTO loan_events (user_id, loan_id, kind, amount_minor, event_on, source, source_key)
+           SELECT ?, ?, 'repay', ?, ?, ?, ?
+           WHERE EXISTS (SELECT 1 FROM loans WHERE id = ? AND user_id = ?)`,
+        )
+        .bind(userId, e.loan_id, e.amount_minor, e.event_on, e.source, e.source_key, e.loan_id, userId)
+        .run();
+    },
+    getLoanEvent(id: number) {
+      return db.prepare('SELECT * FROM loan_events WHERE id = ? AND user_id = ?').bind(id, userId).first<LoanEventRow>();
+    },
+    findLoanEventByKey(sourceKey: string) {
+      return db
+        .prepare('SELECT * FROM loan_events WHERE user_id = ? AND source_key = ?')
+        .bind(userId, sourceKey)
+        .first<LoanEventRow>();
+    },
+    /** Правка возврата — replay пересчитает остаток. Чужие id молча. */
+    updateLoanEvent(id: number, patch: { amount_minor?: number; event_on?: string }) {
+      const sets: string[] = [];
+      const binds: (number | string)[] = [];
+      for (const k of ['amount_minor', 'event_on'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(patch[k]!);
+        }
+      if (!sets.length) return Promise.resolve({ success: true, meta: { changes: 0 } } as D1Result);
+      binds.push(id, userId);
+      return db.prepare(`UPDATE loan_events SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
+    },
+    deleteLoanEvent(id: number) {
+      return db.prepare('DELETE FROM loan_events WHERE id = ? AND user_id = ?').bind(id, userId).run();
     },
 
     // ── состояние диалога ──
@@ -354,6 +850,15 @@ export type AuditAction =
 /** Глобальные таблицы доступа — user-data здесь нет (S5 применяется к scoped). */
 export function accessRepo(db: Env['DB']) {
   return {
+    /** user_id онбоарденных с включёнными напоминаниями — только для cron-сервиса. */
+    async listReminderCandidates(): Promise<number[]> {
+      const r = await db
+        .prepare(
+          'SELECT user_id FROM profiles WHERE onboarded_at IS NOT NULL AND (reminders_weekly = 1 OR reminders_payments = 1)',
+        )
+        .all<{ user_id: number }>();
+      return r.results.map((x) => x.user_id);
+    },
     /** Активный пользователь по Telegram ID; удалённые не возвращаются. */
     async findUserByTelegramId(tgId: number): Promise<UserRow | undefined> {
       const r = await db

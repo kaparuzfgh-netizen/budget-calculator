@@ -11,6 +11,7 @@ import { escapeHtml } from '../telegram/client';
 import { fmtMoney } from './format';
 import { isValidTimezone, parseAmount, parseCommitmentLine, parseCurrencyCode, type ParsedCommitment } from './parse';
 import { toMinor } from '../domain/money';
+import { homeMarkup } from './nav/nav';
 
 export type ObStep =
   | 'terms'
@@ -50,6 +51,7 @@ export type ObEffect =
   | { kind: 'persist'; data: ObData } // несёт финальные данные — state уже null
   | { kind: 'done' };
 
+const CANCEL_BTN = { text: '✖ Отмена', callback_data: 'ob:cancel' };
 const CCY_KB: ReplyMarkup = {
   inline_keyboard: [
     [
@@ -59,6 +61,7 @@ const CCY_KB: ReplyMarkup = {
       { text: 'KGS', callback_data: 'ob:ic:KGS' },
     ],
     [{ text: 'Другая…', callback_data: 'ob:ic:X' }],
+    [CANCEL_BTN],
   ],
 };
 const TZ_KB: ReplyMarkup = {
@@ -73,6 +76,7 @@ const TZ_KB: ReplyMarkup = {
       { text: 'UTC', callback_data: 'ob:tz:UTC' },
     ],
     [{ text: 'Другой…', callback_data: 'ob:tz:X' }],
+    [CANCEL_BTN],
   ],
 };
 const COMM_KB: ReplyMarkup = {
@@ -81,14 +85,9 @@ const COMM_KB: ReplyMarkup = {
       { text: '✅ Готово', callback_data: 'ob:com:done' },
       { text: 'Пропустить', callback_data: 'ob:com:skip' },
     ],
+    [CANCEL_BTN],
   ],
 };
-export const MAIN_MENU: ReplyMarkup = {
-  keyboard: [['📊 План', '📅 Неделя'], ['➕ Трата', '💵 Доход'], ['⚙️ Профиль']],
-  resize_keyboard: true,
-  is_persistent: true,
-};
-
 const TERMS =
   '«Бюджет-компаньон» хранит: профиль (доход, лимиты, таймзона), список обязательных ' +
   'платежей и траты — в Cloudflare D1. Данные видите только вы и владелец сервиса. ' +
@@ -112,11 +111,13 @@ function askIncomeAmount(d: ObData): ObEffect {
   return send(
     `Типичный месячный доход в ${d.incomeCcy} (примерно, просто число — например 6200). ` +
       'Если доход каждый месяц разный — нажмите «Пропустить» и вносите факт командой /income.',
-    { inline_keyboard: [[{ text: 'Пропустить', callback_data: 'ob:inc:skip' }]] },
+    { inline_keyboard: [[{ text: 'Пропустить', callback_data: 'ob:inc:skip' }], [CANCEL_BTN]] },
   );
 }
 function askLiving(d: ObData): ObEffect {
-  return send(`Лимит «на жизнь» (еда/быт) в месяц? Число${d.incomeCcy ? ` — по умолчанию ${d.incomeCcy}` : ''}.`);
+  return send(`Лимит «на жизнь» (еда/быт) в месяц? Число${d.incomeCcy ? ` — по умолчанию ${d.incomeCcy}` : ''}.`, {
+    inline_keyboard: [[CANCEL_BTN]],
+  });
 }
 function askTz(): ObEffect {
   return send('Ваш часовой пояс?', TZ_KB);
@@ -149,15 +150,15 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
   const cb = input.type === 'callback' ? input.data : null;
   const text = input.type === 'text' ? input.text.trim() : '';
 
+  if (cb === 'ob:cancel' || (input.type === 'text' && text === '/cancel')) {
+    return ok(null, send('Настройка отменена. /start — начать заново.'));
+  }
+
   // Step-aware: callback чужого шага (старая кнопка / повторная доставка) —
   // молча игнорируем: иначе повторное «Согласен» переспрашивало валюту.
   if (cb !== null) {
     const allowed = CB_STEP[state.step];
     if (!allowed || !cb.startsWith(allowed)) return { state, effects: [] };
-  }
-
-  if (input.type === 'text' && text === '/cancel') {
-    return ok(null, send('Настройка отменена. /start — начать заново.'));
   }
 
   switch (state.step) {
@@ -269,8 +270,8 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
           `Доход: ${fmtMoney((d.incomeMinor ?? 0) / 100, d.incomeCcy ?? 'USD')}\n` +
           `Лимит жизни: ${fmtMoney((d.livingMinor ?? 0) / 100, d.livingCcy ?? 'USD')} (недельный ≈ ${fmtMoney(weekly / 100, d.livingCcy ?? 'USD')})\n` +
           `Таймзона: ${escapeHtml(d.tz ?? 'UTC')}\nПлатежи:\n${commitmentsList(d)}\n\n` +
-          'Меню внизу — или /plan.';
-        return ok(null, { kind: 'persist', data: d }, { kind: 'done' }, send(summary, MAIN_MENU));
+          'Главное меню — /menu.';
+        return ok(null, { kind: 'persist', data: d }, { kind: 'done' }, send(summary, homeMarkup()));
       }
       if (input.type === 'text') {
         try {

@@ -8,20 +8,44 @@
  * Никогда не логируем текст сообщений, токены, коды приглашений и их хэши.
  */
 import { accessRepo, scoped, type UserRow } from '../db/repo';
-import type { TelegramClient } from '../telegram/client';
+import type { SendMessageOpts, TelegramClient } from '../telegram/client';
 import { INVITE_TTL_MS, MAX_ACTIVE_INVITES, TEXT, inviteLink } from '../bot/commands';
+import { advance, onCcyResult, startOnboarding, type ObEffect, type ObInput, type ObState } from '../bot/onboarding';
+import { convert, round2 } from '../domain/money';
+import { fmtMoney } from '../bot/format';
+import { monthInTz, parseAmount, todayInTz, weekStartInTz } from '../bot/parse';
+import { runIncome, runPlan, runProfile, runSpent, runWeek } from '../bot/features';
 import {
-  advance,
-  onCcyResult,
-  startOnboarding,
-  MAIN_MENU,
-  type ObEffect,
-  type ObInput,
-  type ObState,
-} from '../bot/onboarding';
-import { monthInTz, parseAmount, todayInTz } from '../bot/parse';
-import { runIncome, runIncomeList, runPlan, runProfile, runSpent, runWeek } from '../bot/features';
-import { advancePf, onPfCcyResult, PF_STEPS, type PfCtx, type PfEffect, type PfState } from '../bot/profile';
+  advancePf,
+  cancelTarget,
+  onPfCcyResult,
+  PF_STEPS,
+  renderPf,
+  type PfCtx,
+  type PfEffect,
+  type PfState,
+} from '../bot/profile';
+import {
+  advanceDebt,
+  DEBT_SCREENS,
+  DEBT_STEPS,
+  debtCancelTarget,
+  renderDebt,
+  type DebtEffect,
+  type DebtState,
+} from '../bot/debts';
+import { buildDebtCtx } from './debts';
+import {
+  advanceLoan,
+  LOAN_SCREENS,
+  LOAN_STEPS,
+  loanCancelTarget,
+  renderLoan,
+  type LoanEffect,
+  type LoanState,
+} from '../bot/loans';
+import { buildLoanCtx } from './loans';
+import { getScreen, homeMarkup, NAV_HOME } from '../bot/nav/nav';
 import type { FxProvider } from '../fx/provider';
 import { getFxRates } from '../fx/service';
 
@@ -61,25 +85,104 @@ const MENU: Record<string, string> = {
   '📅 Неделя': '/week',
   '➕ Трата': '/spent',
   '💵 Доход': '/income',
+  '🏦 Кредиты': '/credits',
+  '🤝 Долги': '/loans',
   '⚙️ Профиль': '/profile',
 };
 /** pf-шаги, ждущие текстового ввода (остальные pf-шаги — навигация). */
 const PF_TEXT_STEPS = new Set([
+  'edit_expense',
   'edit_typical',
   'edit_living',
   'edit_commit_amount',
   'edit_commit_day',
   'add_commit',
+  'edit_cpay',
   'edit_income_ccy',
   'edit_living_ccy',
   'edit_tz',
   'edit_tz_custom',
+]);
+/** debt-шаги, ждущие текстового ввода (freq — только кнопки). */
+const DEBT_TEXT_STEPS = new Set([
+  'debt:add:name',
+  'debt:add:balance',
+  'debt:add:rate',
+  'debt:add:payment',
+  'debt:add:due',
+  'debt:add:epoch',
+  'debt:pay',
+  'debt:pp:ask',
+  'debt:recon',
+  'debt:edit:rate',
+  'debt:edit:payment',
+  'debt:edit:day',
+  'debt:ev:edit',
+]);
+/** loan-шаги, ждущие текстового ввода (dir — только кнопки). */
+const LOAN_TEXT_STEPS = new Set([
+  'loan:add:name',
+  'loan:add:amount',
+  'loan:add:due',
+  'loan:add:note',
+  'loan:repay',
+  'loan:due',
+  'loan:ev:edit',
 ]);
 const STALE_MS = 24 * 3600 * 1000;
 
 const fxAdapter = (deps: AccessDeps) => ({
   get: (ccys: string[]) => getFxRates(deps.db, deps.fx!, ccys, deps.now ?? new Date()),
 });
+
+const KB_CLAIM_KIND = 'kb_removed';
+const KB_CLAIM_KEY = 'v1';
+
+/**
+ * Одноразовая миграция нижней reply-клавиатуры (контракт R5: навигация —
+ * только inline + /menu). Показанная когда-то клавиатура висит у клиента,
+ * пока бот явно не пошлёт remove_keyboard: перед первым сообщением
+ * пользователю шлём служебное «·» с remove_keyboard. Claim в reminder_log
+ * (INSERT OR IGNORE) делает отправку «ровно один раз на пользователя»;
+ * сбой отправки снимает claim — ретрай со следующим сообщением. Само
+ * сообщение — пассажир: ошибка миграции не должна его ломать.
+ */
+async function sendWithKeyboardMigration(
+  repo: ReturnType<typeof scoped>,
+  tg: TelegramClient,
+  chatId: number | string,
+  text: string,
+  opts?: SendMessageOpts,
+): Promise<void> {
+  try {
+    const claim = await repo.claimReminder(KB_CLAIM_KIND, KB_CLAIM_KEY);
+    if (claim.meta.changes === 1) {
+      try {
+        await tg.sendMessage(chatId, '·', {
+          disableNotification: true,
+          replyMarkup: { remove_keyboard: true },
+        });
+      } catch {
+        // отправка не удалась — освобождаем claim, миграция ретраится позже
+        await repo.releaseReminder(KB_CLAIM_KIND, KB_CLAIM_KEY).catch(() => undefined);
+      }
+    }
+  } catch {
+    /* упал сам claim-запрос — миграцию пропускаем, сообщение всё равно шлём */
+  }
+  await tg.sendMessage(chatId, text, opts);
+}
+
+/**
+ * TelegramClient, чей sendMessage пропускается через kb-миграцию.
+ * Все исходящие текстовые ответы идут через него; sendDocument — как был.
+ */
+export function tgWithKeyboardMigration(repo: ReturnType<typeof scoped>, tg: TelegramClient): TelegramClient {
+  return {
+    ...tg,
+    sendMessage: (chatId, text, opts) => sendWithKeyboardMigration(repo, tg, chatId, text, opts),
+  };
+}
 
 /** Выполнение эффектов редьюсера (единственное место I/O онбординга). */
 async function runEffects(
@@ -180,11 +283,39 @@ async function currentOb(
 }
 
 // ── pf-флоу: контекст и выполнение эффектов ──
-async function pfCtx(repo: ReturnType<typeof scoped>, p: import('../db/repo').ProfileRow): Promise<PfCtx> {
+async function pfCtx(
+  repo: ReturnType<typeof scoped>,
+  p: import('../db/repo').ProfileRow,
+  deps?: AccessDeps,
+): Promise<PfCtx> {
+  const month = monthInTz(p.timezone, deps?.now ?? new Date());
+  const incomeEntries = (await repo.listIncomeEntries(month)).results;
+  let incomeTotal: string | undefined;
+  if (deps) {
+    try {
+      const fxr = await fxAdapter(deps).get([p.income_currency, ...incomeEntries.map((e) => e.currency)]);
+      const sum = incomeEntries.reduce(
+        (s, e) => s + convert(e.amount_minor / 100, e.currency, p.income_currency, { perUsd: fxr.perUsd }),
+        0,
+      );
+      incomeTotal = fmtMoney(round2(sum), p.income_currency);
+    } catch {
+      incomeTotal = '—';
+    }
+  }
+  const now = deps?.now ?? new Date();
+  const expenses = (await repo.listExpenses(weekStartInTz(p.timezone, now))).results;
+  // журнал оплат за ~год: «оплачен в этом месяце» + последние 5 для карточки
+  const since = `${Number(month.slice(0, 4)) - 1}${month.slice(4)}-01`;
   return {
     profile: p,
     commitments: (await repo.listCommitments(false)).results,
-    incomeEntries: (await repo.listIncomeEntries(monthInTz(p.timezone, new Date()))).results,
+    commitPayments: (await repo.listCommitmentPaymentsSince(since)).results,
+    incomeEntries,
+    expenses,
+    month,
+    today: todayInTz(p.timezone, now),
+    incomeTotal,
   };
 }
 
@@ -208,8 +339,51 @@ async function runPfEffects(
       });
     else if (e.kind === 'commit_patch') await repo.patchCommitment(e.id, e.patch);
     else if (e.kind === 'commit_del') await repo.deleteCommitment(e.id);
+    else if (e.kind === 'cpay_add') {
+      const c = await repo.getCommitment(e.id);
+      if (c) {
+        const p0 = await repo.getProfile();
+        const on = p0 ? todayInTz(p0.timezone, deps.now ?? new Date()) : new Date().toISOString().slice(0, 10);
+        // идемпотентность повторной доставки webhook: tg:<update_id>
+        await repo.addCommitmentPayment({
+          commitment_id: c.id,
+          amount_minor: c.amount_minor,
+          currency: c.currency,
+          paid_on: on,
+          source: 'manual',
+          source_key: `tg:${msg.updateId}`,
+        });
+      }
+    } else if (e.kind === 'cpay_patch') await repo.updateCommitmentPayment(e.id, e.patch);
+    else if (e.kind === 'cpay_del') await repo.deleteCommitmentPayment(e.id);
     else if (e.kind === 'income_del') await repo.deleteIncomeEntry(e.id);
-    else if (e.kind === 'checkCcy') {
+    else if (e.kind === 'expense_del') await repo.deleteExpense(e.id);
+    else if (e.kind === 'expense_patch') await repo.patchExpense(e.id, e.patch);
+    else if (e.kind === 'render') {
+      // экран рендерится ПОСЛЕ мутаций — ctx перечитываем из БД
+      const p0 = await repo.getProfile();
+      if (p0) {
+        const ctx = await pfCtx(repo, p0, deps);
+        const r = renderPf(e.screen, e.data ?? {}, ctx);
+        await tg.sendMessage(msg.chatId, (e.prefix ?? '') + r.text, r.markup ? { replyMarkup: r.markup } : {});
+      }
+    } else if (e.kind === 'export') {
+      // рейт-лимит: один экспорт в минуту (claim по бакету минуты)
+      const bucket = String(Math.floor((deps.now?.getTime() ?? Date.now()) / 60000));
+      const claim = await repo.claimReminder('export', bucket);
+      if (claim.meta.changes === 0) {
+        await tg.sendMessage(msg.chatId, 'Экспорт можно запросить раз в минуту — подождите немного.');
+      } else {
+        const data = await repo.exportUserData();
+        const today = (deps.now ?? new Date()).toISOString().slice(0, 10);
+        await tg.sendDocument(msg.chatId, `budget-export-${today}.json`, JSON.stringify(data, null, 2));
+      }
+    } else if (e.kind === 'delete_me') {
+      // прощальное сообщение — ДО удаления: kb-миграция внутри sendMessage
+      // писала бы claim в reminder_log уже удалённого пользователя
+      await tg.sendMessage(msg.chatId, 'Данные удалены. Если понадоблюсь снова — /start.');
+      await repo.deleteAllUserData(); // batch: все таблицы с user_id + users
+    } else if (e.kind === 'checkCcy') {
       try {
         await fxAdapter(deps).get([e.code]);
         await applyPf(onPfCcyResult(state, true), msg, repo, deps, state.step);
@@ -244,18 +418,230 @@ async function applyPf(
   await runPfEffects(r.effects, msg, repo, deps, r.state ?? { step: 'pf', data: {} });
 }
 
+// ── debt-флоу: контекст и выполнение эффектов ──
+const debtCtx = (repo: ReturnType<typeof scoped>, p: import('../db/repo').ProfileRow, deps: AccessDeps) =>
+  buildDebtCtx(repo, p, fxAdapter(deps).get, deps.now ?? new Date());
+
+async function runDebtEffects(
+  effects: DebtEffect[],
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+): Promise<void> {
+  const tg = deps.telegram;
+  for (const e of effects) {
+    if (e.kind === 'send') await tg.sendMessage(msg.chatId, e.text, e.markup ? { replyMarkup: e.markup } : {});
+    else if (e.kind === 'debt_add')
+      await repo.addDebt({
+        name: e.d.name,
+        currency: e.d.currency,
+        rate: e.d.rate,
+        frequency: e.d.frequency,
+        initial_balance_minor: e.d.amountMinor,
+        initial_payment_minor: e.d.paymentMinor,
+        epoch: e.d.epoch,
+        due_day: e.d.dueDay,
+      });
+    else if (e.kind === 'debt_event') {
+      await repo.addDebtEvent({
+        debt_id: e.id,
+        kind: e.ev.kind,
+        amount_minor: e.ev.amountMinor,
+        event_on: e.ev.eventOn,
+        mode: e.ev.mode ?? null,
+        source: 'manual',
+        // идемпотентность повторной доставки webhook: tg:<update_id>
+        source_key: `tg:${msg.updateId}`,
+      });
+    } else if (e.kind === 'debt_event_patch') await repo.updateDebtEvent(e.id, e.patch);
+    else if (e.kind === 'debt_event_del') await repo.deleteDebtEvent(e.id);
+    else if (e.kind === 'debt_patch') await repo.patchDebt(e.id, e.patch);
+    else if (e.kind === 'debt_del') await repo.deleteDebt(e.id);
+    else if (e.kind === 'render') {
+      // экран рендерится ПОСЛЕ мутаций — ctx перечитываем из БД
+      const p0 = await repo.getProfile();
+      if (p0) {
+        const ctx = await debtCtx(repo, p0, deps);
+        const r = renderDebt(e.screen, e.data ?? {}, ctx);
+        await tg.sendMessage(msg.chatId, (e.prefix ?? '') + r.text, r.markup ? { replyMarkup: r.markup } : {});
+      }
+    }
+  }
+}
+
+async function applyDebt(
+  r: { state: DebtState | null; effects: DebtEffect[] },
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+  expectedStep?: string,
+): Promise<void> {
+  if (r.state) {
+    if (expectedStep !== undefined) {
+      const w = await repo.setConversationExpected(r.state.step, JSON.stringify(r.state.data), expectedStep);
+      if (w.meta.changes === 0) return; // гонка — проигравший молчит
+    } else {
+      await repo.setConversation(r.state.step, JSON.stringify(r.state.data));
+    }
+  } else if (expectedStep !== undefined) {
+    const w = await repo.clearConversationExpected(expectedStep);
+    if (w.meta.changes === 0) return;
+  } else {
+    await repo.clearConversation();
+  }
+  await runDebtEffects(r.effects, msg, repo, deps);
+}
+
+/** /debts — список долгов (экран DEBTS). */
+async function runDebts(msg: IncomingMessage, repo: ReturnType<typeof scoped>, deps: AccessDeps): Promise<void> {
+  const tg = deps.telegram;
+  const p = await repo.getProfile();
+  if (!p) {
+    await tg.sendMessage(msg.chatId, 'Профиль не настроен — /start');
+    return;
+  }
+  const ctx = await debtCtx(repo, p, deps);
+  const r = renderDebt('DEBTS', {}, ctx);
+  await repo.setConversation(r.step, '{}'); // меню активно — кнопки живут 24ч
+  await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
+}
+
+// ── loan-флоу («Долги людям»): контекст и выполнение эффектов ──
+const loanCtx = (repo: ReturnType<typeof scoped>, p: import('../db/repo').ProfileRow, deps: AccessDeps) =>
+  buildLoanCtx(repo, p, fxAdapter(deps).get, deps.now ?? new Date());
+
+async function runLoanEffects(
+  effects: LoanEffect[],
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+): Promise<void> {
+  const tg = deps.telegram;
+  for (const e of effects) {
+    if (e.kind === 'send') await tg.sendMessage(msg.chatId, e.text, e.markup ? { replyMarkup: e.markup } : {});
+    else if (e.kind === 'loan_add')
+      await repo.addLoan({
+        counterparty: e.d.counterparty,
+        direction: e.d.direction,
+        amount_minor: e.d.amountMinor,
+        currency: e.d.currency,
+        due_on: e.d.dueOn,
+        note: e.d.note,
+      });
+    else if (e.kind === 'loan_repay') {
+      const p0 = await repo.getProfile();
+      const on = p0 ? todayInTz(p0.timezone, deps.now ?? new Date()) : new Date().toISOString().slice(0, 10);
+      await repo.addLoanEvent({ loan_id: e.id, amount_minor: e.amountMinor, event_on: e.eventOn ?? on, source: 'manual', source_key: null });
+    } else if (e.kind === 'loan_due') await repo.patchLoan(e.id, { due_on: e.dueOn });
+    else if (e.kind === 'loan_close') await repo.closeLoan(e.id);
+    else if (e.kind === 'loan_del') await repo.deleteLoan(e.id);
+    else if (e.kind === 'loan_event_patch') await repo.updateLoanEvent(e.id, e.patch);
+    else if (e.kind === 'loan_event_del') await repo.deleteLoanEvent(e.id);
+    else if (e.kind === 'render') {
+      // экран рендерится ПОСЛЕ мутаций — ctx перечитываем из БД
+      const p0 = await repo.getProfile();
+      if (p0) {
+        const ctx = await loanCtx(repo, p0, deps);
+        const r = renderLoan(e.screen, e.data ?? {}, ctx);
+        await tg.sendMessage(msg.chatId, (e.prefix ?? '') + r.text, r.markup ? { replyMarkup: r.markup } : {});
+      }
+    }
+  }
+}
+
+async function applyLoan(
+  r: { state: LoanState | null; effects: LoanEffect[] },
+  msg: IncomingMessage,
+  repo: ReturnType<typeof scoped>,
+  deps: AccessDeps,
+  expectedStep?: string,
+): Promise<void> {
+  if (r.state) {
+    if (expectedStep !== undefined) {
+      const w = await repo.setConversationExpected(r.state.step, JSON.stringify(r.state.data), expectedStep);
+      if (w.meta.changes === 0) return; // гонка — проигравший молчит
+    } else {
+      await repo.setConversation(r.state.step, JSON.stringify(r.state.data));
+    }
+  } else if (expectedStep !== undefined) {
+    const w = await repo.clearConversationExpected(expectedStep);
+    if (w.meta.changes === 0) return;
+  } else {
+    await repo.clearConversation();
+  }
+  await runLoanEffects(r.effects, msg, repo, deps);
+}
+
+/** /loans — список личных займов (экран LOANS). */
+async function runLoans(msg: IncomingMessage, repo: ReturnType<typeof scoped>, deps: AccessDeps): Promise<void> {
+  const tg = deps.telegram;
+  const p = await repo.getProfile();
+  if (!p) {
+    await tg.sendMessage(msg.chatId, 'Профиль не настроен — /start');
+    return;
+  }
+  const ctx = await loanCtx(repo, p, deps);
+  const r = renderLoan('LOANS', {}, ctx);
+  await repo.setConversation(r.step, '{}'); // меню активно — кнопки живут 24ч
+  await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
+}
+
 /** Точка входа для известного пользователя: онбординг или команды. */
 async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps): Promise<void> {
-  const tg = deps.telegram;
   const repo = scoped(deps.db, user.id);
+  // Все исходящие тексты — через одноразовую миграцию снятия reply-клавиатуры.
+  deps = { ...deps, telegram: tgWithKeyboardMigration(repo, deps.telegram) };
+  const tg = deps.telegram;
   const profile = await repo.getProfile();
   const text = msg.text.trim();
 
   // Активный диалог — ввод туда (кроме /cancel — см. ниже).
   const conv = await currentOb(repo, deps, !!profile?.onboarded_at);
 
-  // /cancel — всегда, в одном месте, никогда не проваливается в unknownCommand.
+  // /cancel — отмена диалога с возвратом на экран-источник (R2/R3).
   if (/^\/cancel(?:@\w+)?\s*$/.test(text)) {
+    if (conv?.state && profile?.onboarded_at) {
+      if ((conv.state.step as string) in DEBT_STEPS) {
+        const target = debtCancelTarget(conv.state as DebtState);
+        if (target === 'HOME') {
+          await repo.clearConversation();
+          await tg.sendMessage(msg.chatId, 'Настройка отменена.', { replyMarkup: homeMarkup() });
+          return;
+        }
+        const ctx = await debtCtx(repo, profile, deps);
+        const data = (conv.state as DebtState).data ?? {};
+        const r = renderDebt(target, data, ctx);
+        await repo.setConversation(r.step, JSON.stringify(data));
+        await tg.sendMessage(msg.chatId, `Отменено.\n\n${r.text}`, r.markup ? { replyMarkup: r.markup } : {});
+        return;
+      }
+      if ((conv.state.step as string) in LOAN_STEPS) {
+        const target = loanCancelTarget(conv.state as LoanState);
+        if (target === 'HOME') {
+          await repo.clearConversation();
+          await tg.sendMessage(msg.chatId, 'Настройка отменена.', { replyMarkup: homeMarkup() });
+          return;
+        }
+        const ctx = await loanCtx(repo, profile, deps);
+        const data = (conv.state as LoanState).data ?? {};
+        const r = renderLoan(target, data, ctx);
+        await repo.setConversation(r.step, JSON.stringify(data));
+        await tg.sendMessage(msg.chatId, `Отменено.\n\n${r.text}`, r.markup ? { replyMarkup: r.markup } : {});
+        return;
+      }
+      const target = cancelTarget(conv.state as PfState);
+      if (target === 'HOME') {
+        await repo.clearConversation();
+        await tg.sendMessage(msg.chatId, 'Настройка отменена.', { replyMarkup: homeMarkup() });
+        return;
+      }
+      const ctx = await pfCtx(repo, profile, deps);
+      const data = (conv.state as PfState).data ?? {};
+      const r = renderPf(target, data, ctx);
+      await repo.setConversation(r.step, JSON.stringify(data));
+      await tg.sendMessage(msg.chatId, `Отменено.\n\n${r.text}`, r.markup ? { replyMarkup: r.markup } : {});
+      return;
+    }
     if (conv) {
       await repo.clearConversation();
       await tg.sendMessage(msg.chatId, 'Настройка отменена. /start — начать заново.');
@@ -287,7 +673,27 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
         const now = deps.now ?? new Date();
         if (step === 'spent_ask')
           await runSpent(msg.chatId, tg, repo, fxAdapter(deps), text, `tg:${msg.updateId}`, todayInTz(tz, now));
-        else await runIncome(msg.chatId, tg, repo, fxAdapter(deps), text, `tg:${msg.updateId}`, monthInTz(tz, now));
+        else {
+          const saved = await runIncome(
+            msg.chatId,
+            tg,
+            repo,
+            fxAdapter(deps),
+            text,
+            `tg:${msg.updateId}`,
+            monthInTz(tz, now),
+          );
+          if (saved) {
+            // после записи — экран INCOME_HUB (R3)
+            const p0 = await repo.getProfile();
+            if (p0) {
+              const ctx = await pfCtx(repo, p0, deps);
+              const r = renderPf('INCOME_HUB', conv.state!.data ?? {}, ctx);
+              await repo.setConversation(r.step, JSON.stringify(conv.state!.data ?? {}));
+              await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
+            }
+          }
+        }
         return;
       }
       await repo.clearConversation();
@@ -304,12 +710,52 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
         await applyPf(advancePf(conv.state!, { type: 'text', text }, ctx), msg, repo, deps, step);
         return;
       }
-      // навигационный pf-шаг или команда во время правки — отменяем правку, идём к команде
-      await repo.clearConversation();
+      // навигационный pf-экран: произвольный текст — не команда и не ввод,
+      // состояние (кнопки экрана) сохраняем
       if (!text.startsWith('/') && !MENU[text]) {
-        await tg.sendMessage(msg.chatId, 'Правка отменена. Меню: /profile');
+        await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
         return;
       }
+      // команда/кнопка с навигационного экрана или во время правки — уходим к ней
+      await repo.clearConversation();
+    } else if (step in DEBT_STEPS) {
+      if (DEBT_TEXT_STEPS.has(step) && !text.startsWith('/') && !MENU[text]) {
+        // текст — ввод для шага мастера долга
+        const p0 = await repo.getProfile();
+        if (!p0) {
+          await repo.clearConversation();
+          return;
+        }
+        const ctx = await debtCtx(repo, p0, deps);
+        await applyDebt(advanceDebt(conv.state! as DebtState, { type: 'text', text }, ctx), msg, repo, deps, step);
+        return;
+      }
+      // навигационный debt-экран: произвольный текст — не ввод, состояние живёт
+      if (!text.startsWith('/') && !MENU[text]) {
+        await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
+        return;
+      }
+      // команда/кнопка с экрана или во время мастера — уходим к ней
+      await repo.clearConversation();
+    } else if (step in LOAN_STEPS) {
+      if (LOAN_TEXT_STEPS.has(step) && !text.startsWith('/') && !MENU[text]) {
+        // текст — ввод для шага займа (мастер или возврат)
+        const p0 = await repo.getProfile();
+        if (!p0) {
+          await repo.clearConversation();
+          return;
+        }
+        const ctx = await loanCtx(repo, p0, deps);
+        await applyLoan(advanceLoan(conv.state! as LoanState, { type: 'text', text }, ctx), msg, repo, deps, step);
+        return;
+      }
+      // навигационный loan-экран: произвольный текст — не ввод, состояние живёт
+      if (!text.startsWith('/') && !MENU[text]) {
+        await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
+        return;
+      }
+      // команда/кнопка с экрана или во время мастера — уходим к ней
+      await repo.clearConversation();
     } else {
       await applyOnboarding(advance(conv.state!, { type: 'text', text }), msg, user, deps, step);
       return;
@@ -349,8 +795,8 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
   const tz = profile.timezone;
   const today = todayInTz(tz, deps.now ?? new Date());
   const fx = fxAdapter(deps);
-  if (START_RE.test(cmd)) {
-    await tg.sendMessage(msg.chatId, 'Ты уже настроен — команды в /help', { replyMarkup: MAIN_MENU });
+  if (START_RE.test(cmd) || CMD('menu').test(cmd) || text === '🏠 Меню') {
+    await tg.sendMessage(msg.chatId, 'Главное меню', { replyMarkup: homeMarkup() });
     return;
   }
   if (CMD('plan').test(cmd)) {
@@ -367,25 +813,89 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
       await runSpent(msg.chatId, tg, repo, fx, arg, `tg:${msg.updateId}`, today);
       return;
     }
-    await repo.setConversation('spent_ask', '{}');
-    await tg.sendMessage(msg.chatId, 'Сколько потратили? (например: 320 или 320 kgs кофе)');
+    const r0 = renderPf(
+      'SPENT_ASK',
+      {},
+      {
+        profile: (await repo.getProfile())!,
+        commitments: [],
+        commitPayments: [],
+        incomeEntries: [],
+        expenses: [],
+        month: monthInTz(tz, deps.now ?? new Date()),
+        today,
+      },
+    );
+    await repo.setConversation(r0.step, '{}');
+    await tg.sendMessage(msg.chatId, r0.text, r0.markup ? { replyMarkup: r0.markup } : {});
+    return;
+  }
+  if (CMD('export').test(cmd)) {
+    await applyPf(
+      { state: conv?.state ?? { step: 'pf:data', data: {} }, effects: [{ kind: 'export' }] },
+      msg,
+      repo,
+      deps,
+    );
+    return;
+  }
+  if (CMD('delete_me').test(cmd)) {
+    const p0 = await repo.getProfile();
+    if (p0) {
+      const ctx = await pfCtx(repo, p0, deps);
+      const r = renderPf('PF_DELETE_ASK', {}, ctx);
+      await repo.setConversation(r.step, '{}');
+      await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
+    }
+    return;
+  }
+  if (CMD('expenses').test(cmd)) {
+    const p0 = await repo.getProfile();
+    if (p0) {
+      const ctx = await pfCtx(repo, p0, deps);
+      const r = renderPf('EXPENSES_LIST', {}, ctx);
+      await repo.setConversation(r.step, '{}');
+      await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
+    }
     return;
   }
   if (CMD('income').test(cmd)) {
     const arg = cmd.split(/\s+/).slice(1).join(' ').trim();
     const month = monthInTz(tz, deps.now ?? new Date());
     if (arg) {
-      await runIncome(msg.chatId, tg, repo, fx, arg, `tg:${msg.updateId}`, month);
+      const saved = await runIncome(msg.chatId, tg, repo, fx, arg, `tg:${msg.updateId}`, month);
+      if (saved) {
+        // после записи — экран INCOME_HUB (R3)
+        const p0 = await repo.getProfile();
+        if (p0) {
+          const ctx = await pfCtx(repo, p0, deps);
+          const r = renderPf('INCOME_HUB', {}, ctx);
+          await repo.setConversation(r.step, '{}');
+          await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
+        }
+      }
       return;
     }
-    // /income без аргументов — список месяца с кнопками удаления
-    const entries = (await repo.listIncomeEntries(month)).results;
-    if (entries.length) {
-      await runIncomeList(msg.chatId, tg, repo, month);
+    // /income без аргументов → экран INCOME_HUB (итог + кнопки)
+    const p0 = await repo.getProfile();
+    if (p0) {
+      const ctx = await pfCtx(repo, p0, deps);
+      const r = renderPf('INCOME_HUB', {}, ctx);
+      await repo.setConversation(r.step, '{}');
+      await tg.sendMessage(msg.chatId, r.text, r.markup ? { replyMarkup: r.markup } : {});
       return;
     }
     await repo.setConversation('income_ask', '{}');
-    await tg.sendMessage(msg.chatId, 'Сколько получили? (например: 5200 eur зарплата)');
+    const r0 = renderPf('INCOME_ASK', {}, await pfCtx(repo, (await repo.getProfile())!, deps));
+    await tg.sendMessage(msg.chatId, r0.text, r0.markup ? { replyMarkup: r0.markup } : {});
+    return;
+  }
+  if (CMD('credits').test(cmd) || CMD('debts').test(cmd)) {
+    await runDebts(msg, repo, deps);
+    return;
+  }
+  if (CMD('loans').test(cmd)) {
+    await runLoans(msg, repo, deps);
     return;
   }
   if (CMD('profile').test(cmd)) {
@@ -404,19 +914,9 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     await createInvite(msg, user, deps, accessRepo(deps.db));
     return;
   }
-  // не команда — пробуем как сумму траты («3200 kgs кофе»)
-  try {
-    parseAmountCheck(text);
-    await runSpent(msg.chatId, tg, repo, fx, text, `tg:${msg.updateId}`, today);
-    return;
-  } catch {
-    await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
-  }
-}
-
-function parseAmountCheck(text: string): void {
-  // только гейт: быстрый отсев некомандного текста (runSpent перепарсит)
-  if (!/^\d/.test(text.trim())) throw new Error('not an amount');
+  // Не команда и не ввод активного шага — «не знаю». Голая сумма трату НЕ
+  // записывает: расход вносится только через ➕ Трата / /spent (spent_ask).
+  await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
 }
 
 /** Входящее текстовое сообщение. */
@@ -431,8 +931,10 @@ export async function handleMessage(msg: IncomingMessage, deps: AccessDeps): Pro
   if (!user) {
     if (ownerSet && String(msg.fromId) === ownerId) {
       const r = await repo.createUser(msg.fromId, msg.firstName, 'owner');
-      await repo.audit('owner_bootstrap', Number(r.meta.last_row_id));
-      await send(TEXT.welcomeOwner(msg.firstName));
+      const uid = Number(r.meta.last_row_id);
+      await repo.audit('owner_bootstrap', uid);
+      const stg = tgWithKeyboardMigration(scoped(deps.db, uid), tg);
+      await stg.sendMessage(msg.chatId, TEXT.welcomeOwner(msg.firstName));
       return;
     }
     const m = START_RE.exec(msg.text);
@@ -455,7 +957,7 @@ export async function handleMessage(msg: IncomingMessage, deps: AccessDeps): Pro
 
 /** Callback-кнопки — только для известных пользователей. */
 export async function handleCallback(
-  cb: { id: string; chatId: number; fromId: number; firstName: string | null; data: string },
+  cb: { id: string; chatId: number; fromId: number; firstName: string | null; data: string; updateId?: number },
   deps: AccessDeps,
 ): Promise<void> {
   const repo = accessRepo(deps.db);
@@ -463,21 +965,119 @@ export async function handleCallback(
   await deps.telegram.answerCallbackQuery(cb.id);
   if (!user) return; // незнакомец — молча
   const r = scoped(deps.db, user.id);
-  const msg: IncomingMessage = { chatId: cb.chatId, fromId: cb.fromId, firstName: cb.firstName, text: '', updateId: 0 };
+  // исходящие тексты из callback-ветки — тоже через kb-миграцию
+  deps = { ...deps, telegram: tgWithKeyboardMigration(r, deps.telegram) };
+  const msg: IncomingMessage = {
+    chatId: cb.chatId,
+    fromId: cb.fromId,
+    firstName: cb.firstName,
+    text: '',
+    updateId: cb.updateId ?? 0,
+  };
 
   const p0 = await r.getProfile();
+  // nv:* — навигация по реестру (R7: чужие/устаревшие — молча)
+  if (cb.data === NAV_HOME || /^nv:(back|go):/.test(cb.data)) {
+    const target = cb.data === NAV_HOME ? 'HOME' : (/^nv:(?:back|go):(.+)$/.exec(cb.data)?.[1] ?? '');
+    if (!getScreen(target)) return; // неизвестный экран — молча
+    const navMsg: IncomingMessage = {
+      chatId: cb.chatId,
+      fromId: cb.fromId,
+      firstName: cb.firstName,
+      text: '',
+      updateId: 0,
+    };
+    if (target === 'HOME') {
+      await r.clearConversation();
+      await deps.telegram.sendMessage(cb.chatId, 'Главное меню', {
+        replyMarkup: homeMarkup(),
+      });
+      return;
+    }
+    if (!p0?.onboarded_at) return;
+    // экраны с живой логикой — через обычный диспетчер команд
+    const cmd = {
+      PLAN: '/plan',
+      WEEK: '/week',
+      SPENT_ASK: '/spent',
+      PF_HOME: '/profile',
+      INCOME_HUB: '/income',
+      DEBTS: '/debts',
+      LOANS: '/loans',
+    }[target];
+    if (cmd) {
+      await knownUser({ ...navMsg, text: cmd }, user, deps);
+      return;
+    }
+    // debt-экраны — прямой рендер через renderDebt (debtId из состояния диалога)
+    if (DEBT_SCREENS.has(target)) {
+      const conv0 = await r.getConversation();
+      const data = conv0 ? (JSON.parse(conv0.data) as DebtState['data']) : {};
+      const ctx = await debtCtx(r, p0, deps);
+      const r0 = renderDebt(target, data ?? {}, ctx);
+      await r.setConversation(r0.step, JSON.stringify(data ?? {}));
+      await deps.telegram.sendMessage(cb.chatId, r0.text, r0.markup ? { replyMarkup: r0.markup } : {});
+      return;
+    }
+    // loan-экраны — прямой рендер через renderLoan (loanId из состояния диалога)
+    if (LOAN_SCREENS.has(target)) {
+      const conv0 = await r.getConversation();
+      const data = conv0 ? (JSON.parse(conv0.data) as LoanState['data']) : {};
+      const ctx = await loanCtx(r, p0, deps);
+      const r0 = renderLoan(target, data ?? {}, ctx);
+      await r.setConversation(r0.step, JSON.stringify(data ?? {}));
+      await deps.telegram.sendMessage(cb.chatId, r0.text, r0.markup ? { replyMarkup: r0.markup } : {});
+      return;
+    }
+    // остальные pf/income-экраны — прямой рендер через renderPf (данные из conv)
+    const conv0 = await r.getConversation();
+    const data = (conv0 ? (JSON.parse(conv0.data) as PfState['data']) : {}) ?? {};
+    const ctx = await pfCtx(r, p0, deps);
+    const r0 = renderPf(target, data, ctx);
+    await r.setConversation(r0.step, JSON.stringify(data));
+    await deps.telegram.sendMessage(cb.chatId, r0.text, r0.markup ? { replyMarkup: r0.markup } : {});
+    return;
+  }
   const conv = await currentOb(r, deps, !!p0?.onboarded_at);
-  if (!conv?.state) return;
-  const step = conv.state.step as string;
-  if (cb.data.startsWith('pf:') || cb.data.startsWith('in:')) {
+  // ex:* допустим и без разговора (после записи траты conv очищен) — считаем шаг 'pf'
+  const st = conv?.state ?? (cb.data.startsWith('ex:') ? ({ step: 'pf', data: {} } as PfState) : undefined);
+  if (!st) return;
+  const step = st.step as string;
+  if (
+    cb.data.startsWith('pf:') ||
+    cb.data.startsWith('in:') ||
+    cb.data.startsWith('inc:') ||
+    cb.data.startsWith('ex:')
+  ) {
     if (!p0) return;
     if (!(step in PF_STEPS)) return; // чужой шаг — молча
     const ctx = await pfCtx(r, p0);
-    await applyPf(advancePf(conv.state, { type: 'callback', data: cb.data }, ctx), msg, r, deps, step);
+    // без разговора CAS по шагу не сработает — применяем безусловно
+    await applyPf(
+      advancePf(st, { type: 'callback', data: cb.data }, ctx),
+      msg,
+      r,
+      deps,
+      conv?.state ? step : undefined,
+    );
+    return;
+  }
+  if (cb.data.startsWith('dbt:')) {
+    if (!p0?.onboarded_at || !conv) return; // без диалога кнопки кредитов мертвы
+    if (!(step in DEBT_STEPS)) return; // чужой шаг — молча
+    const ctx = await debtCtx(r, p0, deps);
+    await applyDebt(advanceDebt(st as DebtState, { type: 'callback', data: cb.data }, ctx), msg, r, deps, step);
+    return;
+  }
+  if (cb.data.startsWith('ln:')) {
+    if (!p0?.onboarded_at || !conv) return; // без диалога кнопки займов мертвы
+    if (!(step in LOAN_STEPS)) return; // чужой шаг — молча
+    const ctx = await loanCtx(r, p0, deps);
+    await applyLoan(advanceLoan(st as LoanState, { type: 'callback', data: cb.data }, ctx), msg, r, deps, step);
     return;
   }
   const input: ObInput = { type: 'callback', data: cb.data };
-  await applyOnboarding(advance(conv.state, input), msg, user, deps, step);
+  await applyOnboarding(advance(st as ObState, input), msg, user, deps, step);
 }
 
 async function createInvite(
@@ -520,7 +1120,8 @@ async function redeemInvite(msg: IncomingMessage, code: string, deps: AccessDeps
   const res = r!;
   if (res.redeemed) {
     await repo.audit('invite_redeemed', res.userId);
-    await tg.sendMessage(msg.chatId, TEXT.joined(msg.firstName));
+    const stg = tgWithKeyboardMigration(scoped(deps.db, res.userId), tg);
+    await stg.sendMessage(msg.chatId, TEXT.joined(msg.firstName));
     return;
   }
   const reason = await repo.inviteState(codeHash);

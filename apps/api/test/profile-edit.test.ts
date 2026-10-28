@@ -40,6 +40,7 @@ const tg: TelegramClient = {
     sent.push({ chatId: Number(c), text: t, markup: o?.replyMarkup });
   },
   answerCallbackQuery: async () => {},
+  sendDocument: async () => {},
 };
 const fx: FxProvider = {
   latest: async () => ({ perUsd: { USD: 1, EUR: 1 / 1.09, RUB: 97, KGS: 86.5 }, asOf: '2026-10-20' }),
@@ -80,6 +81,7 @@ beforeEach(async () => {
     'conversation_state',
     'income_entries',
     'weekly_expenses',
+    'commitment_payments',
     'commitments',
     'profiles',
     'consents',
@@ -156,8 +158,7 @@ describe('/income', () => {
       },
     };
     await post(body);
-    expect(last()).toContain('Записал доход');
-    expect(last()).toContain('/plan');
+    expect(last()).toContain('Доход за'); // INCOME_HUB после сохранения (R3)
     const entries = (await scoped(env.DB, uid).listIncomeEntries(monthInTz('Asia/Bishkek', new Date()))).results;
     expect(entries).toHaveLength(1);
     expect(entries[0]!.amount_minor).toBe(520000);
@@ -170,13 +171,15 @@ describe('/income', () => {
   it('список + удаление через кнопки с confirm', async () => {
     const uid = await setupUser(OWNER + 41);
     await msg(OWNER + 41, '/income 5200 eur зарплата');
-    await msg(OWNER + 41, '/income');
+    await msg(OWNER + 41, '/income'); // → INCOME_HUB
+    await cb(OWNER + 41, 'inc:list'); // → INCOME_LIST
     expect(last()).toContain('зарплата');
     const eid = (await scoped(env.DB, uid).listIncomeEntries(monthInTz('Asia/Bishkek', new Date()))).results[0]!.id;
     await cb(OWNER + 41, `in:del:${eid}`);
     expect(last()).toContain('Удалить запись');
     await cb(OWNER + 41, 'in:del:yes');
     expect(last()).toContain('Удалено');
+    expect(last()).toContain('записей нет'); // список без удалённой записи
     expect((await scoped(env.DB, uid).listIncomeEntries(monthInTz('Asia/Bishkek', new Date()))).results).toHaveLength(
       0,
     );
@@ -252,6 +255,7 @@ describe('редактирование профиля (pf:*)', () => {
     expect(last()).toContain('Новый типичный доход');
     await msg(OWNER + 50, '7500');
     expect(last()).toContain('7 500');
+    expect(last()).toContain('Типичный'); // PF_INCOME перерисован с новым значением
     expect((await scoped(env.DB, uid).getProfile())!.income_minor).toBe(750000);
     await cb(OWNER + 50, 'pf:sec:income');
     await cb(OWNER + 50, 'pf:typ');
@@ -263,8 +267,10 @@ describe('редактирование профиля (pf:*)', () => {
   it('лимит жизни: правка пересчитывает недельный бюджет', async () => {
     const uid = await setupUser(OWNER + 51);
     await msg(OWNER + 51, '⚙️ Профиль');
-    await cb(OWNER + 51, 'pf:sec:living');
+    await cb(OWNER + 51, 'pf:sec:living'); // → PF_LIVING
+    await cb(OWNER + 51, 'pf:liv'); // → PF_LIVING_ASK
     await msg(OWNER + 51, '90000');
+    expect(last()).toContain('90 000'); // экран-источник с новым значением
     const p = (await scoped(env.DB, uid).getProfile())!;
     expect(p.living_cap_minor).toBe(9000000);
     expect(p.weekly_budget_minor).toBe(Math.round((9000000 * 12) / 52));
@@ -284,11 +290,14 @@ describe('редактирование профиля (pf:*)', () => {
     expect(last()).toContain('700 $');
     await cb(OWNER + 52, `pf:ca:${cid}`);
     await msg(OWNER + 52, '800');
+    expect(last()).toContain('800 $'); // карточка рендерится ПОСЛЕ мутации
     expect((await scoped(env.DB, uid).getCommitment(cid))!.amount_minor).toBe(80000);
     await cb(OWNER + 52, `pf:cday:${cid}`);
     await msg(OWNER + 52, '15');
+    expect(last()).toContain('15');
     expect((await scoped(env.DB, uid).getCommitment(cid))!.due_day).toBe(15);
     await cb(OWNER + 52, `pf:ctog:${cid}`);
+    expect(last()).toContain('⏸'); // выключенный виден сразу
     expect((await scoped(env.DB, uid).getCommitment(cid))!.active).toBe(0);
     // выключенный не входит в /plan
     await msg(OWNER + 52, '/plan');
@@ -300,9 +309,16 @@ describe('редактирование профиля (pf:*)', () => {
     expect(last()).toContain('Удалить');
     await cb(OWNER + 52, 'pf:cdel:yes');
     expect((await scoped(env.DB, uid).listCommitments()).results.find((c) => c.id === cid)).toBeUndefined();
-    // добавить
+    // добавить — ПЕРВЫЙ вернувшийся список содержит новый платёж (регрессия stale-render)
     await cb(OWNER + 52, 'pf:cadd');
     await msg(OWNER + 52, 'Интернет 600 kgs 5');
+    expect(last()).toContain('Интернет');
+    const cbs = (
+      (sent.at(-1)!.markup as { inline_keyboard?: { text: string; callback_data?: string }[][] })?.inline_keyboard ?? []
+    )
+      .flat()
+      .map((b) => b.callback_data ?? '');
+    expect(cbs.some((d) => d.startsWith('pf:cm:'))).toBe(true);
     expect((await scoped(env.DB, uid).listCommitments()).results.some((c) => c.name === 'Интернет')).toBe(true);
     // чужой id молча
     const n = sent.length;
@@ -349,9 +365,10 @@ describe('редактирование профиля (pf:*)', () => {
     // /cancel в правке
     await msg(OWNER + 55, '⚙️ Профиль');
     await cb(OWNER + 55, 'pf:sec:living');
+    await cb(OWNER + 55, 'pf:liv'); // → PF_LIVING_ASK (промпт)
     await msg(OWNER + 55, '/cancel');
-    expect(last()).toContain('отменена');
-    expect(await scoped(env.DB, uid55).getConversation()).toBeFalsy();
+    expect(last()).toContain('Отменено'); // возврат на экран-источник (R2)
+    expect((await scoped(env.DB, uid55).getConversation())!.step).toBe('pf:living');
   });
 
   it('stale pf-callback на другом шаге — молча', async () => {
@@ -360,6 +377,87 @@ describe('редактирование профиля (pf:*)', () => {
     await cb(OWNER + 56, 'pf:sec:income'); // step pf:income
     const n = sent.length;
     await cb(OWNER + 56, 'pf:cadd'); // кнопка раздела платежей — чужой шаг
+    expect(sent.length).toBe(n);
+  });
+});
+
+describe('траты: отмена / правка / удаление (ex:*)', () => {
+  const mk = () =>
+    (sent.at(-1)!.markup as { inline_keyboard?: { text: string; callback_data?: string }[][] })?.inline_keyboard ?? [];
+  const cbsOf = () =>
+    mk()
+      .flat()
+      .map((b) => b.callback_data ?? '');
+
+  it('SPENT_DONE: [↩ Отменить] удаляет запись; повтор — без ошибки; [✏️] → правка', async () => {
+    const uid = await setupUser(OWNER + 60);
+    await msg(OWNER + 60, '➕ Трата');
+    await msg(OWNER + 60, '344 кафе');
+    expect(last()).toContain('Записал: 344');
+    const undo = cbsOf().find((d) => d.startsWith('ex:undo:'))!;
+    const eid = Number(undo.slice(8));
+    expect(cbsOf()).toContain(`ex:e:${eid}`);
+    expect(cbsOf()).toContain('nv:home');
+    // undo → удалено, строки нет
+    await cb(OWNER + 60, undo);
+    expect(last()).toContain('Трата удалена');
+    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(0);
+    // повторный undo — тихий no-op
+    const n = sent.length;
+    await cb(OWNER + 60, undo);
+    expect(sent.length).toBe(n);
+  });
+
+  it('правка суммы → карточка показывает новое; /week пересчитан', async () => {
+    const uid = await setupUser(OWNER + 61);
+    await msg(OWNER + 61, '➕ Трата');
+    await msg(OWNER + 61, '344 кафе');
+    const ecb = cbsOf().find((d) => d.startsWith('ex:e:'))!;
+    const eid = Number(ecb.slice(5));
+    await cb(OWNER + 61, ecb);
+    expect(last()).toContain('Новая сумма');
+    await msg(OWNER + 61, '700 eur бензин');
+    expect(last()).toContain('700');
+    const e = (await scoped(env.DB, uid).getExpense(eid))!;
+    expect(e.amount_minor).toBe(70000);
+    expect(e.currency).toBe('EUR');
+    expect(e.note).toBe('бензин');
+  });
+
+  it('список недели → карточка → удаление → список без записи; /expenses пустой', async () => {
+    const uid = await setupUser(OWNER + 62);
+    await msg(OWNER + 62, '/expenses');
+    expect(last()).toContain('Трат за неделю нет');
+    await msg(OWNER + 62, '➕ Трата');
+    await msg(OWNER + 62, '100 обед');
+    const eid = (await scoped(env.DB, uid).listExpenses()).results[0]!.id;
+    await msg(OWNER + 62, '/expenses');
+    expect(
+      mk()
+        .flat()
+        .map((b) => b.text)
+        .join(' '),
+    ).toContain('обед');
+    await cb(OWNER + 62, `ex:v:${eid}`);
+    expect(last()).toContain('100');
+    await cb(OWNER + 62, `ex:del:${eid}`);
+    expect(last()).toContain('Удалить');
+    await cb(OWNER + 62, 'ex:dyes');
+    expect(last()).toContain('Удалено');
+    expect((await scoped(env.DB, uid).listExpenses()).results).toHaveLength(0);
+  });
+
+  it('изоляция: юзер B не может отменить/удалить трату юзера A', async () => {
+    const uidA = await setupUser(OWNER + 63);
+    await setupUser(OWNER + 64);
+    await msg(OWNER + 63, '➕ Трата');
+    await msg(OWNER + 63, '50 чужое');
+    const eid = (await scoped(env.DB, uidA).listExpenses()).results[0]!.id;
+    const n = sent.length;
+    await cb(OWNER + 64, `ex:undo:${eid}`); // чужой id — молча
+    expect(sent.length).toBe(n);
+    expect((await scoped(env.DB, uidA).listExpenses()).results).toHaveLength(1);
+    await cb(OWNER + 64, `ex:v:${eid}`);
     expect(sent.length).toBe(n);
   });
 });

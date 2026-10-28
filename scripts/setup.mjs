@@ -18,6 +18,7 @@ import { askHidden } from './ask-hidden.mjs';
 import { buildSetWebhookPayload, maskUrl, redact } from './webhook-utils.mjs';
 import {
   deriveWorkerUrl,
+  getTomlVar,
   isValidBotToken,
   parseDatabaseId,
   parseSecretList,
@@ -37,7 +38,7 @@ const SKIP_DEPLOY = args.includes('--skip-deploy');
 const ROTATE = args.includes('--rotate');
 
 let step = 0;
-const TOTAL = 8;
+const TOTAL = 9;
 const secretsToRedact = [];
 const p = (s = '') => console.log(s);
 const stepLog = (msg) => p(`\n[${++step}/${TOTAL}] ${msg}`);
@@ -256,7 +257,15 @@ async function main() {
   if (info.last_error_message) p(`   ⚠️  Telegram last_error: ${hide(info.last_error_message)}`);
   p(`   ✓ webhook: ${maskUrl(whUrl)}`);
 
-  // ── 8. Финал ──
+  // ── 8. Menu Button — голубая кнопка Mini App у поля ввода ──
+  stepLog('Menu Button (кнопка приложения у поля ввода)');
+  const appUrl = getTomlVar(toml, 'MINI_APP_URL') ?? workerUrl;
+  await tg(token, 'setChatMenuButton', {
+    menu_button: { type: 'web_app', text: '💰 Бюджет', web_app: { url: appUrl } },
+  });
+  p(`   ✓ menu button: ${maskUrl(appUrl)}`);
+
+  // ── 9. Финал ──
   stepLog('Проверка /health');
   try {
     const h = await fetch(`${workerUrl}/health`).then((r) => r.json());
