@@ -1,7 +1,9 @@
-# Разработка v2 (Cloudflare Workers + D1 + Pages)
+# Разработка (Cloudflare Workers + D1 + Workers Static Assets)
 
-Каркас нового стека (шаг 1 миграции, [ADR-0001](adr/0001-platform-and-architecture.md)).
-Старый бэкенд (`apps-script/*.gs`, clasp-пайплайн) живёт до шага 9 — не трогаем.
+Основной документ разработки ([ADR-0001](adr/0001-platform-and-architecture.md)).
+Миграция v1→v2 завершена шагом 9: legacy-стек (`apps-script/`, `mini-app/`,
+clasp-пайплайн) удалён; упоминания v1 в тексте вех — исторический контекст
+(«порт v1 X.gs») и оставлены как атрибуция происхождения кода.
 
 ## Структура
 
@@ -44,7 +46,7 @@ npm run wrangler -- d1 migrations apply DB --local
 ```bash
 npm run test:api      # vitest в рантайме workerd (проверки /health, миграций, изоляции tenant)
 npm run typecheck     # tsc --noEmit по всем apps/*
-npm run check         # всё: legacy lint + smoke, typecheck, тесты API, сборка web
+npm run check         # всё: lint, typecheck, тесты API, сборка web
 ```
 
 Важно: тесты идут в **workerd**, а не в Node — так ловится класс ошибок

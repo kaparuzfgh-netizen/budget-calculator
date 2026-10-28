@@ -3,8 +3,8 @@
 Порт расчётов из `apps-script/*.gs` — **без ввода-вывода** (никаких `fetch`,
 `env.DB`, `new Date()`/`Date.now()` — «сегодня» всегда параметром ISO-строкой
 `'YYYY-MM-DD'`). Числа-эталоны: golden-тест `test/domain/golden.test.ts` сверяет
-каждый кейс с реальным выводом legacy-кода (`npm run golden` пересобирает
-`test/domain/golden.legacy.json`).
+каждый кейс с реальным выводом legacy-кода (`test/domain/golden.legacy.json` —
+фикстура заморожена; генератор `gen-golden.js` удалён вместе с v1 на шаге 9).
 
 | Модуль | Что | Источник v1 |
 |--------|-----|-------------|

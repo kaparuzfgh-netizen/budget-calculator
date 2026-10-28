@@ -2,7 +2,7 @@
   "name": "budget-companion",
   "version": "0.1.0",
   "private": true,
-  "description": "Personal Finance Companion — serverless-движок личных финансов (Telegram + Apps Script + Google Sheets)",
+  "description": "Personal Finance Companion — Telegram-бот и Mini App личных финансов (Cloudflare Workers + D1)",
   "license": "UNLICENSED",
   "workspaces": [
     "apps/*"
@@ -11,15 +11,13 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node scripts/smoke-test.js",
+    "test": "npm run test:api",
     "wrangler": "npm exec -w apps/api -- wrangler",
-    "build:bundle": "node scripts/build-bundle.js",
-    "lint": "node scripts/build-bundle.js --quiet && eslint scripts dist/BUNDLE.gs apps",
+    "lint": "eslint scripts apps",
     "lint:sh": "node scripts/lint-sh.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "golden": "node scripts/gen-golden.js",
     "setup": "node scripts/setup.mjs",
     "release": "node scripts/release.mjs",
     "webhook:set": "node scripts/telegram-webhook.mjs set",
@@ -27,15 +25,11 @@
     "webhook:delete": "node scripts/telegram-webhook.mjs delete",
     "test:api": "npm run test -w apps/api",
     "build:web": "npm run build -w apps/web",
-    "check": "npm run lint && npm test && npm run typecheck && npm run test:api && npm run build:web",
-    "push": "clasp push",
-    "deploy": "node scripts/deploy.js",
-    "bootstrap": "node scripts/bootstrap.js",
+    "check": "npm run lint && npm run typecheck && npm run test:api && npm run build:web",
     "prepare": "node scripts/install-hooks.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@google/clasp": "^3.4.1",
     "eslint": "^10.13.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
@@ -45,9 +39,6 @@
   "overrides": {
     "undici": "7.30.1",
     "@cloudflare/vitest-plugin": {
-      "zod": "4.6.7"
-    },
-    "@google/clasp": {
       "zod": "4.6.7"
     }
   }

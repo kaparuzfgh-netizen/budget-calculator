@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### Удалено
+- **Шаг 9: legacy-стек v1 полностью удалён** — миграция завершена
+  ([ADR-0001](docs/adr/0001-platform-and-architecture.md)). Убраны:
+  `apps-script/` (14 модулей + appsscript.json), `mini-app/` (статичный
+  index.html на Pages), скрипты `build-bundle`/`smoke-test`/`gen-golden`/
+  `deploy`/`bootstrap`, workflow `deploy-apps-script.yml` и
+  `deploy-mini-app.yml`, `.claspignore`, `secrets.example.json`,
+  v1-доки (`docs/BOT_SETUP.md`, `docs/PRODUCT_AUDIT.md`, `docs/audits/`),
+  dev-зависимость `@google/clasp` (+ override). Данных для переноса
+  не было — весь учёт в v1 вёлся на бумаге.
+- `package.json`: `lint` = `eslint scripts apps` (без сборки бандла),
+  `check` = lint + typecheck + test:api + build:web, `test` = test:api;
+  `eslint.config.mjs` переписан без gasGlobals и `dist/*.gs`; CI — без
+  smoke-шага; `deploy-v2.yml` чинит порядок (сборка web ДО deploy воркера)
+  и убирает устаревший Pages-шаг (SPA отдаётся [assets] воркера).
+- Эталонные числа v1 сохранены как фикстура
+  `apps/api/test/domain/golden.legacy.json` (golden-тесты живы,
+  генератор удалён — фикстура заморожена).
+- `AGENTS.md`, `README.md`, `SETUP.md`, `CONTRIBUTING.md`, `SECURITY.md`
+  переписаны под единственный стек.
+
 ### Добавлено
 - **Шаг 8: обмен валют — аналитика, алерты и журнал обменов.** Порт v1
   `FXAnalytics.gs` один-в-один в `src/domain/fx.ts` (кросс через USD по

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   node:
-    name: Lint · test · bundle
+    name: Lint · typecheck · tests · build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -27,11 +27,8 @@ jobs:
       - name: Установка зависимостей
         run: npm ci
 
-      - name: ESLint (scripts + собранный dist/BUNDLE.gs)
+      - name: ESLint (scripts + apps)
         run: npm run lint
-
-      - name: Smoke-тесты бэкенда (офлайн)
-        run: npm test
 
       - name: Typecheck (apps/*, TypeScript strict)
         run: npm run typecheck
@@ -44,15 +41,6 @@ jobs:
 
       - name: Prettier (tooling и конфиги)
         run: npm run format:check
-
-      - name: Бандл собирается; BUNDLE.gs нет в apps-script
-        run: |
-          node scripts/build-bundle.js
-          test -s dist/BUNDLE.gs
-          if [ -e apps-script/BUNDLE.gs ]; then
-            echo "::error::apps-script/BUNDLE.gs не должен существовать — модули пушатся clasp'ом, бандл собирается в dist/ (npm run build:bundle)"
-            exit 1
-          fi
 
       - name: shellcheck
         run: |

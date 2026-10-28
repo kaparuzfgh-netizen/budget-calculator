@@ -26,7 +26,7 @@
 5. **Mini App (шаг 5):** ~~Обзор~~ ✅ (initData→JWT, `/api/tma/overview`, тёмная SPA на Workers Assets); **Долги** в Mini App — позже (шаг 6).
 6. **Скриншоты банка по согласию (шаг 7):** vision опционально, ручной ввод основной путь.
 7. ~~**Обмен валют (шаг 8).**~~ ✅ Сделано: порт FXAnalytics 1-в-1 (`domain/fx.ts`, кросс через USD), `/fx` с карточками пар и сигналами, журнал обменов (`exchanges`, rate vs рынок, идемпотентность), FX-алерты в cron (перцентиль ≥85/≤15, кулдаун — ISO-неделя, тумблер в профиле), Mini App «💱 Курсы» + `/api/tma/fx|exchanges`.
-8. **Удаление v1 (шаг 9):** apps-script/, mini-app/, clasp-пайплайн и v1-доки; переносить данные нечего.
+8. ~~**Удаление v1 (шаг 9).**~~ ✅ Сделано: удалены `apps-script/`, `mini-app/`, clasp-пайплайн (`build-bundle`, `smoke-test`, `gen-golden`, `deploy`, `bootstrap`), workflow Apps Script/Pages, `.claspignore`, `secrets.example.json`, v1-доки (`BOT_SETUP`, `PRODUCT_AUDIT`, `docs/audits/`); package.json/eslint/CI переписаны под v2-only; golden-фикстура сохранена как эталон. Переносить данные нечего — всё было на бумаге.
 9. **Инвестиции (шаг 10):** поэтапно — депозиты, облигации, крипто, акции; детальный разбор при старте.
 
 ## P1 — новый раздел «Долги людям» (по просьбе владельца)

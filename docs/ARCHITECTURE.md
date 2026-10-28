@@ -1,8 +1,8 @@
 # Архитектура v2 — Cloudflare Worker + D1 + Mini App
 
-Статус: **v2 в проде**. Стек v1 (`apps-script/`, Google Sheets) живёт параллельно
-до шага 9 миграции — см. [ADR-0001](adr/0001-platform-and-architecture.md).
-Этот документ описывает только v2 (`apps/api`, `apps/web`).
+Статус: **в проде — единственный стек** (миграция завершена шагом 9,
+legacy удалён — см. [ADR-0001](adr/0001-platform-and-architecture.md)).
+Документ описывает `apps/api` и `apps/web`.
 
 ## Обзор системы
 

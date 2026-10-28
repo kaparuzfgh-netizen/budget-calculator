@@ -1,7 +1,9 @@
 # Аудит v2 (apps/api + apps/web) — 2026-10-28
 
 Объём: Cloudflare Worker (Hono + D1), Telegram-бот, Mini App (Preact), скрипты
-setup/release. Legacy v1 (`apps-script/`, `mini-app/`) вне объёма — живёт до шага 9.
+setup/release. Legacy v1 (`apps-script/`, `mini-app/`) вне объёма — на шаге 9
+миграции удалён целиком (28.10, включая `@google/clasp` — замечание к P2-7
+закрыто удалением пакета).
 Код приложения в ходе аудита не менялся.
 
 Проверки: `npm audit --audit-level=high`, `tsc --noEmit` (оба воркспейса — чисто),

@@ -21,7 +21,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   deploy:
-    name: миграции D1 → wrangler deploy → Pages
+    name: сборка web → миграции D1 → wrangler deploy
     needs: ci
     runs-on: ubuntu-latest
     environment: production
@@ -56,6 +56,11 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         run: npm ci
 
+      # Mini App отдаётся как [assets] того же воркера — собирать ДО deploy.
+      - name: Сборка Mini App
+        if: steps.cfg.outputs.configured == 'true'
+        run: npm run build -w apps/web
+
       - name: Миграции D1 (remote)
         if: steps.cfg.outputs.configured == 'true'
         uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
@@ -74,14 +79,4 @@ jobs:
           workingDirectory: apps/api
           command: deploy
 
-      - name: Сборка Mini App
-        if: steps.cfg.outputs.configured == 'true'
-        run: npm run build -w apps/web
 
-      - name: Deploy Mini App (Cloudflare Pages)
-        if: steps.cfg.outputs.configured == 'true'
-        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/web/dist --project-name=budget-companion

@@ -4,8 +4,9 @@
 
 ## Чеклист
 
-- [ ] `npm run check` проходит локально (lint + smoke-тесты)
-- [ ] В `apps-script/` нет `BUNDLE.gs` и секретов (секреты — только в Script Properties)
-- [ ] Новый модуль `apps-script/*.gs` добавлен в `ORDER` в `scripts/build-bundle.js`
-- [ ] `.clasp.json`, `.deploy.json`, `secrets*.json` не закоммичены
+- [ ] `npm run check` проходит локально (lint + typecheck + тесты API + сборка web)
+- [ ] Секреты и `.dev.vars` не закоммичены (прод — `wrangler secret put`)
+- [ ] Новый SQL — только новым файлом `apps/api/migrations/NNNN_name.sql`
+- [ ] Запросы к БД идут через `scoped(db, userId)` в `repo.ts`; для новых чтений — тест изоляции «A не видит B»
+- [ ] Изменения экранов бота внесены в `docs/ux/navigation.md` + `screens.json` (nav.test.ts зелёный)
 - [ ] Документация обновлена (README/SETUP/CHANGELOG), если менялось поведение или установка
