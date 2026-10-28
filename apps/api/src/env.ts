@@ -17,6 +17,12 @@ export interface Env {
   TELEGRAM_BOT_USERNAME?: string;
   /** Переменная [vars]: URL Mini App — на него указывает menu-button «� Бюджет» (setChatMenuButton). */
   MINI_APP_URL?: string;
+  /** Секрет: ключ Gemini AI Studio — основной vision-провайдер (шаг 7). */
+  GEMINI_API_KEY?: string;
+  /** Секрет: ключ Groq — резервный vision-провайдер. */
+  GROQ_API_KEY?: string;
+  /** Секрет/переменная: модель Groq (умолчание — llama-4-scout). */
+  GROQ_MODEL?: string;
   /** Биндинг статики Mini App (wrangler.toml [assets]); SPA-fallback из роутера. */
   ASSETS?: Fetcher;
 }

@@ -68,11 +68,18 @@ export interface TelegramClient {
   answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void>;
   /** Документ (multipart, Workers-compatible FormData+Blob). */
   sendDocument(chatId: number | string, filename: string, content: string | Uint8Array, mime?: string): Promise<void>;
+  /** Метаданные файла (getFile) — нужен vision-флоу; в тест-моках может отсутствовать. */
+  getFile?(fileId: string): Promise<{ file_path: string; file_size?: number }>;
+  /** Скачивание файла с серверов Telegram (https://api.telegram.org/file/bot…). */
+  downloadFileBytes?(filePath: string): Promise<Uint8Array>;
+  /** sendChatAction (typing и т.п.) — best-effort индикатор работы. */
+  sendChatAction?(chatId: number | string, action: string): Promise<void>;
 }
 
 interface TgApiResult {
   ok: boolean;
   description?: string;
+  result?: unknown;
 }
 
 /** P2-4: зависший Telegram API не держит запрос до лимита рантайма. */
@@ -80,7 +87,8 @@ const FETCH_TIMEOUT_MS = 8000;
 
 export function createTelegramClient(opts: { token: string; fetchImpl?: typeof fetch }): TelegramClient {
   const f = opts.fetchImpl ?? fetch;
-  const call = async (method: string, body: unknown) => {
+  /** Вызов Bot API → result. Токен в URL не покидает функцию и не попадает в ошибки. */
+  const call = async (method: string, body: unknown): Promise<unknown> => {
     // URL с токеном существует только внутри этого вызова.
     const res = await f(`https://api.telegram.org/bot${opts.token}/${method}`, {
       method: 'POST',
@@ -90,13 +98,16 @@ export function createTelegramClient(opts: { token: string; fetchImpl?: typeof f
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     let description = res.statusText;
+    let result: unknown;
     try {
       const j = (await res.json()) as TgApiResult;
       if (typeof j.description === 'string') description = j.description;
+      result = j.result;
     } catch {
       /* тело не JSON — оставляем statusText */
     }
     if (!res.ok) throw new TelegramError(res.status, description);
+    return result;
   };
 
   return {
@@ -139,6 +150,27 @@ export function createTelegramClient(opts: { token: string; fetchImpl?: typeof f
     },
     async answerCallbackQuery(callbackQueryId, text) {
       await call('answerCallbackQuery', { callback_query_id: callbackQueryId, text });
+    },
+    async getFile(fileId) {
+      const result = (await call('getFile', { file_id: fileId })) as
+        | { file_path?: string; file_size?: number }
+        | undefined;
+      if (!result?.file_path) throw new TelegramError(0, 'getFile: нет file_path в ответе');
+      return {
+        file_path: result.file_path,
+        ...(result.file_size !== undefined ? { file_size: result.file_size } : {}),
+      };
+    },
+    async downloadFileBytes(filePath) {
+      // file_path и токен — только внутри этого URL; в ошибку уходит лишь статус.
+      const res = await f(`https://api.telegram.org/file/bot${opts.token}/${filePath}`, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new TelegramError(res.status, 'file download failed');
+      return new Uint8Array(await res.arrayBuffer());
+    },
+    async sendChatAction(chatId, action) {
+      await call('sendChatAction', { chat_id: chatId, action });
     },
   };
 }

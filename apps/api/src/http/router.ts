@@ -31,6 +31,16 @@ const updateSchema = z.object({
     .object({
       message_id: z.number(),
       text: z.string().optional(),
+      // шаг 7 (vision): фото — массив размеров по возрастанию (берём последний,
+      // самый крупный); документ-картинка — file_id + mime.
+      photo: z.array(z.object({ file_id: z.string(), file_size: z.number().optional() })).optional(),
+      document: z
+        .object({
+          file_id: z.string(),
+          mime_type: z.string().optional(),
+          file_size: z.number().optional(),
+        })
+        .optional(),
       chat: z.object({ id: z.number(), type: z.string() }),
       from: z.object({ id: z.number(), first_name: z.string().optional(), username: z.string().optional() }).optional(),
     })
@@ -50,6 +60,11 @@ export interface RouterDeps {
   telegram?: TelegramClient;
   /** Подмена FX-провайдера в тестах. */
   fx?: import('../fx/provider').FxProvider;
+  /**
+   * Подмена vision-провайдеров (шаг 7): ключи + fetch для Gemini/Groq.
+   * Если не задано — собирается из env (GEMINI_API_KEY, GROQ_API_KEY, GROQ_MODEL).
+   */
+  vision?: import('../services/vision').VisionProviders;
 }
 
 interface TmaVariables {
@@ -191,6 +206,20 @@ export function createRouter(deps: RouterDeps = {}) {
     }
 
     const telegram = deps.telegram ?? createTelegramClient({ token: c.env.TELEGRAM_BOT_TOKEN });
+    // vision-провайдеры: из deps (тесты) или из env-секретов (шаг 7)
+    const vision: import('../services/vision').VisionProviders = deps.vision ?? {
+      geminiKey: c.env.GEMINI_API_KEY,
+      groqKey: c.env.GROQ_API_KEY,
+      groqModel: c.env.GROQ_MODEL,
+    };
+    const accessDeps = {
+      db: c.env.DB,
+      telegram,
+      ownerTelegramId: c.env.OWNER_TELEGRAM_ID,
+      botUsername: c.env.TELEGRAM_BOT_USERNAME,
+      fx: deps.fx ?? createFrankfurter(),
+      vision,
+    };
     try {
       if (cb && cb.message?.chat.type === 'private' && cb.from) {
         await handleCallback(
@@ -202,16 +231,16 @@ export function createRouter(deps: RouterDeps = {}) {
             data: cb.data ?? '',
             updateId: update.update_id,
           },
-          {
-            db: c.env.DB,
-            telegram,
-            ownerTelegramId: c.env.OWNER_TELEGRAM_ID,
-            botUsername: c.env.TELEGRAM_BOT_USERNAME,
-            fx: deps.fx ?? createFrankfurter(),
-          },
+          accessDeps,
         );
         return c.json({ ok: true });
       }
+      // Фото: самый крупный размер — последний элемент массива; документ —
+      // только изображения (image/*). Подпись к фото игнорируем.
+      const photoFileId =
+        msg!.photo?.at(-1)?.file_id ??
+        (msg!.document?.mime_type?.startsWith('image/') ? msg!.document.file_id : undefined);
+      const photoMime = msg!.document?.mime_type?.startsWith('image/') ? msg!.document.mime_type : 'image/jpeg';
       await handleMessage(
         {
           chatId: msg!.chat.id,
@@ -219,14 +248,9 @@ export function createRouter(deps: RouterDeps = {}) {
           firstName: msg!.from!.first_name ?? null,
           text: msg!.text ?? '',
           updateId: update.update_id,
+          ...(photoFileId ? { photoFileId, photoMime } : {}),
         },
-        {
-          db: c.env.DB,
-          telegram,
-          ownerTelegramId: c.env.OWNER_TELEGRAM_ID,
-          botUsername: c.env.TELEGRAM_BOT_USERNAME,
-          fx: deps.fx ?? createFrankfurter(),
-        },
+        accessDeps,
       );
     } catch (e) {
       // Никогда не логируем тело/текст/токены — update_id + код и

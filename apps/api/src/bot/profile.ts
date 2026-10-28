@@ -44,6 +44,7 @@ export type PfInput = { type: 'text'; text: string } | { type: 'callback'; data:
 export type ProfilePatch = {
   reminders_weekly?: number;
   reminders_payments?: number;
+  vision_enabled?: number;
   income_minor?: number;
   living_cap_minor?: number;
   weekly_budget_minor?: number;
@@ -435,11 +436,14 @@ export function renderPf(
         text:
           '🔔 <b>Напоминания</b>\n' +
           `Еженедельный итог (вс 20:00): ${p.reminders_weekly ? '✅ вкл' : '⏸ выкл'}\n` +
-          `Платежи (за 2 дня, 10:00): ${p.reminders_payments ? '✅ вкл' : '⏸ выкл'}`,
+          `Платежи (за 2 дня, 10:00): ${p.reminders_payments ? '✅ вкл' : '⏸ выкл'}\n` +
+          `📷 Скриншоты банка: ${p.vision_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
+          '<i>Распознавание скриншотов банка — фото уходит в Google AI.</i>',
         markup: kb(
           [
             [btn(p.reminders_weekly ? '⏸ Выкл недельные' : '✅ Вкл недельные', 'pf:rem:weekly')],
             [btn(p.reminders_payments ? '⏸ Выкл платежи' : '✅ Вкл платежи', 'pf:rem:pay')],
+            [btn(p.vision_enabled ? '⏸ Выкл скриншоты' : '✅ Вкл скриншоты', 'pf:rem:vision')],
           ],
           'PF_REMINDERS',
         ),
@@ -658,6 +662,12 @@ export function advancePf(state: PfState, input: PfInput, ctx: PfCtx): { state: 
         return ok(
           { step: 'pf:reminders', data: {} },
           { kind: 'patch', patch: { reminders_payments: p.reminders_payments ? 0 : 1 } },
+          { kind: 'render', screen: 'PF_REMINDERS' },
+        );
+      if (cb === 'pf:rem:vision')
+        return ok(
+          { step: 'pf:reminders', data: {} },
+          { kind: 'patch', patch: { vision_enabled: p.vision_enabled ? 0 : 1 } },
           { kind: 'render', screen: 'PF_REMINDERS' },
         );
       if (cb === 'pf:sec:reminders') return go('PF_REMINDERS');

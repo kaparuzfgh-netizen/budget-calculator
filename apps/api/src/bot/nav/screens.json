@@ -275,6 +275,13 @@
       "nav": "cancel"
     },
     {
+      "id": "VIS_RECON",
+      "kind": "confirm",
+      "depth": 2,
+      "parent": "DEBTS",
+      "nav": "cancel"
+    },
+    {
       "id": "DEBT_EDIT",
       "kind": "menu",
       "depth": 3,
@@ -564,6 +571,8 @@
     ["DEBT_PREPAY_ASK", "DEBT_PREPAY"],
     ["DEBT_PREPAY", "DEBT"],
     ["DEBT_RECON", "DEBT"],
+    ["VIS_RECON", "DEBTS"],
+    ["VIS_RECON", "DEBT"],
     ["DEBT_EDIT", "DEBT"],
     ["DEBT_EDIT", "DEBT_EDIT_RATE"],
     ["DEBT_EDIT", "DEBT_EDIT_PAYMENT"],

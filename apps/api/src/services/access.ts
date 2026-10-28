@@ -48,6 +48,7 @@ import { buildLoanCtx } from './loans';
 import { getScreen, homeMarkup, NAV_HOME } from '../bot/nav/nav';
 import type { FxProvider } from '../fx/provider';
 import { getFxRates } from '../fx/service';
+import { handleVisionPhoto, handleVsCallback, type VisionProviders } from './vision';
 
 export interface IncomingMessage {
   chatId: number;
@@ -55,6 +56,10 @@ export interface IncomingMessage {
   firstName: string | null;
   text: string;
   updateId: number;
+  /** file_id самого крупного размера фото или документа-картинки (шаг 7, vision). */
+  photoFileId?: string | undefined;
+  /** MIME изображения (photo → 'image/jpeg'; document → его mime_type). */
+  photoMime?: string | undefined;
 }
 
 export interface AccessDeps {
@@ -64,6 +69,8 @@ export interface AccessDeps {
   botUsername?: string | undefined;
   fx?: FxProvider;
   now?: Date;
+  /** Ключи/настройки vision-провайдеров (Gemini/Groq) — из env или моков. */
+  vision?: VisionProviders | undefined;
 }
 
 async function sha256Hex(s: string): Promise<string> {
@@ -593,6 +600,12 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
   deps = { ...deps, telegram: tgWithKeyboardMigration(repo, deps.telegram) };
   const tg = deps.telegram;
   const profile = await repo.getProfile();
+  // Фото имеет приоритет над текстовой маршрутизацией (подпись игнорируется);
+  // ждущие текстовые шаги фото не кормит и состояние не чистит.
+  if (profile?.onboarded_at && msg.photoFileId) {
+    await handleVisionPhoto(msg, repo, deps, profile);
+    return;
+  }
   const text = msg.text.trim();
 
   // Активный диалог — ввод туда (кроме /cancel — см. ниже).
@@ -755,6 +768,14 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
         return;
       }
       // команда/кнопка с экрана или во время мастера — уходим к ней
+      await repo.clearConversation();
+    } else if (step === 'vs:recon') {
+      // выбор кредита для сверки скриншота: команда — уходим к ней,
+      // иной текст — не ввод, состояние (кнопки) сохраняем
+      if (!text.startsWith('/') && !MENU[text]) {
+        await tg.sendMessage(msg.chatId, TEXT.unknownCommand);
+        return;
+      }
       await repo.clearConversation();
     } else {
       await applyOnboarding(advance(conv.state!, { type: 'text', text }), msg, user, deps, step);
@@ -1074,6 +1095,13 @@ export async function handleCallback(
     if (!(step in LOAN_STEPS)) return; // чужой шаг — молча
     const ctx = await loanCtx(r, p0, deps);
     await applyLoan(advanceLoan(st as LoanState, { type: 'callback', data: cb.data }, ctx), msg, r, deps, step);
+    return;
+  }
+  // vs:* — сверка остатка со скриншота (vision, шаг 7): живёт только пока
+  // активен шаг vs:recon; сумма — в conversation_state, не в callback.
+  if (cb.data.startsWith('vs:')) {
+    if (!p0?.onboarded_at || !conv) return;
+    await handleVsCallback(cb.data, msg, r, deps, conv.state!, p0);
     return;
   }
   const input: ObInput = { type: 'callback', data: cb.data };

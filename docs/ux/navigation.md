@@ -120,6 +120,9 @@ flowchart TD
   DEBT_PREPAY -. записано .-> DEBT
   DEBT_RECON -- Отмена --> DEBT
   DEBT_RECON -. сверено .-> DEBT
+  DEBTS -. 📷 скриншот банка: «какой кредит?» .-> VIS_RECON["📷 Сверить остаток? (подтверждение)"]
+  VIS_RECON -- Отмена --> DEBTS
+  VIS_RECON -. сверено .-> DEBT
   DEBT_EDIT -- Назад --> DEBT
   DEBT_EDIT --> DEBT_EDIT_RATE["📉 Новая ставка"]
   DEBT_EDIT --> DEBT_EDIT_PAYMENT["💰 Новый платёж"]
@@ -242,6 +245,7 @@ flowchart TD
 | DEBT_PREPAY_ASK | prompt | 3 | DEBT | `[✖ Отмена]` → DEBT; сумма → DEBT_PREPAY |
 | DEBT_PREPAY | confirm | 3 | DEBT | `[📉 Платёж↓] [⏳ Срок↓]` — выбор режима; `[✖ Отмена]` → DEBT; записано → DEBT |
 | DEBT_RECON | prompt | 3 | DEBT | `[✖ Отмена]` → DEBT; сверено → DEBT |
+| VIS_RECON | confirm | 2 | DEBTS | `[✖ Отмена]` → DEBTS; вход — кнопка `vs:rec:<id>` на выборе кредита после 📷-скриншота (сумма — в состоянии, не в callback); `[✅ Сверить]` → DEBT |
 | DEBT_EDIT | menu | 3 | DEBT | `[← Назад] [🏠 Меню]`; `[📉][💰][⏳]` |
 | DEBT_EDIT_RATE | prompt | 4 | DEBT_EDIT | `[✖ Отмена]` → DEBT_EDIT; сохранено → DEBT |
 | DEBT_EDIT_PAYMENT | prompt | 4 | DEBT_EDIT | `[✖ Отмена]` → DEBT_EDIT; сохранено → DEBT |

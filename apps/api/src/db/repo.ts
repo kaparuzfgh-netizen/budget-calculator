@@ -31,6 +31,8 @@ export interface ProfileRow {
   onboarded_at: string | null;
   reminders_weekly: number;
   reminders_payments: number;
+  /** Согласие на отправку скриншотов во внешний vision-провайдер (миграция 0012). */
+  vision_enabled: number;
 }
 
 export interface CommitmentRow {
@@ -161,7 +163,7 @@ export function scoped(db: Env['DB'], userId: number) {
       return db.prepare('SELECT * FROM profiles WHERE user_id = ?').bind(userId).first<ProfileRow>();
     },
     upsertProfile(
-      p: Omit<ProfileRow, 'user_id' | 'reminders_weekly' | 'reminders_payments'> & {
+      p: Omit<ProfileRow, 'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled'> & {
         reminders_weekly?: number;
         reminders_payments?: number;
       },
@@ -452,6 +454,7 @@ export function scoped(db: Env['DB'], userId: number) {
       timezone?: string;
       reminders_weekly?: number;
       reminders_payments?: number;
+      vision_enabled?: number;
     }) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string)[] = [];
@@ -464,6 +467,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'timezone',
         'reminders_weekly',
         'reminders_payments',
+        'vision_enabled',
       ] as const;
       for (const f of FIELDS) {
         if (patch[f] !== undefined) {

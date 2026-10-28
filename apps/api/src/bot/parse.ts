@@ -94,6 +94,11 @@ const CCY_ALIAS: Record<string, string> = {
   франка: 'CHF',
   франков: 'CHF',
 };
+/**
+ * Поддерживаемые ISO-коды валют — значения таблицы алиасов.
+ * Vision-санитайзинг валидирует код из ответа модели по этому набору.
+ */
+export const SUPPORTED_CCYS = new Set(Object.values(CCY_ALIAS));
 const CCY_WORD = '[A-Za-zА-Яа-яЁё]{1,15}|[$€₽£¥₸₴₾֏₼₺]';
 
 export interface ParsedAmount {

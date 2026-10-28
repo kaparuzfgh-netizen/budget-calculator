@@ -132,7 +132,7 @@ async function onboarded(tgId: number, withCommit = true) {
 }
 /** whitelist: зарегистрированные пространства callback_data */
 const CB_OK =
-  /^(nv:(home|back:[A-Z_]+|go:[A-Z_]+)|pf:[a-z0-9:/_-]*|in:del:\d+$|in:del:(yes|no)$|inc:(add|list)$|ex:[a-z]+:\d+$|ex:(list|dyes)$|dbt:[a-z0-9:]+|ln:[a-z0-9:]+|ob:[a-z:]+)/i;
+  /^(nv:(home|back:[A-Z_]+|go:[A-Z_]+)|pf:[a-z0-9:/_-]*|in:del:\d+$|in:del:(yes|no)$|inc:(add|list)$|ex:[a-z]+:\d+$|ex:(list|dyes)$|dbt:[a-z0-9:]+|ln:[a-z0-9:]+|vs:[a-z0-9:]+|ob:[a-z:]+)/i;
 function assertNavRow(expected: string[], actualLast: string[], screen: string) {
   expect(actualLast, `${screen}: нав-ряд ${JSON.stringify(actualLast)}`).toEqual(expected);
 }
@@ -179,6 +179,7 @@ function screenOf(): string {
   if (t.includes('ЧДП по')) return 'DEBT_PREPAY_ASK';
   if (t.includes('Платёж по')) return 'DEBT_PAY';
   if (t.includes('выписке банка')) return 'DEBT_RECON';
+  if (t.includes('Сверить «')) return 'VIS_RECON';
   if (cbs.includes('dbt:ed:rate')) return 'DEBT_EDIT';
   if (t.includes('Новая ставка')) return 'DEBT_EDIT_RATE';
   if (t.includes('Новый платёж за период')) return 'DEBT_EDIT_PAYMENT';
@@ -554,6 +555,19 @@ describe('контракт навигации (walk)', () => {
     expectNav('DEBT_DEL');
     await cb(tgId, 'nv:back:DEBT'); // Отмена → карточка
     expect(screenOf()).toBe('DEBT');
+    // vision-сверка (шаг 7): фото → «какой кредит?» → VIS_RECON → сверено → DEBT
+    await scoped(env.DB, uid).setConversation('vs:recon', JSON.stringify({ amount_minor: 98765400 }));
+    await cb(tgId, `vs:rec:${did}`);
+    expect(screenOf()).toBe('VIS_RECON');
+    expectNav('VIS_RECON');
+    await cb(tgId, 'nv:back:DEBTS'); // ✖ Отмена → список кредитов
+    expect(screenOf()).toBe('DEBTS');
+    // снова подтверждение и сверка → reconcile-событие, карточка DEBT
+    await scoped(env.DB, uid).setConversation('vs:recon', JSON.stringify({ amount_minor: 98765400 }));
+    await cb(tgId, `vs:rec:${did}`);
+    await cb(tgId, `vs:reconok:${did}`);
+    expect(screenOf()).toBe('DEBT');
+    expectNav('DEBT');
     // biweekly-мастер: freq → EPOCH-кнопка «Сегодня»
     await cb(tgId, 'nv:back:DEBTS');
     await cb(tgId, 'dbt:add');

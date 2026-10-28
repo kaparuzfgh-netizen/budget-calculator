@@ -8,3 +8,9 @@ TELEGRAM_WEBHOOK_SECRET=dev-webhook-secret-change-me
 JWT_SECRET=dev-jwt-secret-change-me
 # Числовой Telegram ID владельца (узнать: написать боту /id). Можно оставить пустым.
 OWNER_TELEGRAM_ID=
+# Vision (шаг 7): распознавание скриншотов банка. Основной провайдер — Gemini
+# (aistudio.google.com, free tier), резерв — Groq (console.groq.com).
+# Задайте хотя бы один, иначе бот отвечает «распознавание не настроено».
+# GEMINI_API_KEY=AIza...
+# GROQ_API_KEY=gsk_...
+# GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
