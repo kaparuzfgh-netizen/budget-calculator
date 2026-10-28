@@ -13,8 +13,6 @@ const screenSchema = z.object({
   parent: z.string().nullable(),
   nav: z.enum(['reply', 'home', 'back_home', 'cancel', 'confirm']),
   altParent: z.string().optional(),
-  /** Экран имеет внешнюю web_app-кнопку (📱 Приложение) — вне графа переходов. */
-  external: z.boolean().optional(),
 });
 const registrySchema = z.object({
   screens: z.array(screenSchema),

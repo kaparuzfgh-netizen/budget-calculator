@@ -71,6 +71,19 @@ export function App({ api, name, onFatal }: { api: Api; name: string | null; onF
     flash: setFlash,
   };
 
+  // Нативная «Назад» Telegram дублирует TopBar на вложенных экранах;
+  // без неё кнопка/свайп назад закрывали бы всё приложение.
+  useEffect(() => {
+    const bb = window.Telegram?.WebApp?.BackButton;
+    if (!bb) return;
+    if (stack.length > 1) {
+      bb.onClick(nav.back);
+      bb.show();
+      return () => bb.offClick(nav.back);
+    }
+    bb.hide();
+  }, [stack.length]);
+
   const top = stack[stack.length - 1]!;
   const props = { api, nav, onFatal };
   let screen;

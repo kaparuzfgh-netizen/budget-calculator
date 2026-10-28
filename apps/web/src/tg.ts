@@ -11,6 +11,13 @@ export interface TelegramWebApp {
   expand(): void;
   setHeaderColor?(color: string): void;
   setBackgroundColor?(color: string): void;
+  /** Системная кнопка «Назад» Telegram (Bot API ≥ 6.1). */
+  BackButton?: {
+    show(): void;
+    hide(): void;
+    onClick(cb: () => void): void;
+    offClick(cb: () => void): void;
+  };
 }
 
 declare global {
