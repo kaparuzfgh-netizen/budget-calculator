@@ -40,6 +40,7 @@ import {
 /** Секреты/настройки vision-провайдеров: из env (прод) или deps (тесты). */
 export interface VisionProviders {
   geminiKey?: string | undefined;
+  geminiModel?: string | undefined;
   groqKey?: string | undefined;
   groqModel?: string | undefined;
   fetchImpl?: typeof fetch | undefined;
@@ -109,6 +110,7 @@ export async function handleVisionPhoto(
     }
     const parsed = await parseScreenshot(toBase64(bytes), msg.photoMime || 'image/jpeg', {
       geminiKey: v.geminiKey,
+      geminiModel: v.geminiModel,
       groqKey: v.groqKey,
       groqModel: v.groqModel,
       fallbackCcy: profile.living_currency,

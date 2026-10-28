@@ -7,14 +7,18 @@
 import { VisionError, type VisionResult } from './types';
 import { sanitizeVision, VISION_SCHEMA } from './parse';
 
-const GEMINI_MODEL = 'gemini-2.5-flash'; // актуальная бесплатная flash-модель AI Studio (как в v1)
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
+/** Дефолт — flash-lite GA (июль 2026): самый дешёвый/бесплатный класс;
+ *  переопределяется env GEMINI_MODEL (напр., gemini-3.8-flash). */
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const VISION_TIMEOUT_MS = 20_000;
 
 export interface GeminiOpts {
   key: string;
   prompt: string;
   fallbackCcy: string;
+  /** Модель без префикса 'models/' (env GEMINI_MODEL). */
+  model?: string | undefined;
   fetchImpl?: typeof fetch | undefined;
 }
 
@@ -38,7 +42,7 @@ export async function parseWithGemini(b64: string, mime: string, opts: GeminiOpt
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await f(`${GEMINI_URL}?key=${opts.key}`, {
+      const res = await f(`${GEMINI_URL}${opts.model ?? DEFAULT_MODEL}:generateContent?key=${opts.key}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

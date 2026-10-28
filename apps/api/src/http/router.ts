@@ -209,6 +209,7 @@ export function createRouter(deps: RouterDeps = {}) {
     // vision-провайдеры: из deps (тесты) или из env-секретов (шаг 7)
     const vision: import('../services/vision').VisionProviders = deps.vision ?? {
       geminiKey: c.env.GEMINI_API_KEY,
+      geminiModel: c.env.GEMINI_MODEL,
       groqKey: c.env.GROQ_API_KEY,
       groqModel: c.env.GROQ_MODEL,
     };

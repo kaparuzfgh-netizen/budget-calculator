@@ -398,7 +398,9 @@ Gemini → Groq, `sanitizeVision`, `toBase64` чанками 32 КБ); `src/bot/
 по умолчанию 0). Тумблер — в ⚙️ Профиль → 🔔 Напоминания (`pf:rem:vision`).
 При выключенном флаге фото НЕ уходит провайдеру — бот отвечает подсказкой.
 
-**Провайдеры.** Основной — Gemini 2.5 Flash (`generateContent`, тело как в v1:
+**Провайдеры.** Основной — Gemini, `GEMINI_MODEL` (по умолчанию
+`gemini-3.5-flash-lite` — GA-класс flash-lite; любая свежая flash-модель
+работает, `generateContent`, тело как в v1:
 `inline_data`/`mime_type`/`response_schema` snake_case, 1 ретрай на 429/5xx).
 Резерв — Groq (`chat/completions`, OpenAI-совместимый, `GROQ_MODEL`, по умолчанию
 `meta-llama/llama-4-scout-17b-16e-instruct`). Ошибки — `VisionError`: провайдер +

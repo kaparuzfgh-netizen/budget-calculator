@@ -15,6 +15,8 @@ export { parseWithGroq } from './groq';
 
 export interface VisionCallOpts {
   geminiKey?: string | undefined;
+  /** Модель Gemini (GEMINI_MODEL); по умолчанию gemini-3.5-flash-lite. */
+  geminiModel?: string | undefined;
   groqKey?: string | undefined;
   /** Модель Groq (GROQ_MODEL); по умолчанию llama-4-scout — как в v1 CONFIG. */
   groqModel?: string | undefined;
@@ -38,7 +40,7 @@ export async function parseScreenshot(b64: string, mime: string, opts: VisionCal
   const common = { prompt, fallbackCcy: opts.fallbackCcy, fetchImpl: opts.fetchImpl };
   if (opts.geminiKey) {
     try {
-      return await parseWithGemini(b64, mime, { key: opts.geminiKey, ...common });
+      return await parseWithGemini(b64, mime, { key: opts.geminiKey, model: opts.geminiModel, ...common });
     } catch (e) {
       errors.push(detail(e, 'gemini'));
     }
