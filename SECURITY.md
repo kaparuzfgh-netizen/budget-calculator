@@ -24,6 +24,20 @@
 | Внешние вызовы | данные третьим сторонам | Только `api.telegram.org`, `api.frankfurter.dev` (курсы, без ключа), `generativelanguage.googleapis.com`, `api.groq.com` (vision, по согласию); таймаут `AbortSignal.timeout(8s)` (vision — 20s) |
 | Mini App (XSS/кликджекинг) | внедрение скриптов, фрейминг | CSP: `default-src 'self'; script-src 'self' https://telegram.org; connect-src 'self'; frame-ancestors` — только `*.telegram.org`; `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` на `/api/*` и `/telegram/*` |
 
+## Шифрование данных at rest (вариант A)
+
+Чувствительные поля в D1 (суммы, названия платежей/долгов, контрагенты, заметки,
+JSON состояния диалога) хранятся шифртекстом `enc1:…`: AES-GCM-256, per-user ключ —
+HKDF-SHA256 от секрета `DATA_KEY` (salt 'budget-companion/data/v1', info 'user:<id>'),
+AAD '<table>.<col>:<userId>' (src/db/crypto.ts). Шифрование/дешифровка — только в
+`repo.ts`; сырой D1-дамп/консоль/бэкап/Time Travel-экспорт без `DATA_KEY` бесполезен.
+
+**Не защищает** от владельца секрета (Cloudflare-доступ = DATA_KEY), скомпрометированного
+кода воркера и самого Telegram. Метаданные остаются plaintext: даты, валюты, id,
+флаги, виды событий, счётчики — по ним видна активность, но не суммы/имена.
+D1 Time Travel хранит до-бэкфилл plaintext до 30 дней. Потеря `DATA_KEY` =
+необратимая потеря данных; ротация не реализована (префикс `enc1:` резервирует версию).
+
 ## Секреты и git
 
 - Прод — только `wrangler secret put`: `TELEGRAM_BOT_TOKEN`,

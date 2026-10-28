@@ -123,10 +123,10 @@ async function main() {
 [2] Токен @BotFather (скрытый ввод или env TELEGRAM_BOT_TOKEN) → getMe
 [3] TELEGRAM_BOT_USERNAME → wrangler.toml [vars]
 [4] wrangler d1 migrations apply DB --remote + wrangler deploy${SKIP_DEPLOY ? ' (пропущено)' : ''}
-[5] Секреты: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET (новый каждый раз), JWT_SECRET${ROTATE ? ' (перегенерация)' : ' (если отсутствует)'}
+[5] Секреты: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET (новый каждый раз), JWT_SECRET${ROTATE ? ' (перегенерация)' : ' (если отсутствует)'}, DATA_KEY (если отсутствует; --rotate НЕ трогает)
 [6] Поиск владельца: deleteWebhook → getUpdates → подтверждение → OWNER_TELEGRAM_ID
 [7] setWebhook (secret_token, allowed_updates=["message"]) → getWebhookInfo
-[8] GET /health → сводка. Секреты нигде не печатаются и не сохраняются.`);
+[8] GET /health → сводка. Секреты не печатаются и не сохраняются (исключение — новый DATA_KEY: показывается один раз для бэкапа).`);
     process.exit(0);
   }
 
@@ -202,6 +202,16 @@ async function main() {
     p(ROTATE ? '   ✓ JWT_SECRET перегенерирован (--rotate)' : '   ✓ JWT_SECRET создан');
   } else {
     p('   ⊘ JWT_SECRET уже задан — пропущено');
+  }
+  // DATA_KEY — ключ шифрования данных; НИКОГДА не перегенерируем (потеря = данные не расшифровать).
+  if (!existing.has('DATA_KEY')) {
+    const dk = crypto.randomBytes(32).toString('base64');
+    secretPut('DATA_KEY', dk);
+    p('   ✓ DATA_KEY создан');
+    p('   ⚠️⚠️  DATA_KEY (сохраните ОДИН РАЗ в менеджер паролей — потеря = данные не расшифровать):');
+    p('       ' + dk);
+  } else {
+    p('   ⊘ DATA_KEY уже задан — пропущено (не перегенерируем никогда)');
   }
 
   // ── 6. Владелец ──
@@ -292,6 +302,7 @@ async function main() {
    OWNER_TG_ID    ${existing.has('OWNER_TELEGRAM_ID') ? 'оставлен' : 'задан'}
    WEBHOOK_SECRET обновлён (рандом, только в Cloudflare)
    JWT_SECRET     ${!existing.has('JWT_SECRET') || ROTATE ? 'обновлён' : 'оставлен'}
+   DATA_KEY       ${!existing.has('DATA_KEY') ? 'создан (см. выше — СОХРАНИТЬ!)' : 'оставлен'}
 
 Повторный запуск безопасен: шаги идемпотентны, webhook-секрет при этом обновляется.`);
 }

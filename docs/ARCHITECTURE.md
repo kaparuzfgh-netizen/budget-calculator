@@ -219,3 +219,13 @@ flowchart LR
 | Модель угроз и политика секретов | [../SECURITY.md](../SECURITY.md) — раздел v2 |
 | Решение о платформе и план миграции | [adr/0001-platform-and-architecture.md](adr/0001-platform-and-architecture.md) |
 | Аудит v2 (2026-10-28) | [../AUDIT_REPORT.md](../AUDIT_REPORT.md) |
+
+## Шифрование данных at rest
+
+`src/db/crypto.ts`: HKDF-SHA256(`DATA_KEY`, salt 'budget-companion/data/v1',
+info 'user:<id>') → AES-GCM-256, формат `enc1:<b64url(iv||ct+tag)>`, AAD
+`<table>.<col>:<userId>`. Спек зашифрованных колонок — `FIELDS` (суммы, имена,
+заметки, `conversation_state.data`); остальное plaintext (даты, валюты, id, флаги —
+нужны для WHERE/CAS). `repo.ts` шифрует бинды и дешифрует строки прозрачно для
+вызывающих; cron (`services/encryption.ts` → `encryptBackfill`) дошифровывает
+legacy-строки идемпотентными CAS-UPDATE'ами (≤200/таблицу/тик).

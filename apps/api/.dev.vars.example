@@ -15,3 +15,9 @@ OWNER_TELEGRAM_ID=
 # GEMINI_MODEL=gemini-3.5-flash-lite
 # GROQ_API_KEY=gsk_...
 # GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+
+# DATA_KEY — мастер-ключ шифрования данных в D1 (base64, ровно 32 байта).
+# Сгенерировать: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+# ⚠️ ПОТЕРЯ = необратимая потеря данных: без ключа шифртекст не расшифровать.
+# Без него /telegram/* и /api/tma/* отвечают 503 (fail-closed).
+DATA_KEY=dev-data-key-change-me-32bytes-b64

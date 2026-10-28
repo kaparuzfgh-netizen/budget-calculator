@@ -97,3 +97,9 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     ISO-неделя через `claimReminder('fx', …)`); флаг
     `profiles.fx_alerts_enabled` (DEFAULT 1). Журнал обменов — `exchanges`,
     rate/market_rate в единицах to за 1 from.
+
+19. **Шифрование at rest:** чувствительные текстовые/денежные колонки
+    пользовательских таблиц — шифртекст `enc1:` (per-user AES-GCM, src/db/crypto.ts,
+    спек `FIELDS`). Работа с ними — только через хелперы crypto.ts внутри repo.ts;
+    сырые запросы по ним не писать и в WHERE не использовать. Новая пользовательская
+    текстовая/amount-колонка ОБЯЗАТЕЛЬНО добавляется в `FIELDS`.

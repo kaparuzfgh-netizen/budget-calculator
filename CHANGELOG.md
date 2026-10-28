@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Добавлено
+- **Шифрование данных at rest (вариант A):** per-user AES-GCM ключи из `DATA_KEY`
+  (HKDF-SHA256), формат `enc1:` + AAD `<table>.<col>:<userId>`. Покрыты суммы,
+  названия/контрагенты/заметки и `conversation_state.data` во всех пользовательских
+  таблицах; чтение/запись — только через `repo.ts` (`src/db/crypto.ts`), толерантное
+  чтение legacy-plaintext; cron-тик выполняет идемпотентный CAS-бэкфилл.
+  Fail-closed: без валидного `DATA_KEY` /telegram/* и /api/tma/* → 503.
+  Операционно: `setup.mjs` генерирует ключ один раз (не ротирует), `release.mjs`
+  требует его наличие до деплоя.
+
 ### Удалено
 - **Шаг 9: legacy-стек v1 полностью удалён** — миграция завершена
   ([ADR-0001](docs/adr/0001-platform-and-architecture.md)). Убраны:

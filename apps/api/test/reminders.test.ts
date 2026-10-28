@@ -158,8 +158,9 @@ describe('runReminders — платежи', () => {
       ],
     });
     // «Связь» и «Страховка» заведены после своих октябрьских сроков — автопроводок не будет
-    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-05 00:00:00' WHERE user_id = ? AND name = 'Связь'").bind(uid20).run();
-    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-20 00:00:00' WHERE user_id = ? AND name = 'Страховка'").bind(uid20).run();
+    // name зашифровано — фильтруем по plaintext due_day (1 и 15 уникальны здесь)
+    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-05 00:00:00' WHERE user_id = ? AND due_day = 1").bind(uid20).run();
+    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-20 00:00:00' WHERE user_id = ? AND due_day = 15").bind(uid20).run();
     await run(new Date(Date.UTC(2026, 9, 29, 10, 0))); // 29 окт: due 31 → за 2 дня
     expect(sent).toHaveLength(1);
     expect(sent[0]!.text).toContain('Аренда');

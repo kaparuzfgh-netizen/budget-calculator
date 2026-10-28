@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Env } from '../env';
 import { verifyWebhookSecret } from './security';
 import { accessRepo, scoped, type UserRow } from '../db/repo';
+import { configureDataKey, hasDataKey } from '../db/crypto';
 import { handleCallback, handleMessage } from '../services/access';
 import { createFrankfurter } from '../fx/frankfurter';
 import { FxUnavailable } from '../fx/provider';
@@ -76,6 +77,23 @@ interface TmaVariables {
 /** HTTP-роутер воркера. Маршруты добавляются шагами миграции (ADR-0001). */
 export function createRouter(deps: RouterDeps = {}) {
   const app = new Hono<{ Bindings: Env; Variables: TmaVariables }>();
+
+  // DATA_KEY (шифрование at rest): fail-closed как webhook-секрет — без ключа
+  // контуры данных (вебхук, TMA API) не работают, plaintext не пишется никогда.
+  app.use('*', async (c, next) => {
+    try {
+      configureDataKey(c.env.DATA_KEY);
+    } catch {
+      console.error('data key: невалидный DATA_KEY — отказ (fail-closed)');
+    }
+    if (!hasDataKey()) {
+      const p = new URL(c.req.url).pathname;
+      if (p.startsWith('/telegram/') || p.startsWith('/api/tma/')) {
+        return c.json({ ok: false, error: 'data key not configured' }, 503);
+      }
+    }
+    return next();
+  });
 
   // Заголовки безопасности на все ответы; CSP — на HTML/SPA (Mini App
   // открывается во фрейме Telegram → X-Frame-Options НЕ ставим).

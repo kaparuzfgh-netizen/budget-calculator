@@ -40,4 +40,4 @@ crons = ["0 * * * *"]
 # Задаются через `wrangler secret put <NAME>` (и в CI через
 # CLOUDFLARE_* секреты GitHub):
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, JWT_SECRET,
-#   OWNER_TELEGRAM_ID
+#   OWNER_TELEGRAM_ID, DATA_KEY

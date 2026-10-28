@@ -22,12 +22,16 @@ if (!fs.existsSync(assetsIndex)) {
 
 // Тесты исполняются в workerd с локальной D1 (miniflare); миграции — настоящие .sql.
 export default defineConfig(async () => ({
-  test: { testTimeout: 20_000 }, // workerd cold-start первого изолята медленнее 5с
+  test: { testTimeout: 20_000, setupFiles: ['./test/setup.ts'] }, // workerd cold-start первого изолята медленнее 5с
   plugins: [
     cloudflareTest({
       wrangler: { configPath: './wrangler.toml' },
       miniflare: {
-        bindings: { TEST_MIGRATIONS: await readD1Migrations(migrationsDir) },
+        bindings: {
+          TEST_MIGRATIONS: await readD1Migrations(migrationsDir),
+          // Тестовый мастер-ключ шифрования (32 нулевых байта base64).
+          DATA_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        },
       },
     }),
   ],

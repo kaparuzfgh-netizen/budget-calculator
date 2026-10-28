@@ -71,3 +71,11 @@ CI/CD: push в `main` → workflow **Deploy v2** (нужны секреты ре
 | Бот молчит после деплоя | `npm run webhook:info` — webhook должен указывать на `/telegram` и иметь secret-token; мастер ставит сам |
 | Mini App 401 / «not onboarded» | `/start` боту; JWT живёт 12ч — просто переоткройте Mini App |
 | vision «не настроено» | не задан `GEMINI_API_KEY`/`GROQ_API_KEY` (см. выше) или выключено в профиле |
+
+## DATA_KEY (шифрование данных)
+
+`npm run setup` генерирует `DATA_KEY` (base64, 32 байта) при первом запуске и
+печатает его ОДИН РАЗ — сохраните в менеджере паролей. Потеря ключа = данные в D1
+необратимо не расшифровать. Вручную: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`,
+затем `npm run wrangler -- secret put DATA_KEY`. Локально — в `apps/api/.dev.vars`.
+Без ключа /telegram/* и /api/tma/* отвечают 503 (fail-closed).

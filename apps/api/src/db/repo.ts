@@ -10,6 +10,7 @@
  * глобальные, но доступ к ним тоже только отсюда (функции accessRepo(db)).
  */
 import type { Env } from '../env';
+import { FIELDS, decRow, decRows, decStr, encNum, encStr } from './crypto';
 
 export interface ConsentRow {
   kind: string;
@@ -159,6 +160,14 @@ export interface ExchangeRow {
 
 /** Репозиторий, привязанный к конкретному пользователю. */
 export function scoped(db: Env['DB'], userId: number) {
+  /** Шифрование поля по FIELDS-спеку; колонки вне спека — plaintext. */
+  const en = (table: string, col: string, v: unknown): Promise<string | number | null> => {
+    const spec = FIELDS[table]?.[col];
+    if (!spec || v === undefined) return Promise.resolve((v ?? null) as string | number | null);
+    return spec === 'num'
+      ? encNum(userId, table, col, v as number)
+      : encStr(userId, table, col, v as string);
+  };
   return {
     /** Согласия пользователя (vision/экспорт и т.п.). */
     listConsents() {
@@ -182,9 +191,9 @@ export function scoped(db: Env['DB'], userId: number) {
 
     // ── профиль ──
     getProfile() {
-      return db.prepare('SELECT * FROM profiles WHERE user_id = ?').bind(userId).first<ProfileRow>();
+      return db.prepare('SELECT * FROM profiles WHERE user_id = ?').bind(userId).first<ProfileRow>().then((r) => decRow('profiles', r));
     },
-    upsertProfile(
+    async upsertProfile(
       p: Omit<
         ProfileRow,
         'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled'
@@ -212,9 +221,9 @@ export function scoped(db: Env['DB'], userId: number) {
           p.income_currency,
           p.living_currency,
           p.timezone,
-          p.income_minor,
-          p.living_cap_minor,
-          p.weekly_budget_minor,
+          await en('profiles', 'income_minor', p.income_minor),
+          await en('profiles', 'living_cap_minor', p.living_cap_minor),
+          await en('profiles', 'weekly_budget_minor', p.weekly_budget_minor),
           p.bonus_prepay_share,
           p.bonus_dca_share,
           p.onboarded_at,
@@ -229,23 +238,23 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare(`SELECT * FROM commitments WHERE user_id = ?${activeOnly ? ' AND active = 1' : ''} ORDER BY id`)
         .bind(userId)
-        .all<CommitmentRow>();
+        .all<CommitmentRow>().then((r) => decRows('commitments', r));
     },
     /** Один платёж — строго свой (WHERE id AND user_id). */
     getCommitment(id: number) {
       return db
         .prepare('SELECT * FROM commitments WHERE id = ? AND user_id = ?')
         .bind(id, userId)
-        .first<CommitmentRow>();
+        .first<CommitmentRow>().then((r) => decRow('commitments', r));
     },
-    addCommitment(c: { name: string; amount_minor: number; currency: string; due_day: number | null }) {
+    async addCommitment(c: { name: string; amount_minor: number; currency: string; due_day: number | null }) {
       return db
         .prepare('INSERT INTO commitments (user_id, name, amount_minor, currency, due_day) VALUES (?, ?, ?, ?, ?)')
-        .bind(userId, c.name, c.amount_minor, c.currency, c.due_day)
+        .bind(userId, await en('commitments', 'name', c.name), await en('commitments', 'amount_minor', c.amount_minor), c.currency, c.due_day)
         .run();
     },
     /** Точечные правки — все WHERE id=? AND user_id=? (чужие id молча игнорируются). */
-    patchCommitment(
+    async patchCommitment(
       id: number,
       patch: { amount_minor?: number; currency?: string; due_day?: number | null; active?: number; name?: string },
     ) {
@@ -253,11 +262,11 @@ export function scoped(db: Env['DB'], userId: number) {
       const binds: (number | string | null)[] = [];
       if (patch.name !== undefined) {
         sets.push('name = ?');
-        binds.push(patch.name);
+        binds.push(await en('commitments', 'name', patch.name));
       }
       if (patch.amount_minor !== undefined) {
         sets.push('amount_minor = ?');
-        binds.push(patch.amount_minor);
+        binds.push(await en('commitments', 'amount_minor', patch.amount_minor));
       }
       if (patch.currency !== undefined) {
         sets.push('currency = ?');
@@ -300,18 +309,18 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM commitment_payments WHERE user_id = ? AND commitment_id = ? ORDER BY paid_on, id')
         .bind(userId, commitmentId)
-        .all<CommitmentPaymentRow>();
+        .all<CommitmentPaymentRow>().then((r) => decRows('commitment_payments', r));
     },
     /** Все оплаты юзера с paid_on >= isoDate («оплачено в этом месяце» без N запросов). */
     listCommitmentPaymentsSince(isoDate: string) {
       return db
         .prepare('SELECT * FROM commitment_payments WHERE user_id = ? AND paid_on >= ? ORDER BY paid_on, id')
         .bind(userId, isoDate)
-        .all<CommitmentPaymentRow>();
+        .all<CommitmentPaymentRow>().then((r) => decRows('commitment_payments', r));
     },
     /** INSERT OR IGNORE — идемпотентность по (user_id, source_key);
      *  commitment_id пишется только если платёж принадлежит юзеру (EXISTS). */
-    addCommitmentPayment(e: {
+    async addCommitmentPayment(e: {
       commitment_id: number;
       amount_minor: number;
       currency: string;
@@ -328,7 +337,7 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(
           userId,
           e.commitment_id,
-          e.amount_minor,
+          await en('commitment_payments', 'amount_minor', e.amount_minor),
           e.currency,
           e.paid_on,
           e.source,
@@ -342,22 +351,22 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM commitment_payments WHERE user_id = ? AND source_key = ?')
         .bind(userId, sourceKey)
-        .first<CommitmentPaymentRow>();
+        .first<CommitmentPaymentRow>().then((r) => decRow('commitment_payments', r));
     },
     getCommitmentPayment(id: number) {
       return db
         .prepare('SELECT * FROM commitment_payments WHERE id = ? AND user_id = ?')
         .bind(id, userId)
-        .first<CommitmentPaymentRow>();
+        .first<CommitmentPaymentRow>().then((r) => decRow('commitment_payments', r));
     },
     /** Точечная правка оплаты — только своей записи (чужие id молча). */
-    updateCommitmentPayment(id: number, patch: { amount_minor?: number; paid_on?: string }) {
+    async updateCommitmentPayment(id: number, patch: { amount_minor?: number; paid_on?: string }) {
       const sets: string[] = [];
-      const binds: (number | string)[] = [];
+      const binds: (number | string | null)[] = [];
       for (const k of ['amount_minor', 'paid_on'] as const)
         if (patch[k] !== undefined) {
           sets.push(`${k} = ?`);
-          binds.push(patch[k]!);
+          binds.push(await en('commitment_payments', k, patch[k]));
         }
       if (!sets.length) return Promise.resolve({ success: true, meta: { changes: 0 } } as D1Result);
       binds.push(id, userId);
@@ -371,7 +380,7 @@ export function scoped(db: Env['DB'], userId: number) {
     },
 
     // ── факт дохода по месяцам ──
-    addIncomeEntry(e: {
+    async addIncomeEntry(e: {
       month: string;
       amount_minor: number;
       currency: string;
@@ -382,20 +391,20 @@ export function scoped(db: Env['DB'], userId: number) {
         .prepare(
           'INSERT OR IGNORE INTO income_entries (user_id, month, amount_minor, currency, note, source_key) VALUES (?, ?, ?, ?, ?, ?)',
         )
-        .bind(userId, e.month, e.amount_minor, e.currency, e.note, e.source_key)
+        .bind(userId, e.month, await en('income_entries', 'amount_minor', e.amount_minor), e.currency, await en('income_entries', 'note', e.note), e.source_key)
         .run();
     },
     listIncomeEntries(month: string) {
       return db
         .prepare('SELECT * FROM income_entries WHERE user_id = ? AND month = ? ORDER BY id')
         .bind(userId, month)
-        .all<IncomeEntryRow>();
+        .all<IncomeEntryRow>().then((r) => decRows('income_entries', r));
     },
     getIncomeEntry(id: number) {
       return db
         .prepare('SELECT * FROM income_entries WHERE id = ? AND user_id = ?')
         .bind(id, userId)
-        .first<IncomeEntryRow>();
+        .first<IncomeEntryRow>().then((r) => decRow('income_entries', r));
     },
     deleteIncomeEntry(id: number) {
       return db.prepare('DELETE FROM income_entries WHERE id = ? AND user_id = ?').bind(id, userId).run();
@@ -420,13 +429,13 @@ export function scoped(db: Env['DB'], userId: number) {
         await Promise.all([
           this.getProfile(),
           this.listCommitments(false),
-          db.prepare('SELECT * FROM commitment_payments WHERE user_id = ? ORDER BY id').bind(userId).all<CommitmentPaymentRow>(),
+          db.prepare('SELECT * FROM commitment_payments WHERE user_id = ? ORDER BY id').bind(userId).all<CommitmentPaymentRow>().then((r) => decRows('commitment_payments', r)),
           this.listExpenses(),
-          db.prepare('SELECT * FROM income_entries WHERE user_id = ? ORDER BY id').bind(userId).all<IncomeEntryRow>(),
+          db.prepare('SELECT * FROM income_entries WHERE user_id = ? ORDER BY id').bind(userId).all<IncomeEntryRow>().then((r) => decRows('income_entries', r)),
           this.listDebts(false),
-          db.prepare('SELECT * FROM debt_events WHERE user_id = ? ORDER BY id').bind(userId).all<DebtEventRow>(),
+          db.prepare('SELECT * FROM debt_events WHERE user_id = ? ORDER BY id').bind(userId).all<DebtEventRow>().then((r) => decRows('debt_events', r)),
           this.listLoans(),
-          db.prepare('SELECT * FROM loan_events WHERE user_id = ? ORDER BY id').bind(userId).all<LoanEventRow>(),
+          db.prepare('SELECT * FROM loan_events WHERE user_id = ? ORDER BY id').bind(userId).all<LoanEventRow>().then((r) => decRows('loan_events', r)),
           this.listExchanges(),
         ]);
       const strip = <T extends Record<string, unknown>>(r: T) => {
@@ -473,7 +482,7 @@ export function scoped(db: Env['DB'], userId: number) {
     },
 
     /** Точечная правка профиля — whitelist полей, всегда WHERE user_id. */
-    patchProfile(patch: {
+    async patchProfile(patch: {
       income_minor?: number;
       living_cap_minor?: number;
       weekly_budget_minor?: number;
@@ -486,7 +495,7 @@ export function scoped(db: Env['DB'], userId: number) {
       fx_alerts_enabled?: number;
     }) {
       const sets: string[] = ["updated_at = datetime('now')"];
-      const binds: (number | string)[] = [];
+      const binds: (number | string | null)[] = [];
       const FIELDS = [
         'income_minor',
         'living_cap_minor',
@@ -502,7 +511,7 @@ export function scoped(db: Env['DB'], userId: number) {
       for (const f of FIELDS) {
         if (patch[f] !== undefined) {
           sets.push(`${f} = ?`);
-          binds.push(patch[f]!);
+          binds.push(await en('profiles', f, patch[f]));
         }
       }
       binds.push(userId);
@@ -513,7 +522,7 @@ export function scoped(db: Env['DB'], userId: number) {
     },
 
     // ── траты ──
-    addExpense(e: {
+    async addExpense(e: {
       spent_on: string;
       amount_minor: number;
       currency: string;
@@ -525,29 +534,29 @@ export function scoped(db: Env['DB'], userId: number) {
         .prepare(
           'INSERT OR IGNORE INTO weekly_expenses (user_id, spent_on, amount_minor, currency, note, source, source_key) VALUES (?, ?, ?, ?, ?, ?, ?)',
         )
-        .bind(userId, e.spent_on, e.amount_minor, e.currency, e.note, e.source, e.source_key)
+        .bind(userId, e.spent_on, await en('weekly_expenses', 'amount_minor', e.amount_minor), e.currency, await en('weekly_expenses', 'note', e.note), e.source, e.source_key)
         .run();
     },
     findExpenseByKey(sourceKey: string) {
-      return db.prepare('SELECT * FROM weekly_expenses WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<ExpenseRow>();
+      return db.prepare('SELECT * FROM weekly_expenses WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<ExpenseRow>().then((r) => decRow('weekly_expenses', r));
     },
     findIncomeByKey(sourceKey: string) {
-      return db.prepare('SELECT * FROM income_entries WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<IncomeEntryRow>();
+      return db.prepare('SELECT * FROM income_entries WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<IncomeEntryRow>().then((r) => decRow('income_entries', r));
     },
     getExpense(id: number) {
       return db
         .prepare('SELECT * FROM weekly_expenses WHERE id = ? AND user_id = ?')
         .bind(id, userId)
-        .first<ExpenseRow>();
+        .first<ExpenseRow>().then((r) => decRow('weekly_expenses', r));
     },
     /** Правка траты — только своей записи. */
-    patchExpense(id: number, patch: { amount_minor?: number; currency?: string; note?: string | null }) {
+    async patchExpense(id: number, patch: { amount_minor?: number; currency?: string; note?: string | null }) {
       const sets: string[] = [];
       const binds: (number | string | null)[] = [];
       for (const k of ['amount_minor', 'currency', 'note'] as const)
         if (k in patch) {
           sets.push(`${k} = ?`);
-          binds.push(patch[k] ?? null);
+          binds.push(await en('weekly_expenses', k, patch[k]));
         }
       if (!sets.length) return db.prepare('SELECT 1').run();
       return db
@@ -564,7 +573,7 @@ export function scoped(db: Env['DB'], userId: number) {
           `SELECT * FROM weekly_expenses WHERE user_id = ?${sinceIsoDate ? ' AND spent_on >= ?' : ''} ORDER BY spent_on, id`,
         )
         .bind(...(sinceIsoDate ? [userId, sinceIsoDate] : [userId]))
-        .all<ExpenseRow>();
+        .all<ExpenseRow>().then((r) => decRows('weekly_expenses', r));
     },
 
     // ── журнал обменов валют (шаг 8) ──
@@ -573,17 +582,17 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM exchanges WHERE user_id = ? ORDER BY spent_on DESC, id DESC LIMIT ?')
         .bind(userId, limit)
-        .all<ExchangeRow>();
+        .all<ExchangeRow>().then((r) => decRows('exchanges', r));
     },
     getExchange(id: number) {
-      return db.prepare('SELECT * FROM exchanges WHERE id = ? AND user_id = ?').bind(id, userId).first<ExchangeRow>();
+      return db.prepare('SELECT * FROM exchanges WHERE id = ? AND user_id = ?').bind(id, userId).first<ExchangeRow>().then((r) => decRow('exchanges', r));
     },
     /**
      * Запись обмена. rate считается здесь (to/from), INSERT OR IGNORE —
      * идемпотентность по partial UNIQUE (user_id, source_key); NULL-ключи
      * ручных повторных записей не конфликтуют (как debts/loans).
      */
-    addExchange(e: {
+    async addExchange(e: {
       from_ccy: string;
       to_ccy: string;
       amount_from_minor: number;
@@ -605,12 +614,12 @@ export function scoped(db: Env['DB'], userId: number) {
           userId,
           e.from_ccy,
           e.to_ccy,
-          e.amount_from_minor,
-          e.amount_to_minor,
-          rate,
+          await en('exchanges', 'amount_from_minor', e.amount_from_minor),
+          await en('exchanges', 'amount_to_minor', e.amount_to_minor),
+          await en('exchanges', 'rate', rate),
           e.market_rate,
           e.spent_on,
-          e.note,
+          await en('exchanges', 'note', e.note),
           e.source,
           e.source_key,
         )
@@ -620,14 +629,14 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM exchanges WHERE user_id = ? AND source_key = ?')
         .bind(userId, sourceKey)
-        .first<ExchangeRow>();
+        .first<ExchangeRow>().then((r) => decRow('exchanges', r));
     },
     /**
      * Правка обмена — только своей записи (чужие id молча).
      * При смене любой суммы вызывающий ОБЯЗАН передать пересчитанный rate
      * (to/from по новым значениям) — инвариант держится на границе repo.
      */
-    patchExchange(
+    async patchExchange(
       id: number,
       patch: {
         amount_from_minor?: number;
@@ -643,7 +652,7 @@ export function scoped(db: Env['DB'], userId: number) {
       for (const k of ['amount_from_minor', 'amount_to_minor', 'rate', 'spent_on', 'note', 'market_rate'] as const)
         if (patch[k] !== undefined) {
           sets.push(`${k} = ?`);
-          binds.push(patch[k] ?? null);
+          binds.push(await en('exchanges', k, patch[k]));
         }
       binds.push(id, userId);
       return db.prepare(`UPDATE exchanges SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
@@ -657,11 +666,11 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare(`SELECT * FROM debts WHERE user_id = ?${activeOnly ? ' AND active = 1' : ''} ORDER BY id`)
         .bind(userId)
-        .all<DebtRow>();
+        .all<DebtRow>().then((r) => decRows('debts', r));
     },
     /** Один долг — строго свой (WHERE id AND user_id). */
     getDebt(id: number) {
-      return db.prepare('SELECT * FROM debts WHERE id = ? AND user_id = ?').bind(id, userId).first<DebtRow>();
+      return db.prepare('SELECT * FROM debts WHERE id = ? AND user_id = ?').bind(id, userId).first<DebtRow>().then((r) => decRow('debts', r));
     },
     /**
      * Создание долга. source_key ('tma:<client_id>') — только REST Mini App;
@@ -669,7 +678,7 @@ export function scoped(db: Env['DB'], userId: number) {
      * INSERT OR IGNORE: при гонке повторный запрос даёт changes=0 —
      * вызывающий достаёт существующую строку через findDebtByKey.
      */
-    addDebt(d: {
+    async addDebt(d: {
       name: string;
       currency: string;
       rate: number;
@@ -688,12 +697,12 @@ export function scoped(db: Env['DB'], userId: number) {
         )
         .bind(
           userId,
-          d.name,
+          await en('debts', 'name', d.name),
           d.currency,
-          d.rate,
+          await en('debts', 'rate', d.rate),
           d.frequency,
-          d.initial_balance_minor,
-          d.initial_payment_minor,
+          await en('debts', 'initial_balance_minor', d.initial_balance_minor),
+          await en('debts', 'initial_payment_minor', d.initial_payment_minor),
           d.epoch,
           d.due_day,
           d.source_key ?? null,
@@ -701,7 +710,7 @@ export function scoped(db: Env['DB'], userId: number) {
         .run();
     },
     findDebtByKey(sourceKey: string) {
-      return db.prepare('SELECT * FROM debts WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<DebtRow>();
+      return db.prepare('SELECT * FROM debts WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<DebtRow>().then((r) => decRow('debts', r));
     },
     /** Активные долги — верхняя граница лимита (P2-2). */
     async countDebts(): Promise<number> {
@@ -712,7 +721,7 @@ export function scoped(db: Env['DB'], userId: number) {
       return r?.n ?? 0;
     },
     /** Точечные правки — все WHERE id=? AND user_id=? (чужие id молча игнорируются). */
-    patchDebt(
+    async patchDebt(
       id: number,
       patch: {
         name?: string;
@@ -727,7 +736,7 @@ export function scoped(db: Env['DB'], userId: number) {
       for (const k of ['name', 'rate', 'initial_payment_minor', 'due_day', 'active'] as const)
         if (patch[k] !== undefined) {
           sets.push(`${k} = ?`);
-          binds.push(patch[k] ?? null);
+          binds.push(await en('debts', k, patch[k]));
         }
       binds.push(id, userId);
       return db.prepare(`UPDATE debts SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
@@ -744,18 +753,18 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM debt_events WHERE user_id = ? AND debt_id = ? ORDER BY event_on, id')
         .bind(userId, debtId)
-        .all<DebtEventRow>();
+        .all<DebtEventRow>().then((r) => decRows('debt_events', r));
     },
     /** Все журналы разом — для plural-вью без N+1 (P2-2). Порядок: по долгу, дальше replay. */
     listDebtEventsAll() {
       return db
         .prepare('SELECT * FROM debt_events WHERE user_id = ? ORDER BY debt_id, event_on, id')
         .bind(userId)
-        .all<DebtEventRow>();
+        .all<DebtEventRow>().then((r) => decRows('debt_events', r));
     },
     /** INSERT OR IGNORE — идемпотентность по (user_id, source_key);
      *  debt_id пишется только если долг принадлежит юзеру (EXISTS). */
-    addDebtEvent(e: {
+    async addDebtEvent(e: {
       debt_id: number;
       kind: 'payment' | 'prepay' | 'reconcile';
       amount_minor: number;
@@ -774,7 +783,7 @@ export function scoped(db: Env['DB'], userId: number) {
           userId,
           e.debt_id,
           e.kind,
-          e.amount_minor,
+          await en('debt_events', 'amount_minor', e.amount_minor),
           e.event_on,
           e.mode ?? null,
           e.source,
@@ -788,13 +797,13 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM debt_events WHERE user_id = ? AND source_key = ?')
         .bind(userId, sourceKey)
-        .first<DebtEventRow>();
+        .first<DebtEventRow>().then((r) => decRow('debt_events', r));
     },
     getDebtEvent(id: number) {
-      return db.prepare('SELECT * FROM debt_events WHERE id = ? AND user_id = ?').bind(id, userId).first<DebtEventRow>();
+      return db.prepare('SELECT * FROM debt_events WHERE id = ? AND user_id = ?').bind(id, userId).first<DebtEventRow>().then((r) => decRow('debt_events', r));
     },
     /** Точечная правка события — реplay пересчитает состояние. Чужие id молча. */
-    updateDebtEvent(
+    async updateDebtEvent(
       id: number,
       patch: { amount_minor?: number; event_on?: string; mode?: 'reduce_payment' | 'reduce_term' | null },
     ) {
@@ -803,7 +812,7 @@ export function scoped(db: Env['DB'], userId: number) {
       for (const k of ['amount_minor', 'event_on', 'mode'] as const)
         if (patch[k] !== undefined) {
           sets.push(`${k} = ?`);
-          binds.push(patch[k] ?? null);
+          binds.push(await en('debt_events', k, patch[k]));
         }
       if (!sets.length) return Promise.resolve({ success: true, meta: { changes: 0 } } as D1Result);
       binds.push(id, userId);
@@ -819,16 +828,16 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM loans WHERE user_id = ? ORDER BY closed_at IS NOT NULL, id')
         .bind(userId)
-        .all<LoanRow>();
+        .all<LoanRow>().then((r) => decRows('loans', r));
     },
     getLoan(id: number) {
-      return db.prepare('SELECT * FROM loans WHERE id = ? AND user_id = ?').bind(id, userId).first<LoanRow>();
+      return db.prepare('SELECT * FROM loans WHERE id = ? AND user_id = ?').bind(id, userId).first<LoanRow>().then((r) => decRow('loans', r));
     },
     /**
      * Создание займа. source_key ('tma:<client_id>') — только REST Mini App
      * (см. addDebt): OR IGNORE + partial UNIQUE игнорирует NULL-ключи бота.
      */
-    addLoan(l: {
+    async addLoan(l: {
       counterparty: string;
       direction: 'owe' | 'owed';
       amount_minor: number;
@@ -842,11 +851,11 @@ export function scoped(db: Env['DB'], userId: number) {
           `INSERT OR IGNORE INTO loans (user_id, counterparty, direction, amount_minor, currency, due_on, note, source_key)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(userId, l.counterparty, l.direction, l.amount_minor, l.currency, l.due_on, l.note, l.source_key ?? null)
+        .bind(userId, await en('loans', 'counterparty', l.counterparty), l.direction, await en('loans', 'amount_minor', l.amount_minor), l.currency, l.due_on, await en('loans', 'note', l.note), l.source_key ?? null)
         .run();
     },
     findLoanByKey(sourceKey: string) {
-      return db.prepare('SELECT * FROM loans WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<LoanRow>();
+      return db.prepare('SELECT * FROM loans WHERE user_id = ? AND source_key = ?').bind(userId, sourceKey).first<LoanRow>().then((r) => decRow('loans', r));
     },
     /** Открытые займы (closed_at IS NULL) — верхняя граница лимита (P2-2). */
     async countLoans(): Promise<number> {
@@ -857,13 +866,13 @@ export function scoped(db: Env['DB'], userId: number) {
       return r?.n ?? 0;
     },
     /** Точечная правка займа — все WHERE id=? AND user_id=? (чужие id молча). */
-    patchLoan(id: number, patch: { due_on?: string | null; note?: string | null }) {
+    async patchLoan(id: number, patch: { due_on?: string | null; note?: string | null }) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string | null)[] = [];
       for (const k of ['due_on', 'note'] as const)
         if (patch[k] !== undefined) {
           sets.push(`${k} = ?`);
-          binds.push(patch[k] ?? null);
+          binds.push(await en('loans', k, patch[k]));
         }
       binds.push(id, userId);
       return db.prepare(`UPDATE loans SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
@@ -886,17 +895,17 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT * FROM loan_events WHERE user_id = ? AND loan_id = ? ORDER BY event_on, id')
         .bind(userId, loanId)
-        .all<LoanEventRow>();
+        .all<LoanEventRow>().then((r) => decRows('loan_events', r));
     },
     /** Все журналы возвратов разом — для plural-вью без N+1 (P2-2). */
     listLoanEventsAll() {
       return db
         .prepare('SELECT * FROM loan_events WHERE user_id = ? ORDER BY loan_id, event_on, id')
         .bind(userId)
-        .all<LoanEventRow>();
+        .all<LoanEventRow>().then((r) => decRows('loan_events', r));
     },
     /** loan_id пишется только если заём принадлежит юзеру (EXISTS в INSERT). */
-    addLoanEvent(e: {
+    async addLoanEvent(e: {
       loan_id: number;
       amount_minor: number;
       event_on: string;
@@ -909,26 +918,26 @@ export function scoped(db: Env['DB'], userId: number) {
            SELECT ?, ?, 'repay', ?, ?, ?, ?
            WHERE EXISTS (SELECT 1 FROM loans WHERE id = ? AND user_id = ?)`,
         )
-        .bind(userId, e.loan_id, e.amount_minor, e.event_on, e.source, e.source_key, e.loan_id, userId)
+        .bind(userId, e.loan_id, await en('loan_events', 'amount_minor', e.amount_minor), e.event_on, e.source, e.source_key, e.loan_id, userId)
         .run();
     },
     getLoanEvent(id: number) {
-      return db.prepare('SELECT * FROM loan_events WHERE id = ? AND user_id = ?').bind(id, userId).first<LoanEventRow>();
+      return db.prepare('SELECT * FROM loan_events WHERE id = ? AND user_id = ?').bind(id, userId).first<LoanEventRow>().then((r) => decRow('loan_events', r));
     },
     findLoanEventByKey(sourceKey: string) {
       return db
         .prepare('SELECT * FROM loan_events WHERE user_id = ? AND source_key = ?')
         .bind(userId, sourceKey)
-        .first<LoanEventRow>();
+        .first<LoanEventRow>().then((r) => decRow('loan_events', r));
     },
     /** Правка возврата — replay пересчитает остаток. Чужие id молча. */
-    updateLoanEvent(id: number, patch: { amount_minor?: number; event_on?: string }) {
+    async updateLoanEvent(id: number, patch: { amount_minor?: number; event_on?: string }) {
       const sets: string[] = [];
-      const binds: (number | string)[] = [];
+      const binds: (number | string | null)[] = [];
       for (const k of ['amount_minor', 'event_on'] as const)
         if (patch[k] !== undefined) {
           sets.push(`${k} = ?`);
-          binds.push(patch[k]!);
+          binds.push(await en('loan_events', k, patch[k]));
         }
       if (!sets.length) return Promise.resolve({ success: true, meta: { changes: 0 } } as D1Result);
       binds.push(id, userId);
@@ -943,28 +952,32 @@ export function scoped(db: Env['DB'], userId: number) {
       return db
         .prepare('SELECT step, data, updated_at FROM conversation_state WHERE user_id = ?')
         .bind(userId)
-        .first<{ step: string; data: string; updated_at: string }>();
+        .first<{ step: string; data: string; updated_at: string }>()
+        .then(async (r) => {
+          if (r?.data) r.data = (await decStr(userId, 'conversation_state', 'data', r.data))!;
+          return r;
+        });
     },
-    setConversation(step: string, data: string) {
+    async setConversation(step: string, data: string) {
       return db
         .prepare(
           `INSERT INTO conversation_state (user_id, step, data) VALUES (?, ?, ?)
            ON CONFLICT(user_id) DO UPDATE SET step=excluded.step, data=excluded.data, updated_at=datetime('now')`,
         )
-        .bind(userId, step, data)
+        .bind(userId, step, await en('conversation_state', 'data', data))
         .run();
     },
     /**
      * CAS-запись: обновляет только если текущий step === expected.
      * meta.changes === 0 → состояние изменил другой апдейт → проигравший молчит.
      */
-    setConversationExpected(step: string, data: string, expected: string) {
+    async setConversationExpected(step: string, data: string, expected: string) {
       return db
         .prepare(
           `UPDATE conversation_state SET step = ?, data = ?, updated_at = datetime('now')
            WHERE user_id = ? AND step = ?`,
         )
-        .bind(step, data, userId, expected)
+        .bind(step, await en('conversation_state', 'data', data), userId, expected)
         .run();
     },
     clearConversation() {
@@ -1184,3 +1197,48 @@ export function accessRepo(db: Env['DB']) {
 }
 
 export type AccessRepo = ReturnType<typeof accessRepo>;
+
+/**
+ * encryptBackfill — шифрует legacy-plaintext в таблицах из FIELDS (сырой SQL
+ * разрешён только здесь). Идемпотентно: выбирает только не-enc1: колонки;
+ * UPDATE с CAS (`col IS ?` по старым значениям) — конкурентная правка юзера
+ * не затирается. Возвращает число зашифрованных строк.
+ */
+export async function encryptBackfill(db: Env['DB'], limitPerTable = 200): Promise<number> {
+  let done = 0;
+  for (const [table, cols] of Object.entries(FIELDS)) {
+    const colNames = Object.keys(cols);
+    const unenc = (c: string) => `(${c} IS NOT NULL AND (typeof(${c}) != 'text' OR ${c} NOT LIKE 'enc1:%'))`;
+    const userKeyed = table === 'conversation_state' || table === 'profiles'; // PK = user_id, колонки id нет
+    const keyCols = userKeyed ? 'user_id' : 'id, user_id';
+    const rows = await db
+      .prepare(`SELECT ${keyCols}, ${colNames.join(', ')} FROM ${table} WHERE ${colNames.map(unenc).join(' OR ')} LIMIT ?`)
+      .bind(limitPerTable)
+      .all<Record<string, unknown>>();
+    for (const row of rows.results) {
+      const uid = Number(row.user_id);
+      const sets: string[] = [];
+      const binds: (string | number | null)[] = [];
+      const cas: string[] = [];
+      const casBinds: (string | number | null)[] = [];
+      for (const [col, kind] of Object.entries(cols)) {
+        const v = row[col];
+        if (v === null || v === undefined) continue;
+        if (typeof v === 'string' && v.startsWith('enc1:')) continue;
+        sets.push(`${col} = ?`);
+        binds.push(kind === 'num' ? await encNum(uid, table, col, v as number) : await encStr(uid, table, col, v as string));
+        cas.push(`${col} IS ?`);
+        casBinds.push(v as string | number);
+      }
+      if (!sets.length) continue;
+      const where = userKeyed ? 'WHERE user_id = ?' : 'WHERE id = ? AND user_id = ?';
+      const keyBinds = userKeyed ? [uid] : [row.id, uid];
+      const r = await db
+        .prepare(`UPDATE ${table} SET ${sets.join(', ')} ${where} AND ${cas.join(' AND ')}`)
+        .bind(...binds, ...(keyBinds as (string | number)[]), ...casBinds)
+        .run();
+      if (r.meta?.changes) done += r.meta.changes;
+    }
+  }
+  return done;
+}

@@ -71,6 +71,15 @@ function main() {
     die(`wrangler не авторизован: ${who.out}\nВыполните: npm run wrangler -- login`);
   }
   p('   ✓ вошли');
+  const sl = wrangler(['secret', 'list']);
+  if (sl.ok && !sl.out.includes('DATA_KEY'))
+    die(
+      'DATA_KEY отсутствует в секретах воркера — данные будут fail-closed (503).\n' +
+        'Сгенерируйте: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"\n' +
+        'и загрузите: npm run wrangler -- secret put DATA_KEY\n' +
+        '⚠️ СОХРАНИТЕ ключ в менеджере паролей — потеря = данные не расшифровать.',
+    );
+
   p('[3/6] Сборка Mini App (apps/web → dist для [assets] воркера)');
   try { npm(['run', 'build', '-w', 'apps/web']); p('   ✓ apps/web/dist собран'); }
   catch (e) { die(`сборка web упала — релиз отменён\n${String(e.stdout ?? e.message).slice(-2000)}`); }

@@ -533,3 +533,11 @@ claim (следующий тик повторит). Тумблер — `⚙️ �
 - Никаких токенов в URL — только `Authorization: Bearer` (шаг 3).
 - Секреты — только `wrangler secret put`; `.dev.vars` для локальной разработки
   (в `.gitignore`).
+
+## Шифрование (DATA_KEY)
+
+Локально задайте `DATA_KEY` в `apps/api/.dev.vars` (генерация — команда в
+`.dev.vars.example`). Без него контуры данных отвечают 503. В тестах ключ
+задан биндингом в `vitest.config.ts` + `test/setup.ts`. Если тест вставляет
+строки сырым SQL и фильтрует по name/note/amount — помните: они в БД шифртекст,
+фильтруйте по plaintext-колонкам (due_day, даты, валюта, source_key).
