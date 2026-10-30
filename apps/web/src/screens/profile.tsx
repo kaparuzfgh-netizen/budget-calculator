@@ -2,8 +2,9 @@
  * profile.tsx — «Профиль» и обязательные платежи.
  *
  * ProfileScreen: GET /api/tma/profile + /api/tma/commitments.
- *   Формы: типичный доход (typical_income+income_currency), лимит жизни
- *   (living_cap+living_currency, сервер пересчитает недельный бюджет ×12/52),
+ *   Формы: типичный доход (typical_income+income_currency), повседневные
+ *   (living_cap+living_currency+expense_currency — сервер пересчитает
+ *   недельный бюджет ×12/52),
  *   таймзона (пресеты + свой IANA-ввод, проверка через Intl).
  * CommitmentScreen: карточка платежа — PATCH amount/due_day и
  *   тогл active; удаление только с подтверждением.
@@ -104,6 +105,7 @@ function profileKey(p: Profile): string {
     p.income_currency,
     p.living_cap_minor,
     p.living_currency,
+    p.expense_currency,
     p.timezone,
   ].join('|');
 }
@@ -127,9 +129,10 @@ function ProfileForms({
   const [incErr, setIncErr] = useState<string | null>(null);
   const [incBusy, setIncBusy] = useState(false);
 
-  // лимит жизни
+  // повседневные (норма + валюта трат по умолчанию)
   const [cap, setCap] = useState(String((p.living_cap_minor ?? 0) / 100 || ''));
   const [capCcy, setCapCcy] = useState(p.living_currency ?? 'USD');
+  const [expCcy, setExpCcy] = useState(p.expense_currency ?? '');
   const [capErr, setCapErr] = useState<string | null>(null);
   const [capBusy, setCapBusy] = useState(false);
 
@@ -169,8 +172,9 @@ function ProfileForms({
     ev.preventDefault();
     const aErr = amountError(cap);
     const cErr = currencyError(capCcy);
-    if (aErr || cErr) {
-      setCapErr(aErr ?? cErr);
+    const eErr = expCcy.trim() ? currencyError(expCcy) : null;
+    if (aErr || cErr || eErr) {
+      setCapErr(aErr ?? cErr ?? eErr);
       return;
     }
     setCapBusy(true);
@@ -179,8 +183,10 @@ function ProfileForms({
       await api.patch('/api/tma/profile', {
         living_cap: parseAmount(cap),
         living_currency: capCcy.trim().toUpperCase(),
+        // пусто → null: валюта трат снова = валюта нормы
+        expense_currency: expCcy.trim() ? expCcy.trim().toUpperCase() : null,
       });
-      nav.flash('Лимит жизни сохранён — недельный бюджет пересчитан');
+      nav.flash('Повседневные сохранены — недельный бюджет пересчитан');
       reload();
     } catch (e) {
       setCapErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
@@ -216,7 +222,7 @@ function ProfileForms({
       <div class="card">
         <form onSubmit={saveIncome}>
           <div class="inline">
-            <Field label="Сумма в месяц (0 — не задан)">
+            <Field label="Сумма в месяц">
               <input
                 inputMode="decimal"
                 value={inc}
@@ -231,6 +237,7 @@ function ProfileForms({
               />
             </Field>
           </div>
+          <p class="muted">0 — не задан</p>
           <FormError msg={incErr} />
           <button type="submit" class="btn" disabled={incBusy}>
             Сохранить доход
@@ -238,11 +245,11 @@ function ProfileForms({
         </form>
       </div>
 
-      <h2>Лимит жизни</h2>
+      <h2>Повседневные</h2>
       <div class="card">
         <form onSubmit={saveCap}>
           <div class="inline">
-            <Field label="Лимит на месяц">
+            <Field label="Норма на месяц">
               <input
                 inputMode="decimal"
                 value={cap}
@@ -257,12 +264,21 @@ function ProfileForms({
               />
             </Field>
           </div>
+          <Field label="Валюта повседневных трат">
+            <input
+              maxLength={5}
+              placeholder={capCcy}
+              value={expCcy}
+              onInput={(e) => setExpCcy((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+          <p class="muted">пусто — как валюта нормы</p>
           <p class="muted">
             Недельный бюджет: {fmtMinor(p.weekly_budget_minor ?? 0, p.living_currency ?? 'USD')}
           </p>
           <FormError msg={capErr} />
           <button type="submit" class="btn" disabled={capBusy}>
-            Сохранить лимит
+            Сохранить
           </button>
         </form>
       </div>

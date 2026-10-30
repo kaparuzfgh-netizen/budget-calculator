@@ -39,11 +39,17 @@ export const zAmount = z.number().finite().positive().max(LIMITS.maxAmount); // 
 export const zNote = z.string().trim().max(LIMITS.maxNote).optional();
 export const zClientId = z.string().regex(CLIENT_ID_RE).optional();
 export const zDay = z.number().int().min(1).max(31).nullable().optional();
-/** 'YYYY-MM-DD' — реальная календарная дата. */
+/** 'YYYY-MM-DD' — реальная календарная дата (roundtrip: '2026-02-30' не пройдёт). */
 export const zIso = z
   .string()
   .regex(ISO_DATE_RE, 'дата в формате YYYY-MM-DD')
-  .refine((v) => !Number.isNaN(new Date(`${v}T00:00:00Z`).getTime()), 'недопустимая дата');
+  .refine((v) => {
+    const d = new Date(`${v}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+  }, 'недопустимая дата');
+
+/** Дата записи: не раньше 2000-01-01 и не в будущем (today — в таймзоне пользователя). */
+export const dayInRange = (iso: string, today: string): boolean => iso >= '2000-01-01' && iso <= today;
 
 export const repoOf = (c: TmaContext) => scoped(c.env.DB, c.get('tmaUser').id);
 

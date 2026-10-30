@@ -3,13 +3,24 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
-import type { FxProvider } from '../src/fx/provider';
+import { FxUnavailable, type FxProvider } from '../src/fx/provider';
 import { scoped } from '../src/db/repo';
 import { signJwt } from '../src/tma/auth';
 import { todayInTz } from '../src/bot/parse';
 
 const JWT_SECRET = 'tma-api-secret';
-const fx: FxProvider = { latest: async () => ({ perUsd: { USD: 1, EUR: 0.9 }, asOf: '2026-10-27' }) };
+const RATES: Record<string, number> = { EUR: 0.9, RUB: 97, KZT: 500 };
+const fx: FxProvider = {
+  latest: async (ccys) => {
+    const perUsd: Record<string, number> = { USD: 1 };
+    for (const c of ccys.map((x) => x.toUpperCase())) {
+      if (c === 'USD') continue;
+      if (!(c in RATES)) throw new FxUnavailable(`Валюта ${c} не поддерживается`, c);
+      perUsd[c] = RATES[c]!;
+    }
+    return { perUsd, asOf: '2026-10-27' };
+  },
+};
 const app = createRouter({ fx });
 const tenv = () => ({ ...env, JWT_SECRET, TELEGRAM_BOT_TOKEN: 't', TELEGRAM_WEBHOOK_SECRET: 's' }) as typeof env;
 
@@ -211,5 +222,117 @@ describe('/api/tma/* — контракт', () => {
       commitments: { paid_this_month: boolean }[];
     };
     expect(list2.commitments[0]!.paid_this_month).toBe(false);
+  });
+});
+
+describe('даты spent_on/received_on, expense_currency, report?ccy', () => {
+  const future = () => new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+
+  it('expenses: spent_on в POST/PATCH; будущее/1999/несуществующая дата → 400; умолчание — сегодня', async () => {
+    const A = await user(900030);
+    const r = await api('/api/tma/expenses', {
+      method: 'POST', token: A.token, body: { amount: 10, spent_on: '2020-06-15' },
+    });
+    expect(r.status).toBe(201);
+    const { id } = (await r.json()) as { id: number };
+    expect((await scoped(env.DB, A.uid).getExpense(id))!.spent_on).toBe('2020-06-15');
+    // несуществующий календарный день и нижняя граница
+    expect((await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 1, spent_on: '2020-02-30' } })).status).toBe(400);
+    expect((await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 1, spent_on: '1999-12-31' } })).status).toBe(400);
+    // будущее (завтра по UTC — профиль UTC)
+    expect((await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 1, spent_on: future() } })).status).toBe(400);
+    // умолчание — сегодня
+    const r2 = await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 1 } });
+    const { id: id2 } = (await r2.json()) as { id: number };
+    expect((await scoped(env.DB, A.uid).getExpense(id2))!.spent_on).toBe(todayInTz('UTC', new Date()));
+    // PATCH spent_on своей записи
+    expect((await api(`/api/tma/expenses/${id}`, { method: 'PATCH', token: A.token, body: { spent_on: '2020-06-20' } })).status).toBe(200);
+    expect((await scoped(env.DB, A.uid).getExpense(id))!.spent_on).toBe('2020-06-20');
+    expect((await api(`/api/tma/expenses/${id}`, { method: 'PATCH', token: A.token, body: { spent_on: future() } })).status).toBe(400);
+  });
+
+  it('income: received_on в POST/PATCH (month следует за датой); будущее → 400; чужой → 404', async () => {
+    const A = await user(900031);
+    const B = await user(900032);
+    const r = await api('/api/tma/income', {
+      method: 'POST', token: A.token, body: { amount: 100, received_on: '2020-06-15' },
+    });
+    expect(r.status).toBe(201);
+    const { id } = (await r.json()) as { id: number };
+    const row = (await scoped(env.DB, A.uid).getIncomeEntry(id))!;
+    expect(row.received_on).toBe('2020-06-15');
+    expect(row.month).toBe('2020-06'); // месяц — из фактической даты
+    // валидация
+    expect((await api('/api/tma/income', { method: 'POST', token: A.token, body: { amount: 1, received_on: future() } })).status).toBe(400);
+    expect((await api('/api/tma/income', { method: 'POST', token: A.token, body: { amount: 1, received_on: '2020-02-30' } })).status).toBe(400);
+    // PATCH: received_on двигает и month; note правится
+    expect(
+      (await api(`/api/tma/income/${id}`, {
+        method: 'PATCH', token: A.token, body: { received_on: '2020-07-01', note: 'аванс' },
+      })).status,
+    ).toBe(200);
+    const row2 = (await scoped(env.DB, A.uid).getIncomeEntry(id))!;
+    expect(row2.received_on).toBe('2020-07-01');
+    expect(row2.month).toBe('2020-07');
+    expect(row2.note).toBe('аванс');
+    // чужой id → 404; пустой patch → 400; будущая дата → 400
+    expect((await api(`/api/tma/income/${id}`, { method: 'PATCH', token: B.token, body: { note: 'x' } })).status).toBe(404);
+    expect((await api(`/api/tma/income/${id}`, { method: 'PATCH', token: A.token, body: {} })).status).toBe(400);
+    expect((await api(`/api/tma/income/${id}`, { method: 'PATCH', token: A.token, body: { received_on: future() } })).status).toBe(400);
+  });
+
+  it('profile.expense_currency: GET→null, PATCH set/reset, дефолт валюты в POST /expenses', async () => {
+    const A = await user(900033);
+    const g1 = (await (await api('/api/tma/profile', { token: A.token })).json()) as { expense_currency: string | null };
+    expect(g1.expense_currency).toBeNull();
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { expense_currency: 'eur' } })).status).toBe(200);
+    const g2 = (await (await api('/api/tma/profile', { token: A.token })).json()) as { expense_currency: string | null };
+    expect(g2.expense_currency).toBe('EUR');
+    // трата без валюты → expense_currency; явная валюта перебивает
+    const r1 = await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 5 } });
+    const { id: id1 } = (await r1.json()) as { id: number };
+    expect((await scoped(env.DB, A.uid).getExpense(id1))!.currency).toBe('EUR');
+    const r2 = await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 5, currency: 'USD' } });
+    const { id: id2 } = (await r2.json()) as { id: number };
+    expect((await scoped(env.DB, A.uid).getExpense(id2))!.currency).toBe('USD');
+    // сброс в null → снова living_currency (USD)
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { expense_currency: null } })).status).toBe(200);
+    expect(((await (await api('/api/tma/profile', { token: A.token })).json()) as { expense_currency: string | null }).expense_currency).toBeNull();
+    const r3 = await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 5 } });
+    const { id: id3 } = (await r3.json()) as { id: number };
+    expect((await scoped(env.DB, A.uid).getExpense(id3))!.currency).toBe('USD');
+    // кривой код валюты → 400
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { expense_currency: 'X1' } })).status).toBe(400);
+  });
+
+  it('report ?ccy=: дефолт — валюта дохода; конвертация в EUR/RUB/KZT/USD; 400/503', async () => {
+    const A = await user(900034);
+    const repo = scoped(env.DB, A.uid);
+    await repo.patchProfile({ income_currency: 'EUR' });
+    await api('/api/tma/expenses', { method: 'POST', token: A.token, body: { amount: 320, currency: 'USD' } });
+    type Rep = { currency: string; spent: { living: number }; living_limit: { cap: number } };
+    // дефолт — income EUR: 320 USD → 288 EUR; норма 60 000 USD → 54 000 EUR
+    const j1 = (await (await api('/api/tma/report?period=month&offset=0', { token: A.token })).json()) as Rep;
+    expect(j1.currency).toBe('EUR');
+    expect(j1.spent.living).toBe(28800);
+    expect(j1.living_limit.cap).toBe(5400000);
+    // ?ccy=RUB: 320·97 = 31 040; норма 60 000·97 = 5 820 000
+    const j2 = (await (await api('/api/tma/report?period=month&ccy=RUB', { token: A.token })).json()) as Rep;
+    expect(j2.currency).toBe('RUB');
+    expect(j2.spent.living).toBe(3104000);
+    expect(j2.living_limit.cap).toBe(582000000);
+    // ?ccy=KZT: 320·500 = 160 000
+    const j3 = (await (await api('/api/tma/report?ccy=KZT', { token: A.token })).json()) as Rep;
+    expect(j3.currency).toBe('KZT');
+    expect(j3.spent.living).toBe(16000000);
+    // ?ccy=USD — без конверсии
+    const j4 = (await (await api('/api/tma/report?ccy=USD', { token: A.token })).json()) as Rep;
+    expect(j4.spent.living).toBe(32000);
+    // malformed → 400; неизвестная провайдеру валюта → 503 fx_unavailable
+    expect((await api('/api/tma/report?ccy=US', { token: A.token })).status).toBe(400);
+    expect((await api('/api/tma/report?ccy=X1', { token: A.token })).status).toBe(400);
+    const r503 = await api('/api/tma/report?ccy=GEL', { token: A.token });
+    expect(r503.status).toBe(503);
+    expect(((await r503.json()) as { error: { code: string } }).error.code).toBe('fx_unavailable');
   });
 });

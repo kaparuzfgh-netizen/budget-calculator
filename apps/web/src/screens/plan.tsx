@@ -1,6 +1,6 @@
 /**
  * plan.tsx — «План» месяца: доход (с источником), обязательные платежи,
- * лимит жизни и свободный остаток. Все итоговые суммы — в USD
+ * повседневные и свободный остаток. Все итоговые суммы — в USD
  * (*_usd_minor по контракту). «Указать доход вручную» → повторный
  * GET /api/tma/plan?income=&currency= (источник «задано вручную»).
  */
@@ -100,7 +100,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
       <h2>Итог</h2>
       <div class="card">
         <div class="row">
-          <span>Лимит жизни</span>
+          <span>Повседневные</span>
           <b>{fmtMinor(p.living_usd_minor, usd)}</b>
         </div>
         <div class="row">

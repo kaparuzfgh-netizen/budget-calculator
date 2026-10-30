@@ -89,7 +89,7 @@ const COMM_KB: ReplyMarkup = {
   ],
 };
 const TERMS =
-  '«Бюджет-компаньон» хранит: профиль (доход, лимиты, таймзона), список обязательных ' +
+  '«Бюджет-компаньон» хранит: профиль (доход, норма повседневных, таймзона), список обязательных ' +
   'платежей и траты — в Cloudflare D1. Данные видите только вы и владелец сервиса. ' +
   'Команды /export и /delete_me появятся скоро.\n\nСогласны?';
 
@@ -115,7 +115,7 @@ function askIncomeAmount(d: ObData): ObEffect {
   );
 }
 function askLiving(d: ObData): ObEffect {
-  return send(`Лимит «на жизнь» (еда/быт) в месяц? Число${d.incomeCcy ? ` — по умолчанию ${d.incomeCcy}` : ''}.`, {
+  return send(`Норма повседневных (еда/быт) в месяц? Число${d.incomeCcy ? ` — по умолчанию ${d.incomeCcy}` : ''}.`, {
     inline_keyboard: [[CANCEL_BTN]],
   });
 }
@@ -268,7 +268,7 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
         const summary =
           '✅ Профиль сохранён:\n' +
           `Доход: ${fmtMoney((d.incomeMinor ?? 0) / 100, d.incomeCcy ?? 'USD')}\n` +
-          `Лимит жизни: ${fmtMoney((d.livingMinor ?? 0) / 100, d.livingCcy ?? 'USD')} (недельный ≈ ${fmtMoney(weekly / 100, d.livingCcy ?? 'USD')})\n` +
+          `Повседневные: ${fmtMoney((d.livingMinor ?? 0) / 100, d.livingCcy ?? 'USD')} (недельный ≈ ${fmtMoney(weekly / 100, d.livingCcy ?? 'USD')})\n` +
           `Таймзона: ${escapeHtml(d.tz ?? 'UTC')}\nПлатежи:\n${commitmentsList(d)}\n\n` +
           'Главное меню — /menu.';
         return ok(null, { kind: 'persist', data: d }, { kind: 'done' }, send(summary, homeMarkup()));

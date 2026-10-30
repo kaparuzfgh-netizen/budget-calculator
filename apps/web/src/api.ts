@@ -104,6 +104,7 @@ export interface IncomeEntry {
   amount_minor: number;
   currency: string;
   note: string | null;
+  received_on: string | null; // 'YYYY-MM-DD'; у старых записей — 1-е число месяца
 }
 export interface IncomeList {
   month: string;
@@ -119,6 +120,8 @@ export interface Profile {
   income_currency?: string;
   living_cap_minor?: number;
   living_currency?: string;
+  /** Валюта повседневных трат по умолчанию; null → living_currency. */
+  expense_currency?: string | null;
   weekly_budget_minor?: number;
   base_currency?: string;
   timezone?: string;

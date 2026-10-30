@@ -146,7 +146,7 @@ export async function runPlan(
       (income.currency !== 'USD' ? ` (${fmtMoney(income.amount, income.currency)})` : '') +
       `<i>${incLabel}</i>`,
     `🧾 Обязательства: −${fmtMoney(round2(mandatoryUsd), 'USD')}` + (commits.length ? `\n${top}` : ' (нет)'),
-    `🍽 Лимит жизни: −${fmtMoney(round2(w.livingUsd), 'USD')} (${fmtMoney(p.living_cap_minor / 100, p.living_currency)})`,
+    `🍽 Повседневные: −${fmtMoney(round2(w.livingUsd), 'USD')} (${fmtMoney(p.living_cap_minor / 100, p.living_currency)})`,
     `💚 <b>Свободный профицит: ${fmtMoney(round2(w.surplusUsd), 'USD')}${inc.source === 'none' ? ' (без дохода)' : ''}</b>`,
     inc.count > 0 ? `<i>Доход за ${month}: ${inc.count} записей</i>` : '',
   ].filter(Boolean);
@@ -183,7 +183,7 @@ export async function runSpent(
     await tg.sendMessage(chatId, (e as Error).message);
     return;
   }
-  const ccy = a.currency ?? p.living_currency;
+  const ccy = a.currency ?? p.expense_currency ?? p.living_currency;
   let fxr: FxResult;
   try {
     fxr = await fxFor(fx, [ccy, p.living_currency]);
@@ -196,7 +196,7 @@ export async function runSpent(
   if (livingValue > cap * 5) {
     await tg.sendMessage(
       chatId,
-      `Сумма ${fmtMoney(round2(livingValue), p.living_currency)} выглядит нереально для траты (лимит ×5). Проверьте ввод.`,
+      `Сумма ${fmtMoney(round2(livingValue), p.living_currency)} выглядит нереально для траты (норма ×5). Проверьте ввод.`,
     );
     return;
   }
@@ -351,7 +351,7 @@ function renderReport(rep: NonNullable<Awaited<ReturnType<typeof buildUserReport
     `📈 <b>${escapeHtml(rep.label)}</b>`,
     `Получено: ${m(rep.received.total)}`,
     `Потрачено: ${m(rep.spent.total)}`,
-    `  • Жизнь: ${m(rep.spent.living)}${rep.living_limit.cap > 0 ? ` (${Math.round(rep.living_limit.used_pct * 100)}% лимита)` : ''}`,
+    `  • Повседневные: ${m(rep.spent.living)}${rep.living_limit.cap > 0 ? ` (${Math.round(rep.living_limit.used_pct * 100)}% нормы)` : ''}`,
     `  • Платежи: ${m(rep.spent.commitments)}`,
     `  • Кредиты: ${m(rep.spent.credits)}`,
     `  • Долги людям: ${m(rep.spent.loans_repaid)}`,
@@ -472,6 +472,7 @@ export async function runIncome(
     currency: ccy,
     note: a.note ?? null,
     source_key: sourceKey,
+    received_on: todayInTz(p.timezone, new Date()),
   });
   if (r.meta.changes === 0) return false; // дубликат update_id — молча
   return true;

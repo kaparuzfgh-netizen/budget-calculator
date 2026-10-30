@@ -162,7 +162,7 @@ describe('signal_ — пороги из v1', () => {
 describe('makeAction_', () => {
   it('<30 → null; ≥30 → полная карточка', () => {
     expect(makeAction_(pts(new Array(10).fill(1)), 'k', 'L', 'p', '💱')).toBeNull();
-    const a = makeAction_(pts(Array.from({ length: 40 }, (_, i) => 100 + i)), 'eur_rub', 'EUR → RUB', 'жизнь', '🛒')!;
+    const a = makeAction_(pts(Array.from({ length: 40 }, (_, i) => 100 + i)), 'eur_rub', 'EUR → RUB', 'повседневные', '🛒')!;
     expect(a.key).toBe('eur_rub');
     expect(a.label).toBe('EUR → RUB');
     expect(a.change30d_pct).toBe(Math.round(a.change30d_pct * 10) / 10);

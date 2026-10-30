@@ -29,7 +29,7 @@ export interface Overview {
   income_entries_count: number;
   /** Активные обязательные платежи (в исходных валютах). */
   commitments: OverviewCommitment[];
-  /** Лимит жизни: недельный бюджет и факт трат (living_currency). */
+  /** Повседневные: недельный бюджет и факт трат (living_currency). */
   weekly_budget_minor: number;
   living_currency: string;
   spent_week_minor: number;

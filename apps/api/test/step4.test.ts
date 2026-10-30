@@ -110,7 +110,7 @@ describe('онбординг (happy path через webhook)', () => {
     await cb(OWNER, 'ob:ic:EUR');
     expect(last()).toContain('месячный доход');
     await msg(OWNER, '6200');
-    expect(last()).toContain('Лимит «на жизнь»');
+    expect(last()).toContain('Норма повседневных');
     await msg(OWNER, '60000 rub');
     expect(last()).toContain('часовой пояс');
     await cb(OWNER, 'ob:tz:Asia/Bishkek');

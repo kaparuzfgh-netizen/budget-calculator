@@ -213,8 +213,8 @@ export function renderFx(screenId: string, data: FxState['data'], ctx: FxCtx): {
       const x = exchangeById(ctx, data.exchangeId);
       if (!x) return renderFx('FX_LIST', {}, ctx);
       const rows = [
-        [btn('✏️ Суммы', 'fxa:ed:amounts'), btn('� Дата', 'fxa:ed:date')],
-        [btn('� Заметка', 'fxa:ed:note'), btn('� Удалить', `fxa:del:${x.id}`)],
+        [btn('✏️ Суммы', 'fxa:ed:amounts'), btn('📅 Дата', 'fxa:ed:date')],
+        [btn('📝 Заметка', 'fxa:ed:note'), btn('🗑 Удалить', `fxa:del:${x.id}`)],
       ];
       return { step, text: exchangeCardText(x), markup: kb(rows, 'FX_ITEM') };
     }

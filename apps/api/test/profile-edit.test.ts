@@ -264,7 +264,7 @@ describe('редактирование профиля (pf:*)', () => {
     expect((await scoped(env.DB, uid).getProfile())!.income_minor).toBe(0);
   });
 
-  it('лимит жизни: правка пересчитывает недельный бюджет', async () => {
+  it('повседневные: правка нормы пересчитывает недельный бюджет', async () => {
     const uid = await setupUser(OWNER + 51);
     await msg(OWNER + 51, '⚙️ Профиль');
     await cb(OWNER + 51, 'pf:sec:living'); // → PF_LIVING
@@ -350,13 +350,13 @@ describe('редактирование профиля (pf:*)', () => {
     await cb(OWNER + 55, 'ob:ic:EUR');
     expect(last()).toContain('Пропустить');
     await cb(OWNER + 55, 'ob:inc:skip');
-    expect(last()).toContain('Лимит');
+    expect(last()).toContain('Норма повседневных');
     const uid55 = Number(
       (await env.DB.prepare('SELECT id FROM users WHERE telegram_id=?')
         .bind(OWNER + 55)
         .first<{ id: number }>())!.id,
     );
-    // доход пропущен → ждём лимит
+    // доход пропущен → ждём норму повседневных
     await msg(OWNER + 55, '50000 rub');
     await cb(OWNER + 55, 'ob:tz:Asia/Bishkek');
     await cb(OWNER + 55, 'ob:com:skip');

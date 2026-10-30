@@ -33,6 +33,14 @@ export const fmtDay = (iso: string): string => {
   return m && d ? `${d}.${m}` : iso;
 };
 
+/** Сегодня в локальной таймзоне устройства — 'YYYY-MM-DD' для input[type=date]. */
+export const todayIso = (): string => {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+};
+
 // ── клиентская валидация — те же лимиты, что LIMITS в apps/api/src/tma/api.ts ──
 
 export const LIMITS = { maxAmount: 1e9, maxNote: 200, maxName: 60 } as const;

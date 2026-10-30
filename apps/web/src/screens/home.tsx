@@ -1,7 +1,7 @@
 /**
  * home.tsx — «Обзор»: хедер с приветствием и аватаром-профилем,
  * быстрые действия, «К оплате в месяце» с кнопками оплаты,
- * лимит жизни с прогресс-барами, доход и сетка разделов.
+ * повседневные с прогресс-барами, доход и сетка разделов.
  */
 import { useState } from 'preact/hooks';
 import { ApiError } from '../api';
@@ -156,7 +156,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         </>
       )}
 
-      <h2>Лимит жизни</h2>
+      <h2>Повседневные</h2>
       <div class="card">
         <div class="row">
           <span>Неделя</span>
@@ -201,7 +201,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
           📊 План
         </button>
         <button type="button" class="btn" onClick={() => nav.push({ id: 'week' })}>
-          � Неделя
+          📅 Неделя
         </button>
         <button type="button" class="btn" onClick={() => nav.push({ id: 'debts' })}>
           🏦 Кредиты

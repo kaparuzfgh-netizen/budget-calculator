@@ -4,6 +4,7 @@
  * Общий для TMA API и бота.
  */
 import type { Currency } from '../domain/money';
+import { convert } from '../domain/money';
 import { buildReport, periodRange, type Period, type Report } from '../domain/report';
 import { todayInTz } from '../bot/parse';
 import type { scoped } from '../db/repo';
@@ -17,9 +18,11 @@ export async function buildUserReport(
   period: Period,
   offset: number,
   now: Date,
+  targetCcy?: string,
 ): Promise<Report | null> {
   const p = await repo.getProfile();
   if (!p?.onboarded_at) return null;
+  const target = (targetCcy ?? p.income_currency) as Currency;
   const today = todayInTz(p.timezone, now);
   const range = periodRange(period, today, offset);
   const prevRange = periodRange(period, today, offset - 1);
@@ -41,7 +44,7 @@ export async function buildUserReport(
   const loanDir = new Map(loans.results.map((l) => [l.id, l.direction]));
   const loanCcy = new Map(loans.results.map((l) => [l.id, l.currency]));
 
-  const ccys = new Set<string>([p.living_currency]);
+  const ccys = new Set<string>([p.living_currency, target]);
   for (const e of expenses.results) ccys.add(e.currency);
   for (const e of commitPays.results) ccys.add(e.currency);
   for (const e of debtEvents.results) ccys.add(debtCcy.get(e.debt_id) ?? p.living_currency);
@@ -54,11 +57,12 @@ export async function buildUserReport(
     offset,
     range,
     prevRange,
-    currency: p.living_currency as Currency,
+    currency: target,
     perUsd: fxr.perUsd,
     fx_as_of: fxr.asOf,
-    livingCapMajor: p.living_cap_minor / 100,
-    weeklyBudgetMajor: p.weekly_budget_minor / 100,
+    // норма хранится в living_currency — конвертируем в валюту отчёта
+    livingCapMajor: convert(p.living_cap_minor / 100, p.living_currency, target, { perUsd: fxr.perUsd }),
+    weeklyBudgetMajor: convert(p.weekly_budget_minor / 100, p.living_currency, target, { perUsd: fxr.perUsd }),
     categories: cats.results.map((c) => ({ id: c.id, name: c.name, emoji: c.emoji })),
     expenses: expenses.results.map((e) => ({
       id: e.id,

@@ -344,6 +344,21 @@ describe('бот: быстрый ввод, пикер категории, отч
     expect(edited.length).toBe(len);
   });
 
+  it('валюта траты по умолчанию — expense_currency профиля (иначе living; явная перебивает)', async () => {
+    const { uid } = await user(OWNER + 73);
+    const repo = scoped(env.DB, uid);
+    await repo.patchProfile({ expense_currency: 'RUB' });
+    await msg(OWNER + 73, '500 продукты');
+    expect((await repo.listExpenses()).results.at(-1)!.currency).toBe('RUB');
+    // явная валюта в тексте перебивает дефолт
+    await msg(OWNER + 73, '500 usd продукты');
+    expect((await repo.listExpenses()).results.at(-1)!.currency).toBe('USD');
+    // сброс → living_currency (USD)
+    await repo.patchProfile({ expense_currency: null });
+    await msg(OWNER + 73, '600 продукты');
+    expect((await repo.listExpenses()).results.at(-1)!.currency).toBe('USD');
+  });
+
   it('/report и rp:<period>:<offset> — правка сообщения', async () => {
     await user(OWNER + 72);
     await msg(OWNER + 72, '/report');

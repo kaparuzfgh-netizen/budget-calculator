@@ -26,6 +26,7 @@ import { dueDateFor } from '../services/reminders';
 import {
   bad,
   CCY_RE,
+  dayInRange,
   err,
   fail,
   fxGet,
@@ -54,12 +55,20 @@ const moneySchema = z.object({
   note: zNote,
   client_id: zClientId,
   category_id: z.number().int().positive().nullable().optional(),
+  /** 'YYYY-MM-DD' — spent_on для расходов, received_on для доходов (ниже по коду). */
+  spent_on: zIso.optional(),
+  received_on: zIso.optional(),
 });
 const expensePatchSchema = z.object({
   amount: zAmount.optional(),
   currency: zCcy.optional(),
   note: z.string().trim().max(LIMITS.maxNote).nullable().optional(),
   category_id: z.number().int().positive().nullable().optional(),
+  spent_on: zIso.optional(),
+});
+const incomePatchSchema = z.object({
+  received_on: zIso.optional(),
+  note: z.string().trim().max(LIMITS.maxNote).nullable().optional(),
 });
 const categorySchema = z.object({
   name: z.string().trim().min(1).max(32),
@@ -97,6 +106,8 @@ const profilePatchSchema = z.object({
   income_currency: zCcy.optional(),
   living_cap: zAmount.optional(),
   living_currency: zCcy.optional(),
+  /** Валюта повседневных трат по умолчанию; null — вернуться к living_currency. */
+  expense_currency: zCcy.nullable().optional(),
   timezone: z.string().optional(),
 });
 
@@ -230,6 +241,9 @@ export function registerTmaApi(
     const p = await profile(repo);
     if (!p) return c.json(notOnboarded().body, 403);
     const b = parsed.data;
+    const today = todayInTz(p.timezone, new Date());
+    if (b.spent_on !== undefined && !dayInRange(b.spent_on, today))
+      return c.json(bad('дата: 2000-01-01 … сегодня').body, 400);
     const key = b.client_id ? `tma:${b.client_id}` : `tma:u:${crypto.randomUUID()}`;
     if (b.client_id) {
       const dup = await repo.findExpenseByKey(key);
@@ -247,9 +261,9 @@ export function registerTmaApi(
       note = m.note;
     }
     const r = await repo.addExpense({
-      spent_on: todayInTz(p.timezone, new Date()),
+      spent_on: b.spent_on ?? today,
       amount_minor: toMinor(b.amount),
-      currency: b.currency ?? p.living_currency,
+      currency: b.currency ?? p.expense_currency ?? p.living_currency,
       note,
       source: 'manual',
       source_key: key,
@@ -269,10 +283,14 @@ export function registerTmaApi(
     if (!parsed.success) return c.json(bad('недопустимые поля').body, 400);
     const repo = repoOf(c);
     if (!(await repo.getExpense(id))) return c.json(notFound().body, 404);
-    const patch: { amount_minor?: number; currency?: string; note?: string | null; category_id?: number | null } = {};
+    const p = await repo.getProfile();
+    if (parsed.data.spent_on !== undefined && !dayInRange(parsed.data.spent_on, todayInTz(p?.timezone ?? 'UTC', new Date())))
+      return c.json(bad('дата: 2000-01-01 … сегодня').body, 400);
+    const patch: { amount_minor?: number; currency?: string; note?: string | null; category_id?: number | null; spent_on?: string } = {};
     if (parsed.data.amount !== undefined) patch.amount_minor = toMinor(parsed.data.amount);
     if (parsed.data.currency !== undefined) patch.currency = parsed.data.currency;
     if (parsed.data.note !== undefined) patch.note = parsed.data.note;
+    if (parsed.data.spent_on !== undefined) patch.spent_on = parsed.data.spent_on;
     if (parsed.data.category_id !== undefined) {
       if (parsed.data.category_id !== null && !(await repo.getCategory(parsed.data.category_id)))
         return c.json(bad('категория не найдена').body, 400);
@@ -348,9 +366,12 @@ export function registerTmaApi(
     const offset = q.offset === undefined || q.offset === '' ? 0 : Number(q.offset);
     if (!Number.isInteger(offset) || offset > 0 || offset < -60)
       return c.json(bad('offset: целое −60..0').body, 400);
+    const ccy = q.ccy === undefined || q.ccy === '' ? undefined : q.ccy.toUpperCase();
+    if (ccy !== undefined && !CCY_RE.test(ccy))
+      return c.json(bad('ccy: код валюты (USD, EUR…)').body, 400);
     try {
       const repo = repoOf(c);
-      const rep = await buildUserReport(repo, fxGet(c, fx), period, offset, new Date());
+      const rep = await buildUserReport(repo, fxGet(c, fx), period, offset, new Date(), ccy);
       if (!rep) return c.json(notOnboarded().body, 403);
       return okJson(c, rep);
     } catch (e) {
@@ -435,7 +456,7 @@ export function registerTmaApi(
       month,
       total_minor: toMinor(round2(total)),
       currency: p.income_currency,
-      entries: entries.map((e) => ({ id: e.id, amount_minor: e.amount_minor, currency: e.currency, note: e.note})),
+      entries: entries.map((e) => ({ id: e.id, amount_minor: e.amount_minor, currency: e.currency, note: e.note, received_on: e.received_on })),
     });
   });
   app.post('/api/tma/income', tmaAuth, async (c) => {
@@ -446,25 +467,49 @@ export function registerTmaApi(
     const p = await profile(repo);
     if (!p) return c.json(notOnboarded().body, 403);
     const b = parsed.data;
-    const month = monthInTz(p.timezone, new Date());
+    const today = todayInTz(p.timezone, new Date());
+    if (b.received_on !== undefined && !dayInRange(b.received_on, today))
+      return c.json(bad('дата: 2000-01-01 … сегодня').body, 400);
+    const receivedOn = b.received_on ?? today;
     const key = b.client_id ? `tma:${b.client_id}` : `tma:u:${crypto.randomUUID()}`;
     if (b.client_id) {
       const dup = await repo.findIncomeByKey(key);
       if (dup) return okJson(c, { id: dup.id, duplicate: true });
     }
     const r = await repo.addIncomeEntry({
-      month,
+      // месяц — из фактической даты получения (received_on ≤ today)
+      month: receivedOn.slice(0, 7),
       amount_minor: toMinor(b.amount),
       currency: b.currency ?? p.income_currency,
       note: b.note ?? null,
       source_key: key,
-      received_on: todayInTz(p.timezone, new Date()),
+      received_on: receivedOn,
     });
     if (r.meta.changes === 0) {
       const dup = b.client_id ? await repo.findIncomeByKey(key) : null;
       return okJson(c, { id: dup?.id ?? 0, duplicate: true });
     }
     return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
+  });
+  app.patch('/api/tma/income/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = incomePatchSchema.safeParse(body);
+    if (!parsed.success || !Object.keys(parsed.data).length) return c.json(bad('недопустимые поля').body, 400);
+    const repo = repoOf(c);
+    if (!(await repo.getIncomeEntry(id))) return c.json(notFound().body, 404);
+    const p = await repo.getProfile();
+    if (parsed.data.received_on !== undefined && !dayInRange(parsed.data.received_on, todayInTz(p?.timezone ?? 'UTC', new Date())))
+      return c.json(bad('дата: 2000-01-01 … сегодня').body, 400);
+    const patch: { received_on?: string; month?: string; note?: string | null } = {};
+    if (parsed.data.received_on !== undefined) {
+      patch.received_on = parsed.data.received_on;
+      patch.month = parsed.data.received_on.slice(0, 7); // месяц следует за датой
+    }
+    if (parsed.data.note !== undefined) patch.note = parsed.data.note;
+    await repo.patchIncomeEntry(id, patch);
+    return okJson(c, { ok: true });
   });
   app.delete('/api/tma/income/:id', tmaAuth, async (c) => {
     const id = idOf(c);
@@ -485,6 +530,7 @@ export function registerTmaApi(
       income_currency: p.income_currency,
       living_cap_minor: p.living_cap_minor,
       living_currency: p.living_currency,
+      expense_currency: p.expense_currency,
       weekly_budget_minor: p.weekly_budget_minor,
       base_currency: p.base_currency,
       timezone: p.timezone,
@@ -505,6 +551,7 @@ export function registerTmaApi(
     if (b.typical_income !== undefined) patch.income_minor = toMinor(b.typical_income);
     if (b.income_currency !== undefined) patch.income_currency = b.income_currency;
     if (b.living_currency !== undefined) patch.living_currency = b.living_currency;
+    if (b.expense_currency !== undefined) patch.expense_currency = b.expense_currency;
     if (b.living_cap !== undefined) {
       const minor = toMinor(b.living_cap);
       patch.living_cap_minor = minor;

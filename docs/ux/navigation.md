@@ -52,8 +52,8 @@ flowchart TD
   PF_INCOME --> INCOME_HUB
   INCOME_HUB -- Назад, если открыт из профиля --> PF_INCOME
 
-  PF_HOME --> PF_LIVING["Лимит жизни"]
-  PF_LIVING --> PF_LIVING_ASK["Ввод лимита"]
+  PF_HOME --> PF_LIVING["Повседневные"]
+  PF_LIVING --> PF_LIVING_ASK["Ввод нормы"]
   PF_LIVING_ASK -. сохранено .-> PF_LIVING
   PF_LIVING_ASK -- Отмена --> PF_LIVING
 
@@ -83,7 +83,7 @@ flowchart TD
   PF_COMMIT -- Назад --> PF_COMMITS
 
   PF_HOME --> PF_LOCALE["Валюта и часовой пояс"]
-  PF_LOCALE --> PF_LOCALE_PICK["Выбор: валюта дохода / валюта лимита / часовой пояс"]
+  PF_LOCALE --> PF_LOCALE_PICK["Выбор: валюта дохода / валюта повседневных / часовой пояс"]
   PF_LOCALE_PICK -. сохранено .-> PF_LOCALE
   PF_LOCALE_PICK -- Отмена --> PF_LOCALE
 

@@ -2,7 +2,7 @@
  * services/fx.ts — валютный анализ и алерты (шаг 8).
  *
  * Порт связки FXAnalytics.gs: пары конвертации строятся из профиля
- * (доход → жизнь / база / каждая валюта активных кредитов), история —
+ * (доход → повседневные / база / каждая валюта активных кредитов), история —
  * один запрос Frankfurter на пару (прямой base=from, иначе кросс через USD),
  * статистика — чистый domain/fx.ts. Кэша анализа нет: считается по запросу.
  *
@@ -44,7 +44,7 @@ export interface FxPairDef {
 }
 
 /**
- * Пары по умолчанию из профиля: income → living (жизнь), income → base
+ * Пары по умолчанию из профиля: income → living (повседневные), income → base
  * (база учёта/инвестиции), income → каждая валюта активных долгов.
  * Дубли и самопары отбрасываются, максимум MAX_PAIRS.
  */
@@ -66,7 +66,7 @@ export function fxPairDefs(p: ProfileRow, debtCurrencies: string[]): FxPairDef[]
       alerts,
     });
   };
-  push(p.living_currency, 'жизнь', '🛒', true);
+  push(p.living_currency, 'повседневные', '🛒', true);
   push(p.base_currency, 'инвестиции и база учёта', '📈', false);
   for (const c of debtCurrencies) push(c, 'платежи по кредитам', '🏦', true);
   return out;

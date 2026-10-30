@@ -14,7 +14,7 @@ import { useMemo, useState } from 'preact/hooks';
 import { ApiError } from '../api';
 import type { Api, CategoriesList, ExpensesList, Profile, WeekStatus } from '../api';
 import type { Nav, ScreenProps } from '../app';
-import { amountError, currencyError, fmtDay, fmtMinor, fmtPct, noteError, parseAmount } from '../fmt';
+import { amountError, currencyError, fmtDay, fmtMinor, fmtPct, noteError, parseAmount, todayIso } from '../fmt';
 import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
 
 // ── Неделя ──
@@ -157,6 +157,7 @@ function ExpenseCard({
   const [ccy, setCcy] = useState(item.currency);
   const [note, setNote] = useState(item.note ?? '');
   const [catId, setCatId] = useState<number | null>(item.category_id);
+  const [spentOn, setSpentOn] = useState(item.spent_on);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -170,6 +171,10 @@ function ExpenseCard({
       setErr(aErr ?? cErr ?? nErr);
       return;
     }
+    if (!spentOn) {
+      setErr('Укажите дату траты');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -178,6 +183,7 @@ function ExpenseCard({
         currency: ccy.trim().toUpperCase(),
         note: note.trim() || null,
         category_id: catId,
+        spent_on: spentOn,
       });
       nav.flash('Трата обновлена');
       reload();
@@ -222,6 +228,15 @@ function ExpenseCard({
               />
             </Field>
           </div>
+          <Field label="Дата">
+            <input
+              type="date"
+              max={todayIso()}
+              min="2000-01-01"
+              value={spentOn}
+              onInput={(e) => setSpentOn((e.target as HTMLInputElement).value)}
+            />
+          </Field>
           <Field label="Заметка">
             <input
               maxLength={200}
@@ -323,6 +338,9 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
   const [ccy, setCcy] = useState('');
   const [note, setNote] = useState('');
   const [catId, setCatId] = useState<number | null>(null);
+  // «Ещё ▸»: состояние раскрытия живёт, пока смонтирован компонент
+  const [more, setMore] = useState(false);
+  const [spentOn, setSpentOn] = useState(todayIso());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -331,7 +349,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
     const v = errorView(prof.error);
     return <ErrorView title={v.title} text={v.text} onRetry={prof.reload} />;
   }
-  const defCcy = prof.data?.living_currency ?? 'USD';
+  const defCcy = prof.data?.expense_currency ?? prof.data?.living_currency ?? 'USD';
 
   const submit = async (ev: Event) => {
     ev.preventDefault();
@@ -350,6 +368,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
         ...(ccy.trim() ? { currency: ccy.trim().toUpperCase() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(catId !== null ? { category_id: catId } : {}),
+        ...(more && spentOn ? { spent_on: spentOn } : {}),
         client_id: clientId,
       });
       nav.flash('Трата записана');
@@ -395,6 +414,20 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
           <Field label="Категория">
             <CategoryChips api={api} onFatal={onFatal} value={catId} onChange={setCatId} />
           </Field>
+          <button type="button" class="more" onClick={() => setMore(!more)}>
+            {more ? 'Ещё ▾' : 'Ещё ▸'}
+          </button>
+          {more && (
+            <Field label="Дата">
+              <input
+                type="date"
+                max={todayIso()}
+                min="2000-01-01"
+                value={spentOn}
+                onInput={(e) => setSpentOn((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+          )}
           <FormError msg={err} />
           <button type="submit" class="btn" disabled={busy}>
             {busy ? 'Записываю…' : 'Записать'}

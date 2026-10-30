@@ -21,7 +21,7 @@ export interface Env {
   OWNER_TELEGRAM_ID?: string;
   /** Переменная [vars]: username бота без @ (для ссылок-приглашений). */
   TELEGRAM_BOT_USERNAME?: string;
-  /** Переменная [vars]: URL Mini App — на него указывает menu-button «� Бюджет» (setChatMenuButton). */
+  /** Переменная [vars]: URL Mini App — на него указывает menu-button «💰 Бюджет» (setChatMenuButton). */
   MINI_APP_URL?: string;
   /** Секрет: ключ Gemini AI Studio — основной vision-провайдер (шаг 7). */
   GEMINI_API_KEY?: string;

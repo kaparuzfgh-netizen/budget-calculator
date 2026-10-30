@@ -23,6 +23,8 @@ export interface ProfileRow {
   base_currency: string;
   income_currency: string;
   living_currency: string;
+  /** Валюта повседневных трат по умолчанию (миграция 0015); NULL → living_currency. */
+  expense_currency: string | null;
   timezone: string;
   income_minor: number;
   living_cap_minor: number;
@@ -212,7 +214,7 @@ export function scoped(db: Env['DB'], userId: number) {
     async upsertProfile(
       p: Omit<
         ProfileRow,
-        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled'
+        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency'
       > & {
         reminders_weekly?: number;
         reminders_payments?: number;
@@ -423,6 +425,21 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(id, userId)
         .first<IncomeEntryRow>().then((r) => decRow('income_entries', r));
     },
+    /** Правка записи дохода — только своей (чужие id молча). month — derived от received_on. */
+    async patchIncomeEntry(id: number, patch: { received_on?: string; month?: string; note?: string | null }) {
+      const sets: string[] = [];
+      const binds: (number | string | null)[] = [];
+      for (const k of ['received_on', 'month', 'note'] as const)
+        if (patch[k] !== undefined) {
+          sets.push(`${k} = ?`);
+          binds.push(await en('income_entries', k, patch[k]));
+        }
+      if (!sets.length) return db.prepare('SELECT 1').run();
+      return db
+        .prepare(`UPDATE income_entries SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+        .bind(...binds, id, userId)
+        .run();
+    },
     deleteIncomeEntry(id: number) {
       return db.prepare('DELETE FROM income_entries WHERE id = ? AND user_id = ?').bind(id, userId).run();
     },
@@ -623,6 +640,7 @@ export function scoped(db: Env['DB'], userId: number) {
       weekly_budget_minor?: number;
       income_currency?: string;
       living_currency?: string;
+      expense_currency?: string | null;
       timezone?: string;
       reminders_weekly?: number;
       reminders_payments?: number;
@@ -637,6 +655,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'weekly_budget_minor',
         'income_currency',
         'living_currency',
+        'expense_currency',
         'timezone',
         'reminders_weekly',
         'reminders_payments',
@@ -689,10 +708,10 @@ export function scoped(db: Env['DB'], userId: number) {
         .first<ExpenseRow>().then((r) => decRow('weekly_expenses', r));
     },
     /** Правка траты — только своей записи. */
-    async patchExpense(id: number, patch: { amount_minor?: number; currency?: string; note?: string | null; category_id?: number | null }) {
+    async patchExpense(id: number, patch: { amount_minor?: number; currency?: string; note?: string | null; category_id?: number | null; spent_on?: string }) {
       const sets: string[] = [];
       const binds: (number | string | null)[] = [];
-      for (const k of ['amount_minor', 'currency', 'note'] as const)
+      for (const k of ['amount_minor', 'currency', 'note', 'spent_on'] as const)
         if (k in patch) {
           sets.push(`${k} = ?`);
           binds.push(await en('weekly_expenses', k, patch[k]));

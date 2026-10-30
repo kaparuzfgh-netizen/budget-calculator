@@ -1,10 +1,10 @@
 /**
  * report.tsx — экран «📈 Отчёты»: период/сдвиг, сводные плитки,
- * «куда ушли деньги» (стек-бар + лимит), категории, динамика, топ трат.
- * Данные: GET /api/tma/report?period&offset (minor units).
+ * «куда ушли деньги» (стек-бар + норма), категории, динамика, топ трат.
+ * Данные: GET /api/tma/report?period&offset&ccy (minor units, валюта — чипы).
  */
 import { useState } from 'preact/hooks';
-import type { Report, ReportPeriod } from '../api';
+import type { DebtsList, Profile, Report, ReportPeriod } from '../api';
 import type { ScreenProps } from '../app';
 import { fmtDay, fmtMinor } from '../fmt';
 import { ErrorView, errorView, Loading, useData } from '../ui';
@@ -17,21 +17,43 @@ const PERIODS: { p: ReportPeriod; label: string }[] = [
   { p: 'year', label: 'Год' },
 ];
 const COLORS = { living: '#5288c1', commitments: '#e8a33d', credits: '#a06ad4', loans: '#d4708a' };
+/** Базовый набор чипов; профиль/кредиты добавляют свои, всего ≤ 7. */
+const CHIP_BASE = ['USD', 'EUR', 'RUB', 'KGS', 'KZT'];
 
 export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
   const [period, setPeriod] = useState<ReportPeriod>('month');
   const [offset, setOffset] = useState(0);
+  // null → валюта дохода из профиля (дефолт отчёта)
+  const [ccy, setCcy] = useState<string | null>(null);
+  const prof = useData(() => api.get<Profile>('/api/tma/profile'), onFatal, []);
+  const debts = useData(() => api.get<DebtsList>('/api/tma/debts'), onFatal, []);
+  const sel = ccy ?? prof.data?.income_currency ?? null;
   const rep = useData(
-    () => api.get<Report>(`/api/tma/report?period=${period}&offset=${offset}`),
+    async () =>
+      sel === null
+        ? undefined
+        : api.get<Report>(`/api/tma/report?period=${period}&offset=${offset}&ccy=${sel}`),
     onFatal,
-    [period, offset],
+    [period, offset, sel],
   );
+  const chipCcys = [
+    ...new Set(
+      [
+        ...CHIP_BASE,
+        prof.data?.income_currency,
+        prof.data?.living_currency,
+        prof.data?.base_currency,
+        prof.data?.expense_currency,
+        ...(debts.data?.debts.map((d) => d.currency) ?? []),
+      ].filter((x): x is string => !!x),
+    ),
+  ].slice(0, 7);
 
   const r = rep.data;
   const c = r?.currency ?? 'USD';
   const parts = r
     ? ([
-        { key: 'living', label: 'Жизнь', v: r.spent.living },
+        { key: 'living', label: 'Повседневные', v: r.spent.living },
         { key: 'commitments', label: 'Платежи', v: r.spent.commitments },
         { key: 'credits', label: 'Кредиты', v: r.spent.credits },
         { key: 'loans', label: 'Долги людям', v: r.spent.loans_repaid },
@@ -58,6 +80,17 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
           </button>
         ))}
       </div>
+      <div class="chips">
+        {chipCcys.map((x) => (
+          <button
+            type="button"
+            class={`chip${x === sel ? ' on' : ''}`}
+            onClick={() => setCcy(x)}
+          >
+            {x}
+          </button>
+        ))}
+      </div>
       <div class="row">
         <button type="button" class="navbtn" onClick={() => setOffset((o) => Math.max(-60, o - 1))}>
           ‹
@@ -68,8 +101,8 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
         </button>
       </div>
 
-      {rep.loading && <Loading />}
-      {!rep.loading && (rep.error || !r) ? (
+      {(rep.loading || sel === null) && <Loading />}
+      {!rep.loading && sel !== null && (rep.error || !r) ? (
         (() => {
           const v = errorView(rep.error);
           return <ErrorView title={v.title} text={v.text} onRetry={rep.reload} />;
@@ -122,7 +155,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
               </div>
             ))}
             <div class="row">
-              <span class="muted">Лимит жизни</span>
+              <span class="muted">Норма повседневных</span>
               <span class="muted">
                 {Math.round(r.living_limit.used_pct * 100)}% (из {fmtMinor(r.living_limit.cap, c)})
               </span>
@@ -196,7 +229,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
               </div>
             </>
           )}
-          <p class="muted">Курсы на {r.fx_as_of || '—'}, суммы пересчитаны по текущему курсу</p>
+          <p class="muted">Суммы пересчитаны по текущему курсу ({r.fx_as_of || '—'})</p>
         </>
       )}
     </>

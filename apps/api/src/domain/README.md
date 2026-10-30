@@ -12,7 +12,7 @@
 | `money.ts` | `Currency`, `FxRates.perUsd`, `convert` через USD, `round2` | `SheetService.convert_` |
 | `dates.ts` | `addMonths` (клэмп конца месяца), `isoWeek` (ISO-год!), `daysInMonth`, `daysLeftInMonth` | `SheetService.isoWeek_/daysLeftInMonth_` |
 | `debt.ts` | аннуитет, инверсия срока, `replay` журнала событий, ЧДП «платёж ↓/срок ↓», проекция, арбитраж вклад/долг | `DebtEngine.gs` |
-| `cashflow.ts` | водопад месяца: обязательства → лимит жизни → профицит → каскад дельты | `CashflowEngine.computeWaterfall` |
+| `cashflow.ts` | водопад месяца: обязательства → повседневные → профицит → каскад дельты | `CashflowEngine.computeWaterfall` |
 | `budget.ts` | недельный/месячный бюджет, burn rate, дневной остаток, антимиспарс | `CashflowEngine.weeklyStatus` |
 
 Осознанные отличия от legacy: `remainingPeriods` считается инверсией от текущего

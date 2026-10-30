@@ -1,7 +1,7 @@
 /**
  * report.ts — периодные отчёты (неделя/месяц/квартал/полгода/год).
  * Чистые функции: календарные диапазоны + агрегация всех денежных потоков
- * в валюту жизни через convert (текущие курсы — fx_as_of).
+ * в целевую валюту через convert (текущие курсы — fx_as_of).
  */
 import { convert, toMinor } from './money';
 import type { Currency } from './money';
@@ -107,10 +107,10 @@ export interface ReportInput {
   offset: number;
   range: Range;
   prevRange: Range;
-  currency: Currency; // валюта жизни
+  currency: Currency; // целевая валюта отчёта
   perUsd: Record<string, number>;
   fx_as_of: string;
-  livingCapMajor: number; // месячный лимит, major
+  livingCapMajor: number; // месячная норма повседневных, major (уже в currency)
   weeklyBudgetMajor: number; // недельный бюджет, major
   categories: { id: number; name: string; emoji: string }[];
   expenses: { id: number; spent_on: string; amount_minor: number; currency: string; note: string | null; category_id: number | null }[];
@@ -148,7 +148,7 @@ export function buildReport(inp: ReportInput) {
       : inp.livingCapMajor * { month: 1, quarter: 3, half: 6, year: 12 }[inp.period as 'month'];
   const capMinor = toMinor(limitMajor);
 
-  // категории: только «жизнь»
+  // категории: только повседневные траты
   const catMap = new Map<number | null, { amount: number; count: number }>();
   for (const e of inp.expenses.filter((x) => inRange(x.spent_on, R))) {
     const k = e.category_id;

@@ -8,7 +8,7 @@ import { useState } from 'preact/hooks';
 import { ApiError } from '../api';
 import type { IncomeList } from '../api';
 import type { ScreenProps } from '../app';
-import { amountError, currencyError, fmtMinor, noteError, parseAmount } from '../fmt';
+import { amountError, currencyError, fmtDay, fmtMinor, noteError, parseAmount, todayIso } from '../fmt';
 import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
 
 export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
@@ -56,6 +56,7 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
               <li>
                 <div class="row">
                   <span>
+                    {e.received_on ? `${fmtDay(e.received_on)} · ` : ''}
                     {fmtMinor(e.amount_minor, e.currency)}
                     {e.note ? ` · ${e.note}` : ''}
                   </span>
@@ -140,6 +141,9 @@ function IncomeAddForm({
   const [amount, setAmount] = useState('');
   const [ccy, setCcy] = useState('');
   const [note, setNote] = useState('');
+  // «Ещё ▸»: состояние раскрытия живёт, пока смонтирован компонент
+  const [more, setMore] = useState(false);
+  const [receivedOn, setReceivedOn] = useState(todayIso());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -159,6 +163,7 @@ function IncomeAddForm({
         amount: parseAmount(amount),
         ...(ccy.trim() ? { currency: ccy.trim().toUpperCase() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(more && receivedOn ? { received_on: receivedOn } : {}),
         client_id: clientId,
       });
       onDone('Доход записан');
@@ -198,6 +203,20 @@ function IncomeAddForm({
             onInput={(e) => setNote((e.target as HTMLInputElement).value)}
           />
         </Field>
+        <button type="button" class="more" onClick={() => setMore(!more)}>
+          {more ? 'Ещё ▾' : 'Ещё ▸'}
+        </button>
+        {more && (
+          <Field label="Дата получения">
+            <input
+              type="date"
+              max={todayIso()}
+              min="2000-01-01"
+              value={receivedOn}
+              onInput={(e) => setReceivedOn((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+        )}
         <FormError msg={err} />
         <button type="submit" class="btn" disabled={busy}>
           {busy ? 'Записываю…' : 'Записать доход'}

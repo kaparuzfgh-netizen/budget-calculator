@@ -154,7 +154,7 @@ export const PF_STEPS: Record<string, string> = {
 /** Реестр разделов — будущие «кредиты»/«инвестиции» добавляются строкой + case. */
 export const SECTIONS = [
   { key: 'income', label: '💵 Доход', cb: 'pf:sec:income' },
-  { key: 'living', label: '🍽 Лимит жизни', cb: 'pf:sec:living' },
+  { key: 'living', label: '🍽 Повседневные', cb: 'pf:sec:living' },
   { key: 'commits', label: '🧾 Платежи', cb: 'pf:sec:commits' },
   { key: 'ccytz', label: '🌍 Валюта и пояс', cb: 'pf:sec:ccytz' },
   { key: 'reminders', label: '🔔 Напоминания', cb: 'pf:sec:reminders' },
@@ -179,7 +179,7 @@ export function profileMenuText(ctx: PfCtx): string {
   return (
     '⚙️ <b>Профиль</b>\n' +
     `💵 Доход: типичный ${p.income_minor ? fmtMoney(p.income_minor / 100, p.income_currency) : '—'} · за ${ctx.month} ${ctx.incomeEntries.length} записей\n` +
-    `🍽 Лимит жизни: ${fmtMoney(p.living_cap_minor / 100, p.living_currency)} (нед. ${fmtMoney(p.weekly_budget_minor / 100, p.living_currency)})\n` +
+    `🍽 Повседневные: ${fmtMoney(p.living_cap_minor / 100, p.living_currency)} (нед. ${fmtMoney(p.weekly_budget_minor / 100, p.living_currency)})\n` +
     `🧾 Платежи: ${ctx.commitments.filter((c) => c.active).length} активных\n` +
     `🌍 ${escapeHtml(p.timezone)}`
   );
@@ -223,13 +223,13 @@ export function ccyTzText(ctx: PfCtx): string {
   const p = ctx.profile;
   return (
     '🌍 <b>Валюта и пояс</b>\n' +
-    `Валюта дохода: ${p.income_currency} · лимита: ${p.living_currency}\nТаймзона: ${escapeHtml(p.timezone)}\n\n` +
+    `Валюта дохода: ${p.income_currency} · повседневных: ${p.living_currency}\nТаймзона: ${escapeHtml(p.timezone)}\n\n` +
     '<i>⚠️ при смене валюты суммы не пересчитываются</i>'
   );
 }
 export function livingText(ctx: PfCtx): string {
   const p = ctx.profile;
-  return `🍽 <b>Лимит жизни</b>\n${fmtMoney(p.living_cap_minor / 100, p.living_currency)} в месяц (нед. ${fmtMoney(p.weekly_budget_minor / 100, p.living_currency)})`;
+  return `🍽 <b>Повседневные</b>\n${fmtMoney(p.living_cap_minor / 100, p.living_currency)} в месяц (нед. ${fmtMoney(p.weekly_budget_minor / 100, p.living_currency)})`;
 }
 export function incomeHubText(ctx: PfCtx): string {
   const list = ctx.incomeEntries.length
@@ -266,7 +266,7 @@ export function renderPf(
         text: profileMenuText(ctx),
         markup: kb(
           [
-            [btn('💵 Доход', 'pf:sec:income'), btn('🍽 Лимит жизни', 'pf:sec:living')],
+            [btn('💵 Доход', 'pf:sec:income'), btn('🍽 Повседневные', 'pf:sec:living')],
             [btn('🧾 Платежи', 'pf:sec:commits'), btn('🌍 Валюта и пояс', 'pf:sec:ccytz')],
             [btn('🔔 Напоминания', 'pf:sec:reminders'), btn('🗄 Мои данные', 'pf:sec:data')],
           ],
@@ -356,7 +356,7 @@ export function renderPf(
         text: ccyTzText(ctx),
         markup: kb(
           [
-            [btn('Валюта дохода', 'pf:ccy:income'), btn('Валюта лимита', 'pf:ccy:living')],
+            [btn('Валюта дохода', 'pf:ccy:income'), btn('Валюта повседневных', 'pf:ccy:living')],
             [btn('Часовой пояс', 'pf:tz')],
           ],
           'PF_LOCALE',
@@ -371,7 +371,7 @@ export function renderPf(
     case 'PF_LIVING_ASK':
       return {
         step: 'edit_living',
-        text: `Новый лимит «на жизнь» в месяц (${p.living_currency} по умолчанию):`,
+        text: `Новая норма повседневных в месяц (${p.living_currency} по умолчанию):`,
         markup: promptKb('PF_LIVING_ASK'),
       };
     case 'PF_COMMIT_ADD':
@@ -439,8 +439,8 @@ export function renderPf(
           '🔔 <b>Напоминания</b>\n' +
           `Еженедельный итог (вс 20:00): ${p.reminders_weekly ? '✅ вкл' : '⏸ выкл'}\n` +
           `Платежи (за 2 дня, 10:00): ${p.reminders_payments ? '✅ вкл' : '⏸ выкл'}\n` +
-          `� Алерты по курсам: ${p.fx_alerts_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
-          `�📷 Скриншоты банка: ${p.vision_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
+          `💱 Алерты по курсам: ${p.fx_alerts_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
+          `📷 Скриншоты банка: ${p.vision_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
           '<i>Распознавание скриншотов банка — фото уходит в Google AI.</i>',
         markup: kb(
           [
@@ -867,7 +867,7 @@ export function advancePf(state: PfState, input: PfInput, ctx: PfCtx): { state: 
           {
             kind: 'render',
             screen: 'PF_LIVING',
-            prefix: `Лимит жизни: ${fmtMoney(a.amount, a.currency ?? p.living_currency)}\n\n`,
+            prefix: `Повседневные: ${fmtMoney(a.amount, a.currency ?? p.living_currency)}\n\n`,
           },
         );
       } catch (e) {
@@ -935,7 +935,7 @@ export function advancePf(state: PfState, input: PfInput, ctx: PfCtx): { state: 
           send('Код валюты дохода (USD, EUR, RUB, KGS, GEL…):', promptKb('PF_LOCALE_PICK')),
         );
       if (cb === 'pf:ccy:living')
-        return ok({ step: 'edit_living_ccy', data: {} }, send('Код валюты лимита жизни:', promptKb('PF_LOCALE_PICK')));
+        return ok({ step: 'edit_living_ccy', data: {} }, send('Код валюты повседневных:', promptKb('PF_LOCALE_PICK')));
       if (cb === 'pf:tz')
         return ok(
           { step: 'edit_tz', data: {} },
@@ -1068,7 +1068,7 @@ export function onPfCcyResult(state: PfState, okFlag: boolean): { state: PfState
       {
         kind: 'render',
         screen: 'PF_LOCALE',
-        prefix: `Валюта ${target === 'income' ? 'дохода' : 'лимита'}: ${ccy}. Суммы не пересчитываются.\n\n`,
+        prefix: `Валюта ${target === 'income' ? 'дохода' : 'повседневных'}: ${ccy}. Суммы не пересчитываются.\n\n`,
       },
     );
   }

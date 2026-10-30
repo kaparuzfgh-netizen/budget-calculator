@@ -144,7 +144,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 | `consents` | 0001 | Согласия пользователя (`terms` и т.п.) |
 | `audit_log` | 0001 | Журнал действий доступа (`meta` — JSON без секретов и кодов) |
 | `processed_updates` | 0002 | Дедуп webhook по `update_id` (PK); очистка старше 7 дней каждый cron-тик |
-| `profiles` | 0003, 0005 | Профиль: валюты, `timezone`, типичный доход, лимит жизни, флаги `reminders_weekly`/`reminders_payments` |
+| `profiles` | 0003, 0005, 0015 | Профиль: валюты (включая `expense_currency` — дефолт трат), `timezone`, типичный доход, норма повседневных, флаги `reminders_weekly`/`reminders_payments` |
 | `commitments` | 0003, 0004 | Регулярные платежи: сумма, валюта, `due_day`, `active` (⏸) |
 | `weekly_expenses` | 0003 | Траты: `spent_on` (локальная дата), сумма, заметка; `UNIQUE(user_id, source_key)` |
 | `conversation_state` | 0003 | Состояние диалога бота (шаг + JSON), TTL 24ч на уровне кода |

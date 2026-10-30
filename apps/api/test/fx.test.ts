@@ -129,15 +129,15 @@ describe('fxPairDefs', () => {
   const P = {
     income_currency: 'EUR', living_currency: 'RUB', base_currency: 'USD', fx_alerts_enabled: 1,
   } as never;
-  it('пары из профиля: жизнь → база → валюты кредитов; дубли/self — нет', () => {
+  it('пары из профиля: повседневные → база → валюты кредитов; дубли/self — нет', () => {
     const pairs = fxPairDefs(P, ['USD', 'KGS', 'EUR', 'RUB']);
     expect(pairs.map((p) => p.key)).toEqual(['eur_rub', 'eur_usd', 'eur_kgs']);
-    expect(pairs[0]!.purpose).toBe('жизнь');
-    expect(pairs[0]!.alerts).toBe(true); // жизнь — алерты
+    expect(pairs[0]!.purpose).toBe('повседневные');
+    expect(pairs[0]!.alerts).toBe(true); // повседневные — алерты
     expect(pairs[1]!.alerts).toBe(false); // база — без пушей (как v1 eur_usd)
     expect(pairs[2]!.alerts).toBe(true); // кредиты — алерты
   });
-  it('без кредитов — только жизнь и база', () => {
+  it('без кредитов — только повседневные и база', () => {
     expect(fxPairDefs(P, []).map((p) => p.key)).toEqual(['eur_rub', 'eur_usd']);
   });
 });
@@ -174,7 +174,7 @@ describe('buildAnalysis + histOf', () => {
       },
     };
     const pairs = [
-      { key: 'eur_kgs', from: 'EUR', to: 'KGS', label: 'EUR → KGS', purpose: 'жизнь', emoji: '🛒', alerts: true },
+      { key: 'eur_kgs', from: 'EUR', to: 'KGS', label: 'EUR → KGS', purpose: 'повседневные', emoji: '🛒', alerts: true },
     ];
     const a = await buildAnalysis(histOf(crossFx), pairs, new Date('2026-04-20T00:00:00Z'));
     expect(a.ok).toBe(true);
@@ -226,7 +226,7 @@ describe('checkFxAlerts / runFxAlerts', () => {
     skipped: [],
     actions: [
       {
-        key: 'eur_rub', label: 'EUR → RUB', purpose: 'жизнь', emoji: '🛒',
+        key: 'eur_rub', label: 'EUR → RUB', purpose: 'повседневные', emoji: '🛒',
         current: 96.4, digits: 2, min: 80, max: 96.4, percentile: pct, rsi14: 62,
         change30d_pct: 5, vol30d_pct: 3, trend_up: true,
         signal: 'convert', signal_text: 'Курс высокий — конвертируйте сейчас',
