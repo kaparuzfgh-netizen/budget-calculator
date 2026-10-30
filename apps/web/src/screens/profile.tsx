@@ -11,6 +11,7 @@
  * CommitmentAddScreen: name+amount+currency+due_day → POST.
  * После мутации — reload/возврат на экран-источник со свежими данными.
  */
+import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { ApiError } from '../api';
 import type { Api, CommitmentPayment, CommitmentPaymentsList, CommitmentsList, Profile } from '../api';
@@ -26,7 +27,7 @@ import {
   timezoneError,
   todayIso,
 } from '../fmt';
-import { ErrorView, errorView, Field, FormError, Loading, useData, useFatalOn } from '../ui';
+import { ErrorView, errorView, Field, FormError, Info, Loading, useData, useFatalOn } from '../ui';
 
 const TZ_PRESETS = ['Europe/Moscow', 'Asia/Bishkek', 'Europe/Berlin', 'UTC'] as const;
 
@@ -55,13 +56,21 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
   }
   const p = prof.data;
 
-  return (
+  const payments = (
     <>
-      <h1>⚙️ Профиль</h1>
-      <ProfileForms key={profileKey(p)} api={api} nav={nav} p={p} reload={prof.reload} />
-
       <div class="row spread">
-        <h2>🧾 Регулярные платежи</h2>
+        <h2>
+          🧾 Регулярные платежи
+          <Info title="Регулярные платежи">
+            <p>
+              Аренда, связь, подписки, ЖКХ — то, что списывается каждый месяц.
+            </p>
+            <p>
+              В день срока бот отметит оплату сам и напомнит за 2 дня. Кредиты —
+              отдельный раздел 🏦, здесь их добавлять не нужно.
+            </p>
+          </Info>
+        </h2>
         <button
           type="button"
           class="btn sm"
@@ -70,7 +79,6 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
           ➕ Добавить
         </button>
       </div>
-      <p class="muted">Аренда, связь, подписки — списываются каждый месяц. Кредиты — отдельно в 🏦.</p>
       <div class="card">
         {com.data.commitments.length ? (
           <ul class="plain">
@@ -93,9 +101,23 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Регулярных платежей нет.</p>
+          <p class="muted">Регулярных платежей нет — добавьте первый.</p>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <>
+      <h1>⚙️ Профиль</h1>
+      <ProfileForms
+        key={profileKey(p)}
+        api={api}
+        nav={nav}
+        p={p}
+        reload={prof.reload}
+        payments={payments}
+      />
     </>
   );
 }
@@ -159,16 +181,17 @@ function ProfileForms({
   nav,
   p,
   reload,
+  payments,
 }: {
   api: Api;
   nav: Nav;
   p: Profile;
   reload: () => void;
+  payments: ComponentChildren;
 }) {
-  // базовый доход (0 = «вычисляется» — поле скрыто за «Ещё ▸»)
+  // базовый доход (0/пусто = «вычисляется»: платежи + бюджет + кредиты)
   const [inc, setInc] = useState(String((p.typical_income_minor ?? 0) / 100 || ''));
   const [incCcy, setIncCcy] = useState(p.income_currency ?? 'USD');
-  const [incMore, setIncMore] = useState(false);
   const [incErr, setIncErr] = useState<string | null>(null);
   const [incBusy, setIncBusy] = useState(false);
 
@@ -304,56 +327,27 @@ function ProfileForms({
 
   return (
     <>
-      <h2>💵 Доход</h2>
-      <div class="card">
-        <div class="row">
-          <span>Записи месяца — факт дохода</span>
-          <button type="button" class="rowbtn" onClick={() => nav.push({ id: 'income' })}>
-            Открыть →
-          </button>
-        </div>
-        <form onSubmit={saveIncome}>
-          <Field label="Валюта доходов (по умолчанию)">
-            <input
-              maxLength={5}
-              value={incCcy}
-              onInput={(e) => setIncCcy((e.target as HTMLInputElement).value)}
-            />
-          </Field>
-          {p.baseline_source === 'computed' && (p.typical_income_minor ?? 0) === 0 ? (
-            <p class="muted">
-              Базовый доход: ≈ {fmtMinor(p.baseline_income_minor ?? 0, p.income_currency ?? 'USD')} — вычисляется:
-              платежи + бюджет + кредиты
-            </p>
-          ) : null}
-          <button type="button" class="more" onClick={() => setIncMore(!incMore)}>
-            {incMore ? 'Ещё ▾' : 'Ещё ▸'}
-          </button>
-          {incMore && (
-            <>
-              <Field label="Базовый доход">
-                <input
-                  inputMode="decimal"
-                  placeholder="например, 6200"
-                  value={inc}
-                  onInput={(e) => setInc((e.target as HTMLInputElement).value)}
-                />
-              </Field>
-              <p class="muted">0 — вычисляется: платежи + бюджет + кредиты</p>
-            </>
-          )}
-          <FormError msg={incErr} />
-          <button type="submit" class="btn" disabled={incBusy}>
-            Сохранить
-          </button>
-        </form>
-      </div>
-
-      <h2>💸 Бюджет</h2>
+      <h2>� Бюджет</h2>
       <div class="card">
         <form onSubmit={saveCap}>
           <div class="inline">
-            <Field label="Бюджет на месяц">
+            <Field
+              label={
+                <>
+                  Бюджет на месяц
+                  <Info title="Бюджет на месяц">
+                    <p>
+                      Сколько вы готовы тратить в месяц на повседневное: еда,
+                      кафе, транспорт, мелочи.
+                    </p>
+                    <p>
+                      Регулярные платежи и кредиты сюда не входят — они считаются
+                      отдельно. Недельный бюджет = месячный × 12 / 52.
+                    </p>
+                  </Info>
+                </>
+              }
+            >
               <input
                 inputMode="decimal"
                 value={cap}
@@ -368,7 +362,20 @@ function ProfileForms({
               />
             </Field>
           </div>
-          <Field label="Валюта повседневных трат (по умолчанию)">
+          <Field
+            label={
+              <>
+                Валюта повседневных трат (по умолчанию)
+                <Info title="Валюта трат по умолчанию">
+                  <p>
+                    Эту валюту приложение предлагает при новой трате. Пусто —
+                    как валюта бюджета.
+                  </p>
+                  <p>В форме траты всегда можно выбрать другую валюту.</p>
+                </Info>
+              </>
+            }
+          >
             <input
               maxLength={5}
               placeholder={capCcy}
@@ -376,12 +383,74 @@ function ProfileForms({
               onInput={(e) => setExpCcy((e.target as HTMLInputElement).value)}
             />
           </Field>
-          <p class="muted">пусто — как валюта бюджета; в форме траты можно выбрать другую</p>
           <p class="muted">
             Недельный бюджет: {fmtMinor(p.weekly_budget_minor ?? 0, p.living_currency ?? 'USD')}
           </p>
           <FormError msg={capErr} />
           <button type="submit" class="btn" disabled={capBusy}>
+            Сохранить
+          </button>
+        </form>
+      </div>
+
+      {payments}
+
+      <h2>� Доход</h2>
+      <div class="card">
+        <form onSubmit={saveIncome}>
+          <Field
+            label={
+              <>
+                Валюта доходов (по умолчанию)
+                <Info title="Валюта доходов">
+                  <p>
+                    Эту валюту предлагают формы дохода и по ней считается отчёт.
+                  </p>
+                  <p>В форме дохода можно выбрать другую валюту.</p>
+                </Info>
+              </>
+            }
+          >
+            <input
+              maxLength={5}
+              value={incCcy}
+              onInput={(e) => setIncCcy((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+          <Field
+            label={
+              <>
+                Базовый доход
+                <Info title="Базовый доход">
+                  <p>
+                    Ориентир «сколько обычно получаю в месяц». Показывается как
+                    доход месяца, пока в нём нет записей, и служит базой для
+                    расчёта превышения дохода (досрочки и инвестиции — следующие
+                    шаги).
+                  </p>
+                  <p>
+                    Пусто или 0 — вычисляется сам: регулярные платежи + бюджет +
+                    платежи по кредитам. Записи дохода важнее: когда они есть,
+                    база используется только для расчётов.
+                  </p>
+                </Info>
+              </>
+            }
+          >
+            <input
+              inputMode="decimal"
+              placeholder="например, 6200"
+              value={inc}
+              onInput={(e) => setInc((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+          {p.baseline_source === 'computed' && (p.typical_income_minor ?? 0) === 0 ? (
+            <p class="muted">
+              Сейчас вычисляется: ≈ {fmtMinor(p.baseline_income_minor ?? 0, p.income_currency ?? 'USD')}
+            </p>
+          ) : null}
+          <FormError msg={incErr} />
+          <button type="submit" class="btn" disabled={incBusy}>
             Сохранить
           </button>
         </form>
@@ -439,7 +508,15 @@ function ProfileForms({
           {expBusy ? 'Готовлю файл…' : '📤 Экспорт данных (JSON)'}
         </button>
         <FormError msg={expErr} />
-        <p class="muted">Удаление данных — через бота: /profile → 🗄 Мои данные → 🗑 Удалить всё.</p>
+        <p class="muted">
+          Удаление данных — через бота: /profile → 🗄 Мои данные → 🗑 Удалить всё.
+          <Info title="Почему удаление — в боте">
+            <p>
+              Полное удаление необратимо, поэтому оно намеренно вынесено в бота —
+              там оно требует явной команды и подтверждения, случайно не нажать.
+            </p>
+          </Info>
+        </p>
       </div>
     </>
   );

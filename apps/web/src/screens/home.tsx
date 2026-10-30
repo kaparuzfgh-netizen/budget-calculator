@@ -8,7 +8,7 @@ import { ApiError } from '../api';
 import type { Overview, Upcoming, UpcomingItem, WeekStatus } from '../api';
 import type { ScreenProps } from '../app';
 import { fmtDay, fmtMinor, fmtPct } from '../fmt';
-import { ErrorView, errorView, Loading, useData } from '../ui';
+import { ErrorView, errorView, Info, Loading, useData } from '../ui';
 
 const INCOME_SOURCE: Record<Overview['income_month_source'], string> = {
   actual: 'факт по записям',
@@ -145,9 +145,20 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
 
       {u.items.length > 0 && (
         <>
-          <h2>К оплате в {monthWord}</h2>
+          <h2>
+            К оплате в {monthWord}
+            <Info title="К оплате">
+              <p>
+                Регулярные платежи (🧾) и кредиты (🏦) этого месяца. «Оплатить»
+                записывает оплату в журнал — сумму можно поправить.
+              </p>
+              <p>
+                В день срока бот может отметить оплату сам — это настраивается в
+                карточке платежа.
+              </p>
+            </Info>
+          </h2>
           <div class="card">
-            <p class="muted">Регулярные платежи и кредиты этого месяца</p>
             <ul class="plain">
               {u.items.map((x) => (
                 <PayRow key={`${x.kind}:${x.id}`} api={api} item={x} onPaid={() => { nav.flash(`Оплачено: ${x.name}`); up.reload(); ov.reload(); }} />
@@ -180,7 +191,15 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         </div>
         <Bar pct={monthPct} />
         <div class="row">
-          <span class="muted">Burn rate</span>
+          <span class="muted">
+            Burn rate
+            <Info title="Burn rate">
+              <p>
+                Темп расхода бюджета: 100% — тратите ровно по плану к концу
+                недели; выше — быстрее, и бюджет кончится раньше.
+              </p>
+            </Info>
+          </span>
           <span class={w.burn_rate > 1 ? 'warn' : ''}>
             {fmtPct(w.burn_rate)}
             {w.burn_rate > 1 ? ' — тратим быстрее плана' : ''}
@@ -188,7 +207,16 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         </div>
       </div>
 
-      <h2>Доход за месяц</h2>
+      <h2>
+        Доход за месяц
+        <Info title="Откуда берётся доход">
+          <p>
+            Сначала — сумма ваших записей дохода за месяц. Если записей нет —
+            базовый доход из профиля. Если и он пуст — расчёт из ваших
+            обязательств (платежи + бюджет + кредиты).
+          </p>
+        </Info>
+      </h2>
       <div class="card">
         <div class="big">{fmtMinor(o.income_month_minor, o.income_month_currency)}</div>
         <div class="muted">

@@ -7,7 +7,7 @@ import { useState } from 'preact/hooks';
 import type { DebtsList, Profile, Report, ReportPeriod } from '../api';
 import type { ScreenProps } from '../app';
 import { fmtDay, fmtMinor } from '../fmt';
-import { ErrorView, errorView, Loading, useData } from '../ui';
+import { ErrorView, errorView, Info, Loading, useData } from '../ui';
 
 const PERIODS: { p: ReportPeriod; label: string }[] = [
   { p: 'week', label: 'Неделя' },
@@ -229,7 +229,19 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
               </div>
             </>
           )}
-          <p class="muted">Суммы пересчитаны по текущему курсу ({r.fx_as_of || '—'})</p>
+          <p class="muted">
+            Суммы пересчитаны по текущему курсу ({r.fx_as_of || '—'})
+            <Info title="Пересчёт валют">
+              <p>
+                Все суммы приводятся к выбранной валюте по курсу на сегодня — а
+                не по курсу дня записи.
+              </p>
+              <p>
+                Для точной сверки в исходной валюте выберите её в чипах валют
+                выше.
+              </p>
+            </Info>
+          </p>
         </>
       )}
     </>

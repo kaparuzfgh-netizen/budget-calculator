@@ -110,12 +110,46 @@ export function useFatalOn(cond: boolean, onFatal: () => void): void {
   }, [cond, onFatal]);
 }
 
-export function Field({ label, children }: { label: string; children: ComponentChildren }) {
+export function Field({ label, children }: { label: ComponentChildren; children: ComponentChildren }) {
   return (
     <label class="field">
       <span class="field-label">{label}</span>
       {children}
     </label>
+  );
+}
+
+/** Кнопка-подсказка «ⓘ»: открывает шторку с объяснением. */
+export function Info({ title, children }: { title: string; children: ComponentChildren }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        class="info"
+        aria-label="Подсказка"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(true);
+        }}
+      >
+        ⓘ
+      </button>
+      {open && (
+        <div class="pop-ov" onClick={() => setOpen(false)}>
+          <div class="pop" onClick={(e) => e.stopPropagation()}>
+            <div class="row spread pop-head">
+              <b>{title}</b>
+              <button type="button" class="info" onClick={() => setOpen(false)}>
+                ✕
+              </button>
+            </div>
+            <div class="pop-body">{children}</div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
