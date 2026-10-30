@@ -327,7 +327,7 @@ function ProfileForms({
 
   return (
     <>
-      <h2>� Бюджет</h2>
+      <h2>💸 Бюджет</h2>
       <div class="card">
         <form onSubmit={saveCap}>
           <div class="inline">
@@ -395,7 +395,7 @@ function ProfileForms({
 
       {payments}
 
-      <h2>� Доход</h2>
+      <h2>💵 Доход</h2>
       <div class="card">
         <form onSubmit={saveIncome}>
           <Field

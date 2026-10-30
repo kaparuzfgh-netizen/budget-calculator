@@ -4,6 +4,7 @@
  * на 401/403 через onAuthFail), подписанные поля форм.
  */
 import { useEffect, useState } from 'preact/hooks';
+import { createPortal } from 'preact/compat';
 import type { ComponentChildren } from 'preact';
 import { isAuthError } from './api';
 
@@ -119,7 +120,7 @@ export function Field({ label, children }: { label: ComponentChildren; children:
   );
 }
 
-/** Кнопка-подсказка «ⓘ»: открывает шторку с объяснением. */
+/** Кнопка-подсказка «ⓘ»: открывает шторку с объяснением (портал в body — стили родителя не наследуются). */
 export function Info({ title, children }: { title: string; children: ComponentChildren }) {
   const [open, setOpen] = useState(false);
   return (
@@ -127,28 +128,34 @@ export function Info({ title, children }: { title: string; children: ComponentCh
       <button
         type="button"
         class="info"
-        aria-label="Подсказка"
+        aria-label={`Подсказка: ${title}`}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setOpen(true);
         }}
       >
-        ⓘ
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9.5" />
+          <line x1="12" y1="11" x2="12" y2="16.5" />
+          <circle cx="12" cy="7.8" r="0.4" fill="currentColor" />
+        </svg>
       </button>
-      {open && (
-        <div class="pop-ov" onClick={() => setOpen(false)}>
-          <div class="pop" onClick={(e) => e.stopPropagation()}>
-            <div class="row spread pop-head">
-              <b>{title}</b>
-              <button type="button" class="info" onClick={() => setOpen(false)}>
-                ✕
-              </button>
+      {open &&
+        createPortal(
+          <div class="pop-ov" onClick={() => setOpen(false)}>
+            <div class="pop" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div class="pop-head">
+                <b>{title}</b>
+                <button type="button" class="pop-close" aria-label="Закрыть" onClick={() => setOpen(false)}>
+                  ✕
+                </button>
+              </div>
+              <div class="pop-body">{children}</div>
             </div>
-            <div class="pop-body">{children}</div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
