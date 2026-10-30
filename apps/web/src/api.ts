@@ -31,7 +31,7 @@ export interface AuthResponse {
   user?: { name: string | null };
 }
 
-export type IncomeSource = 'actual' | 'typical' | 'none' | 'override';
+export type IncomeSource = 'actual' | 'typical' | 'computed' | 'none' | 'override';
 
 export interface OverviewCommitment {
   name: string;
@@ -44,7 +44,7 @@ export interface Overview {
   base_currency: string;
   income_month_minor: number;
   income_month_currency: string;
-  income_month_source: 'actual' | 'typical' | 'none';
+  income_month_source: 'actual' | 'typical' | 'computed' | 'none';
   income_entries_count: number;
   commitments: OverviewCommitment[];
   weekly_budget_minor: number;
@@ -116,7 +116,11 @@ export interface IncomeList {
 /** GET /profile: без онбординга приходит только {onboarded:false}. */
 export interface Profile {
   onboarded: boolean;
+  /** хранимый базовый доход (0 — вычисляется из обязательств). */
   typical_income_minor?: number;
+  /** фактический базовый доход: при income_minor=0 — вычисленная сумма. */
+  baseline_income_minor?: number;
+  baseline_source?: 'explicit' | 'computed' | 'none';
   income_currency?: string;
   living_cap_minor?: number;
   living_currency?: string;
@@ -127,6 +131,8 @@ export interface Profile {
   timezone?: string;
   reminders_weekly?: number;
   reminders_payments?: number;
+  fx_alerts_enabled?: number;
+  vision_enabled?: number;
 }
 
 export interface Commitment {
@@ -292,6 +298,8 @@ export interface Api {
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   del<T>(path: string): Promise<T>;
+  /** Бинарный ответ (экспорт JSON): Bearer + один reauth — как у req. */
+  getBlob(path: string): Promise<Blob>;
 }
 
 interface ApiOpts {
@@ -340,11 +348,32 @@ export function createApi(opts: ApiOpts): Api {
     return data as T;
   };
 
+  /** Скачивание файла (Bearer, один reauth) — blob уходит в <a download>. */
+  const getBlob = async (path: string): Promise<Blob> => {
+    let res = await raw('GET', path, undefined, opts.getToken());
+    if (res.status === 401) {
+      reauthing ??= opts.reauth().finally(() => {
+        reauthing = null;
+      });
+      await reauthing;
+      res = await raw('GET', path, undefined, opts.getToken());
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new ApiError(res.status, 'forbidden', 'Нет доступа');
+    }
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
+      throw new ApiError(res.status, data.error?.code ?? 'error', data.error?.message ?? `Сервер ответил ${res.status}`);
+    }
+    return res.blob();
+  };
+
   return {
     get: (path) => req('GET', path),
     post: (path, body) => req('POST', path, body),
     patch: (path, body) => req('PATCH', path, body),
     del: (path) => req('DELETE', path),
+    getBlob,
   };
 }
 

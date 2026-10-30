@@ -110,7 +110,7 @@ export interface ReportInput {
   currency: Currency; // целевая валюта отчёта
   perUsd: Record<string, number>;
   fx_as_of: string;
-  livingCapMajor: number; // месячная норма повседневных, major (уже в currency)
+  livingCapMajor: number; // месячный бюджет повседневных, major (уже в currency)
   weeklyBudgetMajor: number; // недельный бюджет, major
   categories: { id: number; name: string; emoji: string }[];
   expenses: { id: number; spent_on: string; amount_minor: number; currency: string; note: string | null; category_id: number | null }[];

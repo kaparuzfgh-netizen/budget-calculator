@@ -95,20 +95,21 @@ beforeEach(async () => {
   }
 });
 
-async function setupUser(tgId: number, opts: { incomeMinor?: number } = {}) {
+async function setupUser(tgId: number, opts: { incomeMinor?: number; livingMinor?: number } = {}) {
   await env.DB.prepare("INSERT INTO users (telegram_id, role) VALUES (?, 'member')").bind(tgId).run();
   const uid = Number(
     (await env.DB.prepare('SELECT id FROM users WHERE telegram_id=?').bind(tgId).first<{ id: number }>())!.id,
   );
   await scoped(env.DB, uid).grantConsent('terms');
+  const living = opts.livingMinor ?? 6000000;
   await scoped(env.DB, uid).upsertProfile({
     base_currency: 'USD',
     income_currency: 'EUR',
     living_currency: 'RUB',
     timezone: 'Asia/Bishkek',
     income_minor: opts.incomeMinor ?? 620000,
-    living_cap_minor: 6000000,
-    weekly_budget_minor: Math.round((6000000 * 12) / 52),
+    living_cap_minor: living,
+    weekly_budget_minor: Math.round((living * 12) / 52),
     bonus_prepay_share: 0,
     bonus_dca_share: 0,
     onboarded_at: '2026-10-01',
@@ -141,6 +142,48 @@ describe('resolveIncome (чистая)', () => {
       amount: 0,
       source: 'none',
     });
+  });
+  it('computed: income_minor=0 → расчётный базовый; факт и override его бьют', () => {
+    const baseline = { amount: 1000, currency: 'EUR' };
+    // computed берётся, когда нет записей и явного базового
+    expect(
+      resolveIncome({ entries: [], typicalMinor: 0, incomeCcy: 'EUR', perUsd: pu, baseline }),
+    ).toMatchObject({ amount: 1000, source: 'computed' });
+    // факт > computed
+    expect(
+      resolveIncome({
+        entries: [{ amount_minor: 500000, currency: 'EUR' }],
+        typicalMinor: 0,
+        incomeCcy: 'EUR',
+        perUsd: pu,
+        baseline,
+      }),
+    ).toMatchObject({ source: 'actual', amount: 5000 });
+    // typical > computed (явный базовый не меняется)
+    expect(
+      resolveIncome({ entries: [], typicalMinor: 620000, incomeCcy: 'EUR', perUsd: pu, baseline }),
+    ).toMatchObject({ source: 'typical', amount: 6200 });
+    // override > computed
+    expect(
+      resolveIncome({
+        entries: [],
+        typicalMinor: 0,
+        incomeCcy: 'EUR',
+        perUsd: pu,
+        baseline,
+        override: { amount: 100, currency: 'USD' },
+      }),
+    ).toMatchObject({ source: 'override' });
+    // baseline=0 → none
+    expect(
+      resolveIncome({
+        entries: [],
+        typicalMinor: 0,
+        incomeCcy: 'EUR',
+        perUsd: pu,
+        baseline: { amount: 0, currency: 'EUR' },
+      }),
+    ).toMatchObject({ source: 'none' });
   });
 });
 
@@ -212,7 +255,7 @@ describe('/income', () => {
 });
 
 describe('/plan с фактом месяца', () => {
-  it('факт (записи) побивает типичный; «нет дохода» помечено', async () => {
+  it('факт (записи) побивает базовый; «нет дохода» помечено', async () => {
     const uid = await setupUser(OWNER + 44);
     await scoped(env.DB, uid).addIncomeEntry({
       month: monthInTz('Asia/Bishkek', new Date()),
@@ -221,22 +264,27 @@ describe('/plan с фактом месяца', () => {
       note: null,
       source_key: 'a',
     });
-    // факт 3000€ → USD 3270; типичный 6200€ игнорируется
+    // факт 3000€ → USD 3270; базовый 6200€ игнорируется
     await msg(OWNER + 44, '/plan');
     const t = last();
     expect(t).toContain('3 270 $');
     expect(t).toContain('факт за');
     expect(t).toContain('1 записей');
-    // без записей → типичный
+    // без записей → базовый
     const uid2 = await setupUser(OWNER + 45);
     void uid2;
     await msg(OWNER + 45, '/plan');
     expect(last()).toContain('6 758');
-    expect(last()).toContain('типичный');
-    // без дохода вообще
+    expect(last()).toContain('базовый');
+    // income_minor=0 → расчётный базовый = бюджет 60 000 ₽ ≈ 618,56 $
     const uid3 = await setupUser(OWNER + 46, { incomeMinor: 0 });
     void uid3;
     await msg(OWNER + 46, '/plan');
+    expect(last()).toContain('618,56 $');
+    expect(last()).toContain('расчёт: платежи + бюджет + кредиты');
+    // ни дохода, ни обязательств → «без дохода»
+    await setupUser(OWNER + 47, { incomeMinor: 0, livingMinor: 0 });
+    await msg(OWNER + 47, '/plan');
     expect(last()).toContain('без дохода');
     // override
     await msg(OWNER + 45, '/plan 1000 usd');
@@ -246,16 +294,16 @@ describe('/plan с фактом месяца', () => {
 });
 
 describe('редактирование профиля (pf:*)', () => {
-  it('типичный доход: изменить и убрать', async () => {
+  it('базовый доход: изменить и убрать', async () => {
     const uid = await setupUser(OWNER + 50);
     await msg(OWNER + 50, '⚙️ Профиль');
     await cb(OWNER + 50, 'pf:sec:income');
-    expect(last()).toContain('Типичный');
+    expect(last()).toContain('Базовый доход');
     await cb(OWNER + 50, 'pf:typ');
-    expect(last()).toContain('Новый типичный доход');
+    expect(last()).toContain('Новый базовый доход');
     await msg(OWNER + 50, '7500');
     expect(last()).toContain('7 500');
-    expect(last()).toContain('Типичный'); // PF_INCOME перерисован с новым значением
+    expect(last()).toContain('Базовый доход'); // PF_INCOME перерисован с новым значением
     expect((await scoped(env.DB, uid).getProfile())!.income_minor).toBe(750000);
     await cb(OWNER + 50, 'pf:sec:income');
     await cb(OWNER + 50, 'pf:typ');
@@ -264,7 +312,7 @@ describe('редактирование профиля (pf:*)', () => {
     expect((await scoped(env.DB, uid).getProfile())!.income_minor).toBe(0);
   });
 
-  it('повседневные: правка нормы пересчитывает недельный бюджет', async () => {
+  it('бюджет: правка месячной суммы пересчитывает недельный', async () => {
     const uid = await setupUser(OWNER + 51);
     await msg(OWNER + 51, '⚙️ Профиль');
     await cb(OWNER + 51, 'pf:sec:living'); // → PF_LIVING
@@ -350,7 +398,7 @@ describe('редактирование профиля (pf:*)', () => {
     await cb(OWNER + 55, 'ob:ic:EUR');
     expect(last()).toContain('Пропустить');
     await cb(OWNER + 55, 'ob:inc:skip');
-    expect(last()).toContain('Норма повседневных');
+    expect(last()).toContain('Бюджет повседневных');
     const uid55 = Number(
       (await env.DB.prepare('SELECT id FROM users WHERE telegram_id=?')
         .bind(OWNER + 55)

@@ -89,9 +89,9 @@ const COMM_KB: ReplyMarkup = {
   ],
 };
 const TERMS =
-  '«Бюджет-компаньон» хранит: профиль (доход, норма повседневных, таймзона), список обязательных ' +
+  '«Бюджет-компаньон» хранит: профиль (доход, бюджет повседневных, таймзона), список регулярных ' +
   'платежей и траты — в Cloudflare D1. Данные видите только вы и владелец сервиса. ' +
-  'Команды /export и /delete_me появятся скоро.\n\nСогласны?';
+  'Экспорт и удаление — в профиле бота.\n\nСогласны?';
 
 const send = (text: string, markup?: ReplyMarkup): ObEffect => ({ kind: 'send', text, ...(markup ? { markup } : {}) });
 const ok = (state: ObState | null, ...effects: ObEffect[]) => ({ state, effects });
@@ -109,13 +109,14 @@ function askIncomeCcy(): ObEffect {
 }
 function askIncomeAmount(d: ObData): ObEffect {
   return send(
-    `Типичный месячный доход в ${d.incomeCcy} (примерно, просто число — например 6200). ` +
-      'Если доход каждый месяц разный — нажмите «Пропустить» и вносите факт командой /income.',
+    `Базовый месячный доход в ${d.incomeCcy} — для расчётов (число, например 6200). ` +
+      '0 или «Пропустить» — вычислю сам из платежей, бюджета и кредитов.\n' +
+      'Если доход каждый месяц разный — «Пропустить» и вносите факт командой /income.',
     { inline_keyboard: [[{ text: 'Пропустить', callback_data: 'ob:inc:skip' }], [CANCEL_BTN]] },
   );
 }
 function askLiving(d: ObData): ObEffect {
-  return send(`Норма повседневных (еда/быт) в месяц? Число${d.incomeCcy ? ` — по умолчанию ${d.incomeCcy}` : ''}.`, {
+  return send(`Бюджет повседневных (еда/быт) в месяц? Число${d.incomeCcy ? ` — по умолчанию ${d.incomeCcy}` : ''}.`, {
     inline_keyboard: [[CANCEL_BTN]],
   });
 }
@@ -200,11 +201,17 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
 
     case 'income_amount': {
       if (cb === 'ob:inc:skip') {
-        d.incomeMinor = 0; // типичный доход не задан — факт через /income
+        d.incomeMinor = 0; // базовый доход — вычисляется из обязательств
         d.livingCcy = d.incomeCcy;
         return ok({ step: 'living_cap', data: d }, askLiving(d));
       }
       if (input.type !== 'text') return ok(state, askIncomeAmount(d));
+      // «0» и «пропустить» — как кнопка: базовый доход вычисляется
+      if (text === '0' || /^пропустить$/i.test(text)) {
+        d.incomeMinor = 0;
+        d.livingCcy = d.incomeCcy;
+        return ok({ step: 'living_cap', data: d }, askLiving(d));
+      }
       try {
         const a = parseAmount(text);
         d.incomeMinor = toMinor(a.amount);
@@ -238,7 +245,7 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
         return ok(
           { step: 'commitments', data: d },
           send(
-            'Обязательные платежи — по одному в строке:\n' +
+            'Регулярные платежи — по одному в строке:\n' +
               '<code>Аренда 700 usd 1</code> (название сумма [валюта] [день месяца])\n\n' +
               commitmentsList(d),
             COMM_KB,
@@ -256,7 +263,7 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
       return ok(
         { step: 'commitments', data: d },
         send(
-          'Обязательные платежи — по одному в строке:\n<code>Аренда 700 usd 1</code>\n\n' + commitmentsList(d),
+          'Регулярные платежи — по одному в строке:\n<code>Аренда 700 usd 1</code>\n\n' + commitmentsList(d),
           COMM_KB,
         ),
       );
@@ -267,9 +274,9 @@ export function advance(state: ObState, input: ObInput): { state: ObState | null
         const weekly = Math.round(((d.livingMinor ?? 0) * 12) / 52);
         const summary =
           '✅ Профиль сохранён:\n' +
-          `Доход: ${fmtMoney((d.incomeMinor ?? 0) / 100, d.incomeCcy ?? 'USD')}\n` +
-          `Повседневные: ${fmtMoney((d.livingMinor ?? 0) / 100, d.livingCcy ?? 'USD')} (недельный ≈ ${fmtMoney(weekly / 100, d.livingCcy ?? 'USD')})\n` +
-          `Таймзона: ${escapeHtml(d.tz ?? 'UTC')}\nПлатежи:\n${commitmentsList(d)}\n\n` +
+          `Базовый доход: ${d.incomeMinor ? fmtMoney(d.incomeMinor / 100, d.incomeCcy ?? 'USD') : 'вычисляется: платежи + бюджет + кредиты'}\n` +
+          `Бюджет: ${fmtMoney((d.livingMinor ?? 0) / 100, d.livingCcy ?? 'USD')} (недельный ≈ ${fmtMoney(weekly / 100, d.livingCcy ?? 'USD')})\n` +
+          `Таймзона: ${escapeHtml(d.tz ?? 'UTC')}\nРегулярные платежи:\n${commitmentsList(d)}\n\n` +
           'Главное меню — /menu.';
         return ok(null, { kind: 'persist', data: d }, { kind: 'done' }, send(summary, homeMarkup()));
       }

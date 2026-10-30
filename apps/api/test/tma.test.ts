@@ -259,7 +259,10 @@ describe('JWT-гейт /api/tma/overview', () => {
     const rB = await overviewGet(await tokenFor(612));
     expect(rB.status).toBe(200);
     const o = (await rB.json()) as Record<string, unknown>;
-    expect(o.income_month_minor).toBe(0);
+    // income_minor=0 → базовый доход вычисляется из обязательств B:
+    // только бюджет 10 000 (платёж A «Аренда» 700 в расчёт не попал = изоляция)
+    expect(o.income_month_minor).toBe(1000000);
+    expect(o.income_month_source).toBe('computed');
     expect(o.spent_week_minor).toBe(0);
     expect(o.spent_month_minor).toBe(0);
     expect(o.commitments).toEqual([]);

@@ -1,11 +1,11 @@
 /**
- * profile.tsx — «Профиль» и обязательные платежи.
+ * profile.tsx — «Профиль» и регулярные платежи.
  *
  * ProfileScreen: GET /api/tma/profile + /api/tma/commitments.
- *   Формы: типичный доход (typical_income+income_currency), повседневные
- *   (living_cap+living_currency+expense_currency — сервер пересчитает
- *   недельный бюджет ×12/52),
- *   таймзона (пресеты + свой IANA-ввод, проверка через Intl).
+ *   Секции: ДОХОД (валюта + «Базовый доход» под «Ещё ▸»; 0 — вычисляется),
+ *   БЮДЖЕТ (living_cap+living_currency+expense_currency — сервер пересчитает
+ *   недельный бюджет ×12/52), ЧАСОВОЙ ПОЯС, НАПОМИНАНИЯ (4 переключателя),
+ *   ДАННЫЕ (экспорт JSON через getBlob; удаление — в боте).
  * CommitmentScreen: карточка платежа — PATCH amount/due_day и
  *   тогл active; удаление только с подтверждением.
  * CommitmentAddScreen: name+amount+currency+due_day → POST.
@@ -24,6 +24,7 @@ import {
   nameError,
   parseAmount,
   timezoneError,
+  todayIso,
 } from '../fmt';
 import { ErrorView, errorView, Field, FormError, Loading, useData, useFatalOn } from '../ui';
 
@@ -60,7 +61,7 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
       <ProfileForms key={profileKey(p)} api={api} nav={nav} p={p} reload={prof.reload} />
 
       <div class="row spread">
-        <h2>Платежи</h2>
+        <h2>🧾 Регулярные платежи</h2>
         <button
           type="button"
           class="btn sm"
@@ -69,6 +70,7 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
           ➕ Добавить
         </button>
       </div>
+      <p class="muted">Аренда, связь, подписки — списываются каждый месяц. Кредиты — отдельно в 🏦.</p>
       <div class="card">
         {com.data.commitments.length ? (
           <ul class="plain">
@@ -91,7 +93,7 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Обязательных платежей нет.</p>
+          <p class="muted">Регулярных платежей нет.</p>
         )}
       </div>
     </>
@@ -112,6 +114,46 @@ function profileKey(p: Profile): string {
 
 // ── формы профиля ──
 
+/** Переключатель-«тогл» в стиле iOS: PATCH по change, без submit-кнопки. */
+function Switch({
+  label,
+  hint,
+  checked,
+  busy,
+  onToggle,
+}: {
+  label: string;
+  hint?: string | undefined;
+  checked: boolean;
+  busy: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div class="row spread switch-row">
+      <span>
+        {label}
+        {hint ? <span class="muted switch-hint">{hint}</span> : null}
+      </span>
+      <label class="switch">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={busy}
+          onChange={() => onToggle()}
+        />
+        <i />
+      </label>
+    </div>
+  );
+}
+
+const REMINDERS: { key: 'reminders_weekly' | 'reminders_payments' | 'fx_alerts_enabled' | 'vision_enabled'; label: string; hint: string }[] = [
+  { key: 'reminders_weekly', label: 'Еженедельный итог', hint: 'вс 20:00 — траты недели' },
+  { key: 'reminders_payments', label: 'Платежи и сроки', hint: 'за 2 дня до срока, 10:00' },
+  { key: 'fx_alerts_enabled', label: '💱 Алерты по курсам', hint: 'выгодные моменты для обмена' },
+  { key: 'vision_enabled', label: '📷 Скриншоты банка', hint: 'распознавание — фото уходит в Google AI' },
+];
+
 function ProfileForms({
   api,
   nav,
@@ -123,13 +165,14 @@ function ProfileForms({
   p: Profile;
   reload: () => void;
 }) {
-  // типичный доход (0 = «не задан» — ввод 0 разрешён)
+  // базовый доход (0 = «вычисляется» — поле скрыто за «Ещё ▸»)
   const [inc, setInc] = useState(String((p.typical_income_minor ?? 0) / 100 || ''));
   const [incCcy, setIncCcy] = useState(p.income_currency ?? 'USD');
+  const [incMore, setIncMore] = useState(false);
   const [incErr, setIncErr] = useState<string | null>(null);
   const [incBusy, setIncBusy] = useState(false);
 
-  // повседневные (норма + валюта трат по умолчанию)
+  // бюджет (месячный + валюта трат по умолчанию)
   const [cap, setCap] = useState(String((p.living_cap_minor ?? 0) / 100 || ''));
   const [capCcy, setCapCcy] = useState(p.living_currency ?? 'USD');
   const [expCcy, setExpCcy] = useState(p.expense_currency ?? '');
@@ -144,10 +187,18 @@ function ProfileForms({
   const [tzErr, setTzErr] = useState<string | null>(null);
   const [tzBusy, setTzBusy] = useState(false);
 
+  // напоминания — переключатели сразу PATCH'ат
+  const [remBusy, setRemBusy] = useState(false);
+  const [remErr, setRemErr] = useState<string | null>(null);
+
+  // экспорт
+  const [expBusy, setExpBusy] = useState(false);
+  const [expErr, setExpErr] = useState<string | null>(null);
+
   const saveIncome = async (ev: Event) => {
     ev.preventDefault();
     const n = parseAmount(inc);
-    if (n === null || n < 0) return setIncErr('Сумма — число ≥ 0 (0 — «не задан»)');
+    if (n === null || n < 0) return setIncErr('Сумма — число ≥ 0 (0 — вычисляется)');
     if (n > 1e9) return setIncErr('Слишком большая сумма');
     const cErr = currencyError(incCcy);
     if (cErr) return setIncErr(cErr);
@@ -158,7 +209,7 @@ function ProfileForms({
         typical_income: n,
         income_currency: incCcy.trim().toUpperCase(),
       });
-      nav.flash('Типичный доход сохранён');
+      nav.flash('Доход сохранён');
       reload();
     } catch (e) {
       setIncErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
@@ -183,10 +234,10 @@ function ProfileForms({
       await api.patch('/api/tma/profile', {
         living_cap: parseAmount(cap),
         living_currency: capCcy.trim().toUpperCase(),
-        // пусто → null: валюта трат снова = валюта нормы
+        // пусто → null: валюта трат снова = валюта бюджета
         expense_currency: expCcy.trim() ? expCcy.trim().toUpperCase() : null,
       });
-      nav.flash('Повседневные сохранены — недельный бюджет пересчитан');
+      nav.flash('Бюджет сохранён — недельный пересчитан');
       reload();
     } catch (e) {
       setCapErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
@@ -216,40 +267,93 @@ function ProfileForms({
     }
   };
 
+  const toggleReminder = async (key: (typeof REMINDERS)[number]['key'], value: boolean) => {
+    setRemBusy(true);
+    setRemErr(null);
+    try {
+      await api.patch('/api/tma/profile', { [key]: value });
+      nav.flash('Напоминания обновлены');
+      reload();
+    } catch (e) {
+      setRemErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
+    } finally {
+      setRemBusy(false);
+    }
+  };
+
+  const doExport = async () => {
+    setExpBusy(true);
+    setExpErr(null);
+    try {
+      const blob = await api.getBlob('/api/tma/export');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `budget-export-${todayIso()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      nav.flash('Экспорт скачан');
+    } catch (e) {
+      setExpErr(e instanceof ApiError ? e.message : 'Не удалось выгрузить — проверьте соединение');
+    } finally {
+      setExpBusy(false);
+    }
+  };
+
   return (
     <>
-      <h2>Типичный доход</h2>
+      <h2>💵 Доход</h2>
       <div class="card">
+        <div class="row">
+          <span>Записи месяца — факт дохода</span>
+          <button type="button" class="rowbtn" onClick={() => nav.push({ id: 'income' })}>
+            Открыть →
+          </button>
+        </div>
         <form onSubmit={saveIncome}>
-          <div class="inline">
-            <Field label="Сумма в месяц">
-              <input
-                inputMode="decimal"
-                value={inc}
-                onInput={(e) => setInc((e.target as HTMLInputElement).value)}
-              />
-            </Field>
-            <Field label="Валюта">
-              <input
-                maxLength={5}
-                value={incCcy}
-                onInput={(e) => setIncCcy((e.target as HTMLInputElement).value)}
-              />
-            </Field>
-          </div>
-          <p class="muted">0 — не задан</p>
+          <Field label="Валюта доходов (по умолчанию)">
+            <input
+              maxLength={5}
+              value={incCcy}
+              onInput={(e) => setIncCcy((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+          {p.baseline_source === 'computed' && (p.typical_income_minor ?? 0) === 0 ? (
+            <p class="muted">
+              Базовый доход: ≈ {fmtMinor(p.baseline_income_minor ?? 0, p.income_currency ?? 'USD')} — вычисляется:
+              платежи + бюджет + кредиты
+            </p>
+          ) : null}
+          <button type="button" class="more" onClick={() => setIncMore(!incMore)}>
+            {incMore ? 'Ещё ▾' : 'Ещё ▸'}
+          </button>
+          {incMore && (
+            <>
+              <Field label="Базовый доход">
+                <input
+                  inputMode="decimal"
+                  placeholder="например, 6200"
+                  value={inc}
+                  onInput={(e) => setInc((e.target as HTMLInputElement).value)}
+                />
+              </Field>
+              <p class="muted">0 — вычисляется: платежи + бюджет + кредиты</p>
+            </>
+          )}
           <FormError msg={incErr} />
           <button type="submit" class="btn" disabled={incBusy}>
-            Сохранить доход
+            Сохранить
           </button>
         </form>
       </div>
 
-      <h2>Повседневные</h2>
+      <h2>💸 Бюджет</h2>
       <div class="card">
         <form onSubmit={saveCap}>
           <div class="inline">
-            <Field label="Норма на месяц">
+            <Field label="Бюджет на месяц">
               <input
                 inputMode="decimal"
                 value={cap}
@@ -264,7 +368,7 @@ function ProfileForms({
               />
             </Field>
           </div>
-          <Field label="Валюта повседневных трат">
+          <Field label="Валюта повседневных трат (по умолчанию)">
             <input
               maxLength={5}
               placeholder={capCcy}
@@ -272,7 +376,7 @@ function ProfileForms({
               onInput={(e) => setExpCcy((e.target as HTMLInputElement).value)}
             />
           </Field>
-          <p class="muted">пусто — как валюта нормы</p>
+          <p class="muted">пусто — как валюта бюджета; в форме траты можно выбрать другую</p>
           <p class="muted">
             Недельный бюджет: {fmtMinor(p.weekly_budget_minor ?? 0, p.living_currency ?? 'USD')}
           </p>
@@ -283,7 +387,7 @@ function ProfileForms({
         </form>
       </div>
 
-      <h2>Часовой пояс</h2>
+      <h2>🌍 Часовой пояс</h2>
       <div class="card">
         <form onSubmit={saveTz}>
           <Field label="Таймзона (IANA)">
@@ -311,6 +415,31 @@ function ProfileForms({
             Сохранить пояс
           </button>
         </form>
+      </div>
+
+      <h2>🔔 Напоминания</h2>
+      <div class="card">
+        {REMINDERS.map((r) => (
+          <Switch
+            key={r.key}
+            label={r.label}
+            hint={r.hint}
+            checked={!!p[r.key]}
+            busy={remBusy}
+            onToggle={() => void toggleReminder(r.key, !p[r.key])}
+          />
+        ))}
+        <FormError msg={remErr} />
+      </div>
+
+      <h2>🗄 Данные</h2>
+      <div class="card">
+        <p class="muted">Экспорт — JSON со всеми вашими данными (профиль, платежи, траты, доход).</p>
+        <button type="button" class="btn" disabled={expBusy} onClick={() => void doExport()}>
+          {expBusy ? 'Готовлю файл…' : '📤 Экспорт данных (JSON)'}
+        </button>
+        <FormError msg={expErr} />
+        <p class="muted">Удаление данных — через бота: /profile → 🗄 Мои данные → 🗑 Удалить всё.</p>
       </div>
     </>
   );
@@ -474,6 +603,7 @@ function CommitmentCard({
             Этот месяц:{' '}
             {item.paid_this_month ? `✅ оплачен ${item.last_paid_on ? fmtDay(item.last_paid_on) : ''}` : 'не оплачен'}
           </p>
+          <p class="muted">В день срока бот отметит оплату сам, напомнит за 2 дня.</p>
           <FormError msg={err} />
           <button type="submit" class="btn" disabled={busy}>
             Сохранить

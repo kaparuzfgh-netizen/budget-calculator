@@ -111,7 +111,7 @@ const WEEKLY_MK: { inline_keyboard: InlineButton[][] } = {
 const autoPostMk = (debts: boolean, commits: boolean): { inline_keyboard: InlineButton[][] } => ({
   inline_keyboard: [
     ...(debts ? [[{ text: '🏦 Кредиты', callback_data: 'nv:go:DEBTS' }]] : []),
-    ...(commits ? [[{ text: '🧾 Платежи', callback_data: 'nv:go:PF_COMMITS' }]] : []),
+    ...(commits ? [[{ text: '🧾 Регулярные платежи', callback_data: 'nv:go:PF_COMMITS' }]] : []),
     [{ text: '🏠 Меню', callback_data: 'nv:home' }],
   ],
 });

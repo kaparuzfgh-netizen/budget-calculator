@@ -6,7 +6,7 @@ import { createRouter } from '../src/http/router';
 import { FxUnavailable, type FxProvider } from '../src/fx/provider';
 import { scoped } from '../src/db/repo';
 import { signJwt } from '../src/tma/auth';
-import { todayInTz } from '../src/bot/parse';
+import { monthInTz, todayInTz } from '../src/bot/parse';
 
 const JWT_SECRET = 'tma-api-secret';
 const RATES: Record<string, number> = { EUR: 0.9, RUB: 97, KZT: 500 };
@@ -26,7 +26,7 @@ const tenv = () => ({ ...env, JWT_SECRET, TELEGRAM_BOT_TOKEN: 't', TELEGRAM_WEBH
 
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
-  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'commitments', 'profiles', 'consents', 'reminder_log', 'rate_limit', 'audit_log', 'processed_updates', 'invites', 'users'])
+  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'debt_events', 'debts', 'loan_events', 'loans', 'exchanges', 'commitments', 'profiles', 'consents', 'reminder_log', 'rate_limit', 'audit_log', 'processed_updates', 'invites', 'users'])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 
@@ -63,6 +63,7 @@ describe('/api/tma/* — контракт', () => {
       ['GET', '/api/tma/commitments'], ['POST', '/api/tma/commitments'],
       ['GET', '/api/tma/commitments/1/payments'], ['POST', '/api/tma/commitments/1/payments'],
       ['PATCH', '/api/tma/commitment-payments/1'], ['DELETE', '/api/tma/commitment-payments/1'],
+      ['GET', '/api/tma/export'],
     ] as const) expect((await api(p, { method: m, body: {} })).status, `${m} ${p}`).toBe(401);
   });
 
@@ -77,7 +78,7 @@ describe('/api/tma/* — контракт', () => {
     expect(o.month_cap_minor).toBe(6000000);
   });
 
-  it('plan: источник дохода аргумент > факт > типичный; PATCH профиля меняет план', async () => {
+  it('plan: источник дохода аргумент > факт > базовый (typical); PATCH профиля меняет план', async () => {
     const { token } = await user(900002);
     const p1 = (await (await api('/api/tma/plan', { token })).json()) as { income_source: string; income_minor: number };
     expect(p1.income_source).toBe('typical');
@@ -222,6 +223,100 @@ describe('/api/tma/* — контракт', () => {
       commitments: { paid_this_month: boolean }[];
     };
     expect(list2.commitments[0]!.paid_this_month).toBe(false);
+  });
+});
+
+describe('базовый доход: explicit/computed/none, напоминания, экспорт', () => {
+  it('profile GET: baseline_source + baseline_income_minor; PATCH — тоглы напоминаний', async () => {
+    const { uid, token } = await user(900040);
+    // explicit: income_minor > 0 — хранимое значение, поведение не меняется
+    const g1 = (await (await api('/api/tma/profile', { token })).json()) as {
+      baseline_source: string;
+      baseline_income_minor: number;
+      typical_income_minor: number;
+      reminders_weekly: number;
+      vision_enabled: number;
+    };
+    expect(g1.baseline_source).toBe('explicit');
+    expect(g1.baseline_income_minor).toBe(100000);
+    expect(g1.typical_income_minor).toBe(100000);
+    // тоглы: reminders_weekly → 0, vision_enabled → 1
+    expect(
+      (await api('/api/tma/profile', {
+        method: 'PATCH', token, body: { reminders_weekly: false, vision_enabled: true },
+      })).status,
+    ).toBe(200);
+    const p = (await scoped(env.DB, uid).getProfile())!;
+    expect(p.reminders_weekly).toBe(0);
+    expect(p.vision_enabled).toBe(1);
+    // computed: income_minor=0 → платежи + бюджет + кредиты; займы НЕ входят
+    await scoped(env.DB, uid).patchProfile({ income_minor: 0 });
+    await scoped(env.DB, uid).addCommitment({ name: 'Аренда', amount_minor: 70000, currency: 'USD', due_day: 1 });
+    await scoped(env.DB, uid).addDebt({
+      name: 'Кредит', currency: 'USD', rate: 0.1, frequency: 'monthly',
+      initial_balance_minor: 1000000, initial_payment_minor: 50000, epoch: '2024-01-05', due_day: 5,
+    });
+    await scoped(env.DB, uid).addLoan({
+      counterparty: 'Вася', direction: 'owe', amount_minor: 99999900, currency: 'USD', due_on: null, note: null,
+    });
+    const g2 = (await (await api('/api/tma/profile', { token })).json()) as {
+      baseline_source: string;
+      baseline_income_minor: number;
+    };
+    expect(g2.baseline_source).toBe('computed');
+    // 60 000 бюджет + 700 платёж + 500 платёж кредита = 61 200; займ исключён
+    expect(g2.baseline_income_minor).toBe(6120000);
+  });
+
+  it('profile GET: ни дохода, ни обязательств → baseline_source none', async () => {
+    const { uid, token } = await user(900041);
+    await scoped(env.DB, uid).patchProfile({ income_minor: 0, living_cap_minor: 0 });
+    const g = (await (await api('/api/tma/profile', { token })).json()) as {
+      baseline_source: string;
+      baseline_income_minor: number;
+    };
+    expect(g.baseline_source).toBe('none');
+    expect(g.baseline_income_minor).toBe(0);
+  });
+
+  it('plan: income_minor=0 → computed (платежи+бюджет+кредиты); факт бьёт computed', async () => {
+    const { uid, token } = await user(900042);
+    await scoped(env.DB, uid).patchProfile({ income_minor: 0 });
+    await scoped(env.DB, uid).addCommitment({ name: 'A', amount_minor: 70000, currency: 'USD', due_day: 1 });
+    const p1 = (await (await api('/api/tma/plan', { token })).json()) as {
+      income_source: string;
+      income_minor: number;
+    };
+    expect(p1.income_source).toBe('computed');
+    expect(p1.income_minor).toBe(6070000); // 60 000 + 700
+    await scoped(env.DB, uid).addIncomeEntry({
+      month: monthInTz('UTC', new Date()), amount_minor: 300000, currency: 'USD', note: null, source_key: 'k',
+    });
+    const p2 = (await (await api('/api/tma/plan', { token })).json()) as { income_source: string; income_minor: number };
+    expect(p2.income_source).toBe('actual');
+    expect(p2.income_minor).toBe(300000);
+  });
+
+  it('export: JSON только своих данных, attachment; изоляция tenant', async () => {
+    const A = await user(900043);
+    const B = await user(900044);
+    await scoped(env.DB, A.uid).addCommitment({ name: 'A-тайное', amount_minor: 1, currency: 'USD', due_day: 1 });
+    await scoped(env.DB, B.uid).addCommitment({ name: 'B-данные', amount_minor: 2, currency: 'USD', due_day: 2 });
+    const res = await api('/api/tma/export', { token: A.token });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(res.headers.get('content-disposition')).toContain('budget-export-');
+    const j = (await res.json()) as {
+      schema_version: number;
+      commitments: { name: string; user_id: number }[];
+      profile: { user_id: number } | null;
+    };
+    expect(j.schema_version).toBe(5);
+    expect(j.profile?.user_id).toBe(A.uid);
+    const names = j.commitments.map((x) => x.name);
+    expect(names).toContain('A-тайное');
+    expect(names).not.toContain('B-данные');
+    expect(j.commitments.every((x) => x.user_id === A.uid)).toBe(true);
   });
 });
 

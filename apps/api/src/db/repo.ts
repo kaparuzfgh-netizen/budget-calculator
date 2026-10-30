@@ -251,7 +251,7 @@ export function scoped(db: Env['DB'], userId: number) {
         .run();
     },
 
-    // ── обязательные платежи ──
+    // ── регулярные платежи ──
     listCommitments(activeOnly = true) {
       return db
         .prepare(`SELECT * FROM commitments WHERE user_id = ?${activeOnly ? ' AND active = 1' : ''} ORDER BY id`)

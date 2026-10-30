@@ -1,5 +1,5 @@
 /**
- * plan.tsx — «План» месяца: доход (с источником), обязательные платежи,
+ * plan.tsx — «План» месяца: доход (с источником), регулярные платежи,
  * повседневные и свободный остаток. Все итоговые суммы — в USD
  * (*_usd_minor по контракту). «Указать доход вручную» → повторный
  * GET /api/tma/plan?income=&currency= (источник «задано вручную»).
@@ -12,7 +12,8 @@ import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui'
 
 const INCOME_SOURCE: Record<IncomeSource, string> = {
   actual: 'факт по записям',
-  typical: 'типичный доход',
+  typical: 'базовый доход',
+  computed: 'расчёт (обязательства)',
   override: 'задано вручную',
   none: 'не указан',
 };
@@ -72,7 +73,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
         </div>
       </div>
 
-      <h2>Обязательные платежи</h2>
+      <h2>Регулярные платежи</h2>
       <div class="card">
         {p.commitments.length ? (
           <ul class="plain">
@@ -89,10 +90,10 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Нет обязательных платежей.</p>
+          <p class="muted">Нет регулярных платежей.</p>
         )}
         <div class="row">
-          <span>Итого платежи</span>
+          <span>Итого</span>
           <b>{fmtMinor(p.mandatory_usd_minor, usd)}</b>
         </div>
       </div>
@@ -100,7 +101,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
       <h2>Итог</h2>
       <div class="card">
         <div class="row">
-          <span>Повседневные</span>
+          <span>Бюджет</span>
           <b>{fmtMinor(p.living_usd_minor, usd)}</b>
         </div>
         <div class="row">

@@ -110,11 +110,11 @@ describe('онбординг (happy path через webhook)', () => {
     await cb(OWNER, 'ob:ic:EUR');
     expect(last()).toContain('месячный доход');
     await msg(OWNER, '6200');
-    expect(last()).toContain('Норма повседневных');
+    expect(last()).toContain('Бюджет повседневных');
     await msg(OWNER, '60000 rub');
     expect(last()).toContain('часовой пояс');
     await cb(OWNER, 'ob:tz:Asia/Bishkek');
-    expect(last()).toContain('Обязательные платежи');
+    expect(last()).toContain('Регулярные платежи');
     await msg(OWNER, 'Аренда 700 usd 1');
     expect(last()).toContain('Аренда');
     await msg(OWNER, 'Комуналка 30000 rub');
@@ -154,6 +154,30 @@ describe('онбординг (happy path через webhook)', () => {
     await cb(OWNER, 'ob:ic:X');
     await msg(OWNER, 'RUB'); // поддерживается fake-провайдером
     expect(last()).toContain('месячный доход');
+  });
+
+  it('доход опционален: «0» и «пропустить» → income_minor=0 и дальше', async () => {
+    // «0» текстом
+    await msg(OWNER, 'x');
+    await msg(OWNER, '/start');
+    await cb(OWNER, 'ob:terms:ok');
+    await cb(OWNER, 'ob:ic:USD');
+    await msg(OWNER, '0');
+    expect(last()).toContain('Бюджет повседневных');
+    await msg(OWNER, '500');
+    await cb(OWNER, 'ob:tz:UTC');
+    await cb(OWNER, 'ob:com:done');
+    expect(last()).toContain('Базовый доход: вычисляется');
+    const p = await scoped(env.DB, 1).getProfile();
+    expect(p?.income_minor).toBe(0);
+    // «пропустить» текстом — тот же путь, что и кнопка (профиль сброшен → рестарт)
+    await env.DB.prepare('DELETE FROM profiles').run();
+    await env.DB.prepare('DELETE FROM conversation_state').run();
+    await msg(OWNER, '/start');
+    await cb(OWNER, 'ob:terms:ok');
+    await cb(OWNER, 'ob:ic:USD');
+    await msg(OWNER, 'Пропустить');
+    expect(last()).toContain('Бюджет повседневных');
   });
 
   it('/id от незнакомца когда owner задан → тишина', async () => {

@@ -20,6 +20,7 @@ import { resolveIncome } from '../bot/features';
 import { isValidTimezone, monthInTz, todayInTz, weekStartInTz } from '../bot/parse';
 import { matchCategory } from '../domain/categories';
 import { buildUserReport } from '../services/report';
+import { baselineIncome } from '../services/baseline';
 import type { Period } from '../domain/report';
 import { debtViews } from '../services/debts';
 import { dueDateFor } from '../services/reminders';
@@ -109,6 +110,11 @@ const profilePatchSchema = z.object({
   /** Валюта повседневных трат по умолчанию; null — вернуться к living_currency. */
   expense_currency: zCcy.nullable().optional(),
   timezone: z.string().optional(),
+  // переключатели напоминаний/фич — все 4, как в боте
+  reminders_weekly: z.boolean().optional(),
+  reminders_payments: z.boolean().optional(),
+  fx_alerts_enabled: z.boolean().optional(),
+  vision_enabled: z.boolean().optional(),
 });
 
 export function registerTmaApi(
@@ -130,12 +136,16 @@ export function registerTmaApi(
       if (override && (!Number.isFinite(override.amount) || override.amount <= 0 || override.amount > LIMITS.maxAmount))
         return c.json(bad('сумма дохода недопустима').body, 400);
       if (override && !CCY_RE.test(override.currency)) return c.json(bad('валюта недопустима').body, 400);
-      const month = monthInTz(p.timezone, new Date());
+      const now = new Date();
+      const month = monthInTz(p.timezone, now);
       const commits = (await repo.listCommitments()).results;
       const entries = (await repo.listIncomeEntries(month)).results;
+      // базовый доход: явный (income_minor>0) или вычисленный из обязательств
+      const base = await baselineIncome(repo, p, { get: fxGet(c, fx) }, todayInTz(p.timezone, now));
       const fxr: FxResult = await fxGet(c, fx)([
         p.income_currency,
         p.living_currency,
+        base.currency,
         ...(override ? [override.currency] : []),
         ...entries.map((e) => e.currency),
         ...commits.map((x) => x.currency),
@@ -146,11 +156,12 @@ export function registerTmaApi(
         incomeCcy: p.income_currency,
         perUsd: fxr.perUsd,
         ...(override ? { override } : {}),
+        ...(base.source === 'computed' ? { baseline: { amount: base.amount, currency: base.currency } } : {}),
       });
       const mandatoryUsd = commits.reduce((s, x) => s + usd(x.amount_minor / 100, x.currency, fxr.perUsd), 0);
       const w = computeWaterfall({
         income: { amount: inc.amount, currency: inc.currency },
-        baseIncomeUsd: usd(p.income_minor / 100, p.income_currency, fxr.perUsd),
+        baseIncomeUsd: usd(base.amount, base.currency, fxr.perUsd),
         mandatoryUsd,
         livingCap: { amount: p.living_cap_minor / 100, currency: p.living_currency },
         bonusPrepayShare: p.bonus_prepay_share,
@@ -524,9 +535,24 @@ export function registerTmaApi(
   app.get('/api/tma/profile', tmaAuth, async (c) => {
     const p = await repoOf(c).getProfile();
     if (!p) return c.json({ onboarded: false }, 200);
+    // базовый доход: хранимое значение + источник (explicit/computed/none);
+    // при income_minor=0 — вычисленное значение для отображения
+    let baselineMinor = p.income_minor;
+    let baselineSource: 'explicit' | 'computed' | 'none' = p.income_minor > 0 ? 'explicit' : 'none';
+    try {
+      const base = await baselineIncome(repoOf(c), p, { get: fxGet(c, fx) }, todayInTz(p.timezone, new Date()));
+      baselineSource = base.source;
+      if (base.source === 'computed') baselineMinor = toMinor(base.amount);
+    } catch (e) {
+      const f = fail(e);
+      if (!f) throw e;
+      return c.json(f.body, f.status as 400);
+    }
     return okJson(c, {
       onboarded: !!p.onboarded_at,
       typical_income_minor: p.income_minor,
+      baseline_income_minor: baselineMinor,
+      baseline_source: baselineSource,
       income_currency: p.income_currency,
       living_cap_minor: p.living_cap_minor,
       living_currency: p.living_currency,
@@ -536,6 +562,8 @@ export function registerTmaApi(
       timezone: p.timezone,
       reminders_weekly: p.reminders_weekly,
       reminders_payments: p.reminders_payments,
+      fx_alerts_enabled: p.fx_alerts_enabled,
+      vision_enabled: p.vision_enabled,
     });
   });
   app.patch('/api/tma/profile', tmaAuth, async (c) => {
@@ -558,10 +586,26 @@ export function registerTmaApi(
       patch.weekly_budget_minor = Math.round((minor * 12) / 52);
     }
     if (b.timezone !== undefined) patch.timezone = b.timezone;
+    if (b.reminders_weekly !== undefined) patch.reminders_weekly = b.reminders_weekly ? 1 : 0;
+    if (b.reminders_payments !== undefined) patch.reminders_payments = b.reminders_payments ? 1 : 0;
+    if (b.fx_alerts_enabled !== undefined) patch.fx_alerts_enabled = b.fx_alerts_enabled ? 1 : 0;
+    if (b.vision_enabled !== undefined) patch.vision_enabled = b.vision_enabled ? 1 : 0;
     if (!Object.keys(patch).length) return c.json(bad('нет полей для изменения').body, 400);
     await repo.patchProfile(patch);
     const np = await repo.getProfile();
     return okJson(c, { ok: true, weekly_budget_minor: np!.weekly_budget_minor });
+  });
+
+  // ── export: все данные пользователя JSON-файлом (паритет бота /export) ──
+  app.get('/api/tma/export', tmaAuth, async (c) => {
+    const data = await repoOf(c).exportUserData();
+    const today = new Date().toISOString().slice(0, 10);
+    return new Response(JSON.stringify(data, null, 2), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="budget-export-${today}.json"`,
+      },
+    });
   });
 
   // ── commitments ──

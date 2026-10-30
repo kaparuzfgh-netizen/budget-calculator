@@ -70,8 +70,12 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     сначала вносится в оба; нав-ряды только через `navRow()` (R1–R4),
     колбэки `nv:home`/`nv:back:<id>`/`nv:go:<id>` whitelist-ятся реестром.
     Тест `nav.test.ts` сверяет реестр, mermaid-схему и ряды.
-13. **Профиль:** `income_minor` — «типичный доход» (0 = не задан); факт —
-    `income_entries` по месяцам (`/income`). Правки профиля — редьюсер
+13. **Профиль:** `income_minor` — «базовый доход»: >0 — явный, 0 — база
+    вычисляется из обязательств (активные платежи + бюджет + месячные
+    платежи кредитов; `services/baseline.ts` → `computedBaselineUsd`,
+    личные займы не входят); факт — `income_entries` по месяцам (`/income`).
+    Источник дохода — `resolveIncome` в `bot/features.ts` (аргумент →
+    факт → explicit → computed → none). Правки профиля — редьюсер
     `bot/profile.ts` (`advancePf`); колбэки `pf:*`/`in:*` step-aware
     (`PF_STEPS`), CAS-запись состояния; ВСЕ мутации по id —
     `WHERE id=? AND user_id=?` (чужие id молча игнорируются).

@@ -56,6 +56,7 @@ import {
   type FxState,
 } from '../bot/fxan';
 import { buildFxCtx } from './fx';
+import { baselineIncome } from './baseline';
 import { getScreen, homeMarkup, NAV_HOME } from '../bot/nav/nav';
 import type { FxProvider } from '../fx/provider';
 import { getFxRates } from '../fx/service';
@@ -335,9 +336,21 @@ async function pfCtx(
     }
   }
   const now = deps?.now ?? new Date();
+  const today = todayInTz(p.timezone, now);
   const expenses = (await repo.listExpenses(weekStartInTz(p.timezone, now))).results;
   // журнал оплат за ~год: «оплачен в этом месяце» + последние 5 для карточки
   const since = `${Number(month.slice(0, 4)) - 1}${month.slice(4)}-01`;
+  // расчётный базовый доход (income_minor=0) — для подписи в разделе «Доход»;
+  // best-effort: без FX показываем только состав («платежи + бюджет + кредиты»)
+  let baseline: PfCtx['baseline'];
+  if (!p.income_minor && deps?.fx) {
+    try {
+      const b = await baselineIncome(repo, p, fxAdapter(deps), today);
+      if (b.source === 'computed') baseline = { amount: b.amount, currency: b.currency };
+    } catch {
+      baseline = undefined;
+    }
+  }
   return {
     profile: p,
     commitments: (await repo.listCommitments(false)).results,
@@ -346,8 +359,9 @@ async function pfCtx(
     expenses,
     categories: (await repo.listCategories(true)).results,
     month,
-    today: todayInTz(p.timezone, now),
+    today,
     incomeTotal,
+    baseline,
   };
 }
 
@@ -1088,7 +1102,7 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     return;
   }
   if (CMD('profile').test(cmd)) {
-    await runProfile(msg.chatId, tg, repo);
+    await runProfile(msg.chatId, tg, repo, deps.fx ? fxAdapter(deps) : undefined);
     return;
   }
   if (CMD('help').test(cmd)) {

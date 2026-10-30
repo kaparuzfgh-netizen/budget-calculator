@@ -12,7 +12,8 @@ import { ErrorView, errorView, Loading, useData } from '../ui';
 
 const INCOME_SOURCE: Record<Overview['income_month_source'], string> = {
   actual: 'факт по записям',
-  typical: 'типичный доход',
+  typical: 'базовый доход',
+  computed: 'расчёт (обязательства)',
   none: 'не указан',
 };
 const MONTHS = [
@@ -146,6 +147,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         <>
           <h2>К оплате в {monthWord}</h2>
           <div class="card">
+            <p class="muted">Регулярные платежи и кредиты этого месяца</p>
             <ul class="plain">
               {u.items.map((x) => (
                 <PayRow key={`${x.kind}:${x.id}`} api={api} item={x} onPaid={() => { nav.flash(`Оплачено: ${x.name}`); up.reload(); ov.reload(); }} />
@@ -156,8 +158,9 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         </>
       )}
 
-      <h2>Повседневные</h2>
+      <h2>Бюджет</h2>
       <div class="card">
+        <p class="muted">повседневных израсходовано</p>
         <div class="row">
           <span>Неделя</span>
           <span>

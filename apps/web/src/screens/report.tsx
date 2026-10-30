@@ -54,7 +54,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
   const parts = r
     ? ([
         { key: 'living', label: 'Повседневные', v: r.spent.living },
-        { key: 'commitments', label: 'Платежи', v: r.spent.commitments },
+        { key: 'commitments', label: 'Регулярные платежи', v: r.spent.commitments },
         { key: 'credits', label: 'Кредиты', v: r.spent.credits },
         { key: 'loans', label: 'Долги людям', v: r.spent.loans_repaid },
       ] as const)
@@ -155,7 +155,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
               </div>
             ))}
             <div class="row">
-              <span class="muted">Норма повседневных</span>
+              <span class="muted">Бюджет</span>
               <span class="muted">
                 {Math.round(r.living_limit.used_pct * 100)}% (из {fmtMinor(r.living_limit.cap, c)})
               </span>

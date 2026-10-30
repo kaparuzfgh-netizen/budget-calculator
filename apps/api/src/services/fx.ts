@@ -196,7 +196,7 @@ export function renderFxText(a: FxAnalysis): string {
   if (a.skipped.length) L.push(`ℹ️ Нет данных: ${a.skipped.join(', ')}`);
   L.push('');
   L.push('⚠️ ' + a.disclaimer);
-  L.push('ℹ️ Обязательные платежи (кредиты, аренда к дате) конвертируйте в срок — тайминг вторичен.');
+  L.push('ℹ️ Регулярные платежи (кредиты, аренда к дате) конвертируйте в срок — тайминг вторичен.');
   return L.join('\n');
 }
 
@@ -275,7 +275,7 @@ export async function checkFxAlerts(
           `${x.signal_text}\n/fx — детали`
         : `🔴 <b>Курс ${x.emoji} ${x.label} в нижней зоне</b>\n` +
           `Перцентиль ${x.percentile}/100 — по возможности отложите конвертацию ` +
-          `(кроме обязательных платежей).\n/fx — детали`;
+          `(кроме регулярных платежей).\n/fx — детали`;
     try {
       await send(text, ALERT_MARKUP);
     } catch (e) {

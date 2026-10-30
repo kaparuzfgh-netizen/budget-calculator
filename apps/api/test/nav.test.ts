@@ -236,8 +236,8 @@ function screenOf(): string {
   if (t.includes('Неделя') || t.includes('недел')) return 'WEEK';
   if (t.includes('Сколько потратили')) return 'SPENT_ASK';
   if (t.includes('Сколько получили')) return 'INCOME_ASK';
-  if (t.includes('Новый типичный')) return 'PF_TYPICAL_ASK';
-  if (t.includes('норма повседневных')) return 'PF_LIVING_ASK';
+  if (t.includes('Новый базовый')) return 'PF_TYPICAL_ASK';
+  if (t.includes('бюджет повседневных')) return 'PF_LIVING_ASK';
   if (t.includes('Новый платёж')) return 'PF_COMMIT_ADD';
   if (t.includes('Новая сумма')) return 'PF_COMMIT_AMOUNT';
   if (t.includes('День месяца')) return 'PF_COMMIT_DAY';

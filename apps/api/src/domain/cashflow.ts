@@ -3,7 +3,7 @@
  * Все суммы выводятся в USD; валюты входа конвертируются через fx.perUsd.
  */
 import { DomainError, num } from './errors';
-import { convert } from './money';
+import { convert, round2 } from './money';
 import type { Currency, FxRates } from './money';
 
 export interface MoneyAmount {
@@ -32,6 +32,29 @@ export interface WaterfallResult {
   toPrepayUsd: number;
   toDcaUsd: number;
   split: Record<string, number>; // toDcaUsd × вес
+}
+
+/**
+ * computedBaselineUsd — «базовый доход» для плана/каскада, когда явный доход
+ * не задан (profiles.income_minor = 0): сумма месячных обязательств
+ * (регулярные платежи + бюджет повседневных + месячный платёж каждого
+ * активного кредита) в USD, округлённая до центов.
+ * Личные займы (loans) не входят — выплаты нерегулярные.
+ * Входные суммы: commitments в minor units, платежи кредитов — float
+ * (уже нормализованные в месяц через DebtView.monthlyPayment).
+ */
+export function computedBaselineUsd(input: {
+  commits: { amount_minor: number; currency: Currency }[];
+  livingCapMinor: number;
+  livingCcy: Currency;
+  debtMonthly: { amount: number; currency: Currency }[];
+  pu: Record<string, number>;
+}): number {
+  let sum = 0;
+  for (const c of input.commits) sum += convert(c.amount_minor / 100, c.currency, 'USD', { perUsd: input.pu });
+  sum += convert(input.livingCapMinor / 100, input.livingCcy, 'USD', { perUsd: input.pu });
+  for (const d of input.debtMonthly) sum += convert(d.amount, d.currency, 'USD', { perUsd: input.pu });
+  return round2(sum);
 }
 
 export function computeWaterfall(input: WaterfallInput): WaterfallResult {

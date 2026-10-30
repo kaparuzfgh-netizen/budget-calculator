@@ -10,6 +10,7 @@ import { convert, round2 } from '../domain/money';
 import type { FxResult } from '../fx/service';
 import type { ScopedRepo } from '../db/repo';
 import { resolveIncome } from '../bot/features';
+import { baselineIncome } from '../services/baseline';
 import { monthInTz, todayInTz, weekStartInTz } from '../bot/parse';
 
 export interface OverviewCommitment {
@@ -22,12 +23,12 @@ export interface OverviewCommitment {
 export interface Overview {
   month: string; // 'YYYY-MM' в таймзоне пользователя
   base_currency: string;
-  /** Доход месяца: факт записей → типичный → 0 (income_month_source). */
+  /** Доход месяца: факт записей → базовый (явный/расчётный) → 0 (income_month_source). */
   income_month_minor: number;
   income_month_currency: string;
-  income_month_source: 'actual' | 'typical' | 'none';
+  income_month_source: 'actual' | 'typical' | 'computed' | 'none';
   income_entries_count: number;
-  /** Активные обязательные платежи (в исходных валютах). */
+  /** Активные регулярные платежи (в исходных валютах). */
   commitments: OverviewCommitment[];
   /** Повседневные: недельный бюджет и факт трат (living_currency). */
   weekly_budget_minor: number;
@@ -76,11 +77,14 @@ export async function buildOverview(
   const fxr = await getFx([...new Set(ccys)]);
   const pu = fxr.perUsd;
 
+  // базовый доход: явный (income_minor>0) или вычисленный из обязательств
+  const base = await baselineIncome(repo, p, { get: getFx }, today);
   const inc = resolveIncome({
     entries,
     typicalMinor: p.income_minor,
     incomeCcy: p.income_currency,
     perUsd: pu,
+    ...(base.source === 'computed' ? { baseline: { amount: base.amount, currency: base.currency } } : {}),
   });
 
   const inLiving = expenses.map((e) => ({

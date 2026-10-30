@@ -45,19 +45,19 @@ flowchart TD
   INCOME_DEL -- Отмена --> INCOME_LIST
 
   HOME --> PF_HOME["⚙️ Профиль"]
-  PF_HOME --> PF_INCOME["Доход: типичный + факт"]
-  PF_INCOME --> PF_TYPICAL_ASK["Ввод типичного дохода"]
+  PF_HOME --> PF_INCOME["Доход: базовый + факт"]
+  PF_INCOME --> PF_TYPICAL_ASK["Ввод базового дохода"]
   PF_TYPICAL_ASK -. сохранено .-> PF_INCOME
   PF_TYPICAL_ASK -- Отмена --> PF_INCOME
   PF_INCOME --> INCOME_HUB
   INCOME_HUB -- Назад, если открыт из профиля --> PF_INCOME
 
-  PF_HOME --> PF_LIVING["Повседневные"]
-  PF_LIVING --> PF_LIVING_ASK["Ввод нормы"]
+  PF_HOME --> PF_LIVING["Бюджет"]
+  PF_LIVING --> PF_LIVING_ASK["Ввод бюджета"]
   PF_LIVING_ASK -. сохранено .-> PF_LIVING
   PF_LIVING_ASK -- Отмена --> PF_LIVING
 
-  PF_HOME --> PF_COMMITS["Платежи: список"]
+  PF_HOME --> PF_COMMITS["Регулярные платежи: список"]
   PF_COMMITS --> PF_COMMIT["Платёж: карточка"]
   PF_COMMITS --> PF_COMMIT_ADD["Ввод нового платежа"]
   PF_COMMIT_ADD -. сохранено .-> PF_COMMITS
@@ -83,7 +83,7 @@ flowchart TD
   PF_COMMIT -- Назад --> PF_COMMITS
 
   PF_HOME --> PF_LOCALE["Валюта и часовой пояс"]
-  PF_LOCALE --> PF_LOCALE_PICK["Выбор: валюта дохода / валюта повседневных / часовой пояс"]
+  PF_LOCALE --> PF_LOCALE_PICK["Выбор: валюта дохода / валюта бюджета / часовой пояс"]
   PF_LOCALE_PICK -. сохранено .-> PF_LOCALE
   PF_LOCALE_PICK -- Отмена --> PF_LOCALE
 

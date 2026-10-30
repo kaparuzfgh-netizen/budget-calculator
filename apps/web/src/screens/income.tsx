@@ -98,7 +98,7 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Записей за месяц нет — итог считается по типичному доходу.</p>
+          <p class="muted">Записей за месяц нет — итог считается по базовому доходу.</p>
         )}
         <FormError msg={err} />
       </div>

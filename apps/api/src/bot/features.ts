@@ -8,6 +8,7 @@ import { matchCategory } from '../domain/categories';
 import { convert, round2 } from '../domain/money';
 import type { Period } from '../domain/report';
 import { buildUserReport } from '../services/report';
+import { baselineIncome } from '../services/baseline';
 import type { FxResult } from '../fx/service';
 import type { CategoryRow, CommitmentRow, ExpenseRow, IncomeEntryRow } from '../db/repo';
 import type { ReplyMarkup, TelegramClient } from '../telegram/client';
@@ -40,7 +41,9 @@ const usd = (amount: number, ccy: string, perUsd: Record<string, number>) => con
 
 /**
  * resolveIncome — ЧИСТАЯ функция: какой доход идёт в /plan.
- * override (аргумент /plan) > сумма записей месяца («факт») > типичный доход > нет.
+ * override (аргумент /plan) > сумма записей месяца («факт») > базовый доход
+ * (явный income_minor > 0 → 'typical') > вычисленный из обязательств
+ * (income_minor = 0 → 'computed', передаётся как baseline) > нет.
  * Записи конвертируются в incomeCcy через USD.
  */
 export function resolveIncome(opts: {
@@ -49,8 +52,10 @@ export function resolveIncome(opts: {
   incomeCcy: string;
   perUsd: Record<string, number>;
   override?: { amount: number; currency: string };
-}): { amount: number; currency: string; source: 'override' | 'actual' | 'typical' | 'none'; count: number } {
-  const { entries, typicalMinor, incomeCcy, perUsd, override } = opts;
+  /** расчётный базовый доход (services/baseline.ts) — уже в валюте дохода. */
+  baseline?: { amount: number; currency: string };
+}): { amount: number; currency: string; source: 'override' | 'actual' | 'typical' | 'computed' | 'none'; count: number } {
+  const { entries, typicalMinor, incomeCcy, perUsd, override, baseline } = opts;
   if (override)
     return { amount: override.amount, currency: override.currency, source: 'override', count: entries.length };
   if (entries.length) {
@@ -58,6 +63,8 @@ export function resolveIncome(opts: {
     return { amount: sum, currency: incomeCcy, source: 'actual', count: entries.length };
   }
   if (typicalMinor > 0) return { amount: typicalMinor / 100, currency: incomeCcy, source: 'typical', count: 0 };
+  if (baseline && baseline.amount > 0)
+    return { amount: baseline.amount, currency: incomeCcy, source: 'computed', count: 0 };
   return { amount: 0, currency: incomeCcy, source: 'none', count: 0 };
 }
 
@@ -87,11 +94,15 @@ export async function runPlan(
       return;
     }
   }
+  // базовый доход: явный (income_minor>0) или вычисленный из обязательств
+  let base: Awaited<ReturnType<typeof baselineIncome>>;
   let fxr: FxResult;
   try {
+    base = await baselineIncome(repo, p, fx, todayInTz(p.timezone, new Date()));
     fxr = await fxFor(fx, [
       p.income_currency,
       p.living_currency,
+      base.currency,
       override?.currency,
       ...entries.map((e) => e.currency),
       ...commits.map((c) => c.currency),
@@ -107,6 +118,7 @@ export async function runPlan(
     incomeCcy: p.income_currency,
     perUsd: pu,
     ...(override ? { override } : {}),
+    ...(base.source === 'computed' ? { baseline: { amount: base.amount, currency: base.currency } } : {}),
   });
   const income = { amount: inc.amount, currency: inc.currency };
   const mandatoryUsd = commits.reduce(
@@ -115,7 +127,7 @@ export async function runPlan(
   );
   const w = computeWaterfall({
     income,
-    baseIncomeUsd: usd(p.income_minor / 100, p.income_currency, pu),
+    baseIncomeUsd: usd(base.amount, base.currency, pu),
     mandatoryUsd,
     livingCap: { amount: p.living_cap_minor / 100, currency: p.living_currency },
     bonusPrepayShare: p.bonus_prepay_share,
@@ -138,15 +150,17 @@ export async function runPlan(
       : inc.source === 'actual'
         ? ` — факт за ${month}`
         : inc.source === 'typical'
-          ? ' — типичный, факт за месяц не введён'
-          : ' — доход не указан, /income';
+          ? ' — базовый, факт за месяц не введён'
+          : inc.source === 'computed'
+            ? ' — расчёт: платежи + бюджет + кредиты'
+            : ' — доход не указан, /income';
   const lines = [
     `📊 <b>План месяца</b>`,
     `💵 Доход: <b>${fmtMoney(round2(w.incomeUsd), 'USD')}</b>` +
       (income.currency !== 'USD' ? ` (${fmtMoney(income.amount, income.currency)})` : '') +
       `<i>${incLabel}</i>`,
-    `🧾 Обязательства: −${fmtMoney(round2(mandatoryUsd), 'USD')}` + (commits.length ? `\n${top}` : ' (нет)'),
-    `🍽 Повседневные: −${fmtMoney(round2(w.livingUsd), 'USD')} (${fmtMoney(p.living_cap_minor / 100, p.living_currency)})`,
+    `🧾 Регулярные платежи: −${fmtMoney(round2(mandatoryUsd), 'USD')}` + (commits.length ? `\n${top}` : ' (нет)'),
+    `💸 Бюджет: −${fmtMoney(round2(w.livingUsd), 'USD')} (${fmtMoney(p.living_cap_minor / 100, p.living_currency)})`,
     `💚 <b>Свободный профицит: ${fmtMoney(round2(w.surplusUsd), 'USD')}${inc.source === 'none' ? ' (без дохода)' : ''}</b>`,
     inc.count > 0 ? `<i>Доход за ${month}: ${inc.count} записей</i>` : '',
   ].filter(Boolean);
@@ -196,7 +210,7 @@ export async function runSpent(
   if (livingValue > cap * 5) {
     await tg.sendMessage(
       chatId,
-      `Сумма ${fmtMoney(round2(livingValue), p.living_currency)} выглядит нереально для траты (норма ×5). Проверьте ввод.`,
+      `Сумма ${fmtMoney(round2(livingValue), p.living_currency)} выглядит нереально для траты (бюджет ×5). Проверьте ввод.`,
     );
     return;
   }
@@ -244,7 +258,9 @@ async function spentView(
     (ex.note ? ` — ${escapeHtml(ex.note)}` : '');
   const week =
     `Неделя: ${fmtMoney(round2(weekSpent), c)} из ${fmtMoney(round2(budget), c)} · ` +
-    (weekSpent > budget ? `🔴 перерасход ${fmtMoney(round2(weekSpent - budget), c)}` : `остаток ${fmtMoney(round2(budget - weekSpent), c)}`);
+    (weekSpent > budget
+      ? `🔴 перерасход бюджета ${fmtMoney(round2(weekSpent - budget), c)}`
+      : `остаток ${fmtMoney(round2(budget - weekSpent), c)}`);
   const undoEdit = [
     { text: '↩ Отменить', callback_data: `ex:undo:${ex.id}` },
     { text: '✏️ Изменить', callback_data: `ex:e:${ex.id}` },
@@ -351,8 +367,8 @@ function renderReport(rep: NonNullable<Awaited<ReturnType<typeof buildUserReport
     `📈 <b>${escapeHtml(rep.label)}</b>`,
     `Получено: ${m(rep.received.total)}`,
     `Потрачено: ${m(rep.spent.total)}`,
-    `  • Повседневные: ${m(rep.spent.living)}${rep.living_limit.cap > 0 ? ` (${Math.round(rep.living_limit.used_pct * 100)}% нормы)` : ''}`,
-    `  • Платежи: ${m(rep.spent.commitments)}`,
+    `  • Повседневные: ${m(rep.spent.living)}${rep.living_limit.cap > 0 ? ` (${Math.round(rep.living_limit.used_pct * 100)}% бюджета)` : ''}`,
+    `  • Регулярные платежи: ${m(rep.spent.commitments)}`,
     `  • Кредиты: ${m(rep.spent.credits)}`,
     `  • Долги людям: ${m(rep.spent.loans_repaid)}`,
     `Итог: ${rep.net >= 0 ? '+' : '−'}${m(Math.abs(rep.net))}` +
@@ -434,7 +450,7 @@ export async function runWeek(
   const c = p.living_currency;
   const lines = [
     `📅 <b>Неделя</b>: ${fmtMoney(round2(s.weekSpent), c)} из ${fmtMoney(round2(s.weekBudget), c)}` +
-      ` — ${s.weekOver ? '🔴 перерасход' : `остаток ${fmtMoney(round2(s.weekRemaining), c)}`}`,
+      ` — ${s.weekOver ? '🔴 перерасход бюджета' : `остаток ${fmtMoney(round2(s.weekRemaining), c)}`}`,
     `🗓 Месяц: ${fmtMoney(round2(s.monthSpent), c)} из ${fmtMoney(round2(s.monthCap), c)}` +
       ` · burn rate ${fmtPct(s.burnRate)}${s.burnRate > 1 ? ' ⚠️' : ''}`,
     `💵 В день до конца месяца: ${fmtMoney(round2(s.dailyAllowance), c)} (${s.daysLeft} дн.)`,
@@ -478,7 +494,7 @@ export async function runIncome(
   return true;
 }
 
-export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo): Promise<void> {
+export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo, fx?: FxLike): Promise<void> {
   const p = await repo.getProfile();
   if (!p) {
     await tg.sendMessage(chatId, 'Профиль не настроен — /start');
@@ -486,6 +502,17 @@ export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo)
   }
   const now = new Date();
   const month = monthInTz(p.timezone, now);
+  const today = todayInTz(p.timezone, now);
+  // расчётный базовый доход для подписи (best-effort — без FX только состав)
+  let baseline: PfCtx['baseline'];
+  if (!p.income_minor && fx) {
+    try {
+      const b = await baselineIncome(repo, p, fx, today);
+      if (b.source === 'computed') baseline = { amount: b.amount, currency: b.currency };
+    } catch {
+      baseline = undefined;
+    }
+  }
   const ctx: PfCtx = {
     profile: p,
     commitments: (await repo.listCommitments(false)).results,
@@ -496,7 +523,8 @@ export async function runProfile(chatId: number, tg: TelegramClient, repo: Repo)
     expenses: (await repo.listExpenses(weekStartInTz(p.timezone, now))).results,
     categories: (await repo.listCategories(true)).results,
     month,
-    today: todayInTz(p.timezone, now),
+    today,
+    baseline,
   };
   const r = renderPf('PF_HOME', {}, ctx);
   await repo.setConversation(r.step, '{}'); // меню активно — кнопки живут 24ч
