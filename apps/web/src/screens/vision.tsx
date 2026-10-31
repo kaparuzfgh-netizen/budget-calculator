@@ -18,7 +18,7 @@ import { amountError, fmtMoney, noteError, parseAmount, todayIso } from '../fmt'
 import {
   CcySelect,
   FormError,
-  inputCls,
+  smInputCls,
   mutedCls,
   primaryBtnCls,
   Select,
@@ -291,9 +291,9 @@ function ReviewSheet({
           </div>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto px-5">
-          <ul class="space-y-3 pb-2">
+          <ul class="space-y-2 pb-2">
             {rows.map((r, i) => (
-              <li key={i} class={`rounded-xl border border-white/10 bg-zinc-950/60 p-3${r.on ? '' : ' opacity-50'}`}>
+              <li key={i} class={`rounded-xl border border-white/10 bg-zinc-950/60 p-2.5${r.on ? '' : ' opacity-50'}`}>
                 <div class="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -303,31 +303,35 @@ function ReviewSheet({
                     onChange={(e) => set(i, { on: (e.target as HTMLInputElement).checked })}
                   />
                   <input
-                    class={inputCls}
-                    inputMode="decimal"
-                    placeholder="Сумма"
-                    value={r.amount}
-                    onInput={(e) => set(i, { amount: (e.target as HTMLInputElement).value })}
-                  />
-                  <input
-                    class={`${inputCls} w-36 flex-none`}
-                    type="date"
-                    max={todayIso()}
-                    min="2000-01-01"
-                    value={r.date}
-                    onInput={(e) => set(i, { date: (e.target as HTMLInputElement).value })}
-                  />
-                </div>
-                <div class="mt-2 flex items-center gap-2 pl-6">
-                  <input
-                    class={inputCls}
+                    class={`${smInputCls} min-w-0 flex-1`}
                     maxLength={200}
                     placeholder="Заметка"
                     value={r.note}
                     onInput={(e) => set(i, { note: (e.target as HTMLInputElement).value })}
                   />
-                  <span class="w-32 flex-none">
-                    <Select value={r.cat} options={catOptions} onChange={(v) => set(i, { cat: v })} />
+                  <span class="w-24 flex-none">
+                    <input
+                      class={`${smInputCls} text-right`}
+                      inputMode="decimal"
+                      placeholder="Сумма"
+                      value={r.amount}
+                      onInput={(e) => set(i, { amount: (e.target as HTMLInputElement).value })}
+                    />
+                  </span>
+                </div>
+                <div class="mt-1.5 flex items-center gap-2 pl-6">
+                  <span class="w-36 flex-none">
+                    <input
+                      class={smInputCls}
+                      type="date"
+                      max={todayIso()}
+                      min="2000-01-01"
+                      value={r.date}
+                      onInput={(e) => set(i, { date: (e.target as HTMLInputElement).value })}
+                    />
+                  </span>
+                  <span class="min-w-0 flex-1">
+                    <Select compact value={r.cat} options={catOptions} onChange={(v) => set(i, { cat: v })} />
                   </span>
                 </div>
               </li>

@@ -25,6 +25,9 @@ import { CCY_LIST } from './fmt';
 /** Поле ввода/селект. */
 export const inputCls =
   'w-full rounded-xl border border-white/10 bg-zinc-950 px-3 py-2.5 text-[15px] text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:ring-2 focus:ring-sky-500/60';
+/** Компактное поле — для плотных списков (строки разбора скриншота и т.п.). */
+export const smInputCls =
+  'w-full rounded-lg border border-white/10 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:ring-2 focus:ring-sky-500/60';
 /** Карточка с контентом (padding у самой карточки). */
 export const cardCls =
   'rounded-2xl border border-white/10 bg-zinc-900/80 p-4 shadow-lg shadow-black/30';
@@ -276,6 +279,7 @@ export function Select({
   placeholder = '—',
   disabled = false,
   searchable = false,
+  compact = false,
 }: {
   value: string;
   options: readonly (string | SelectOption)[];
@@ -283,6 +287,8 @@ export function Select({
   placeholder?: string;
   disabled?: boolean;
   searchable?: boolean;
+  /** Компактная кнопка (smInputCls) — для плотных списков. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -320,7 +326,7 @@ export function Select({
     <div class="relative" ref={root}>
       <button
         type="button"
-        class={`${inputCls} flex items-center justify-between gap-2 text-left disabled:opacity-50`}
+        class={`${compact ? smInputCls : inputCls} flex items-center justify-between gap-2 text-left disabled:opacity-50`}
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => {
@@ -331,7 +337,7 @@ export function Select({
         }}
       >
         <span class={`truncate ${cur ? '' : 'text-zinc-600'}`}>{cur?.label ?? placeholder}</span>
-        <ChevronDown size={16} strokeWidth={1.5} class="flex-none text-zinc-400" />
+        <ChevronDown size={compact ? 14 : 16} strokeWidth={1.5} class="flex-none text-zinc-400" />
       </button>
       {open && (
         <div class="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-xl border border-white/10 bg-zinc-900 shadow-xl shadow-black/40">
