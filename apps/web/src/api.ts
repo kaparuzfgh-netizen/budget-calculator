@@ -61,12 +61,18 @@ export interface Overview {
 
 export interface WeekStatus {
   currency: string;
+  /** Диапазон текущей недели 'YYYY-MM-DD' (пн..вс). */
+  week_from: string;
+  week_to: string;
   week_spent_minor: number;
   week_budget_minor: number;
   week_over: boolean;
   week_remaining_minor: number;
   month_spent_minor: number;
   month_cap_minor: number;
+  /** День месяца и всего дней — для темпа «дни vs бюджет». */
+  month_day: number;
+  month_days: number;
   /** >1 — тратим быстрее плана (форматировать через fmtPct). */
   burn_rate: number;
   daily_allowance_minor: number;

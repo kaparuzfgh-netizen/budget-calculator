@@ -13,6 +13,7 @@ import type { FxResult } from '../fx/service';
 import type { FxProvider } from '../fx/provider';
 import { computeWaterfall } from '../domain/cashflow';
 import { weeklyStatus } from '../domain/budget';
+import { dayOfMonth, daysInMonth } from '../domain/dates';
 import { convert, round2, toMinor } from '../domain/money';
 
 const usd = (amount: number, ccy: string, pu: Record<string, number>) => convert(amount, ccy, 'USD', { perUsd: pu });
@@ -313,14 +314,20 @@ export function registerTmaApi(
         monthlyCap: p.living_cap_minor / 100,
         weeklyBudget: p.weekly_budget_minor / 100,
       });
+      const wEnd = new Date(`${wStart}T00:00:00Z`);
+      wEnd.setUTCDate(wEnd.getUTCDate() + 6);
       return okJson(c, {
         currency: p.living_currency,
+        week_from: wStart,
+        week_to: wEnd.toISOString().slice(0, 10),
         week_spent_minor: toMinor(round2(s.weekSpent)),
         week_budget_minor: toMinor(round2(s.weekBudget)),
         week_over: s.weekOver,
         week_remaining_minor: toMinor(round2(s.weekRemaining)),
         month_spent_minor: toMinor(round2(s.monthSpent)),
         month_cap_minor: toMinor(round2(s.monthCap)),
+        month_day: dayOfMonth(today),
+        month_days: daysInMonth(today),
         burn_rate: s.burnRate,
         daily_allowance_minor: toMinor(round2(s.dailyAllowance)),
         days_left: s.daysLeft,

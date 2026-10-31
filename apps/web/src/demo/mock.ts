@@ -38,13 +38,17 @@ export const OVERVIEW: Overview = {
 
 export const WEEK: WeekStatus = {
   currency: 'KGS',
+  week_from: '2026-03-16',
+  week_to: '2026-03-22',
   week_spent_minor: 214000,
   week_budget_minor: 1384615,
   week_over: false,
   week_remaining_minor: 1170615,
   month_spent_minor: 2350000,
   month_cap_minor: 6000000,
-  burn_rate: 0.55,
+  month_day: 18,
+  month_days: 31,
+  burn_rate: 0.67,
   daily_allowance_minor: 195000,
   days_left: 13,
   fx_as_of: '2026-03-18',
