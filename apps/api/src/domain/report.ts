@@ -192,17 +192,35 @@ export function buildReport(inp: ReportInput) {
     const m = s.length >> 1;
     return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
   };
+  const quantile = (s: number[], q: number) => {
+    const pos = (s.length - 1) * q;
+    const lo = Math.floor(pos);
+    return s[lo]! + (s[Math.ceil(pos)]! - s[lo]!) * (pos - lo);
+  };
+  // статистический выброс: n≥4 — правило Тьюки (>Q3+1.5·IQR, медиана
+  // не вздувается от одной копеечной записи); n==3 — ≥2.5× медианы.
+  const catStat = new Map<number | null, { med: number; fence: number }>();
+  for (const [k, xs] of byCat) {
+    const s = [...xs].sort((a, b) => a - b);
+    if (s.length >= 4) {
+      const q1 = quantile(s, 0.25);
+      const q3 = quantile(s, 0.75);
+      catStat.set(k, { med: median(s), fence: q3 + 1.5 * (q3 - q1) });
+    } else if (s.length === 3) {
+      const med = s[1]!;
+      catStat.set(k, { med, fence: 2.5 * med });
+    }
+  }
   const floor = cur.living * 0.02;
   const notable = new Map<number, { e: (typeof conv)[number]; ratio: number | null }>();
   for (const e of [...conv].sort((a, b) => b.minor - a.minor).slice(0, 3)) {
     notable.set(e.id, { e, ratio: null });
   }
   for (const e of conv) {
-    const xs = byCat.get(e.category_id)!;
-    if (xs.length < 3 || e.minor < floor) continue;
-    const med = median(xs);
-    if (med > 0 && e.minor >= 2 * med) {
-      notable.set(e.id, { e, ratio: Math.round((e.minor / med) * 10) / 10 });
+    const st = catStat.get(e.category_id);
+    if (!st || st.med <= 0 || e.minor < floor) continue;
+    if (e.minor >= st.fence) {
+      notable.set(e.id, { e, ratio: Math.round((e.minor / st.med) * 10) / 10 });
     }
   }
   const top_expenses = [...notable.values()]

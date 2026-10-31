@@ -16,10 +16,11 @@ import {
   Tags,
   TrendingDown,
   TrendingUp,
+  X,
 } from 'lucide-preact';
 import type { DebtsList, Profile, Report, ReportPeriod } from '../api';
 import type { ScreenProps } from '../app';
-import { fmtDay, fmtMinor } from '../fmt';
+import { fmtDay, fmtMinorAuto } from '../fmt';
 import {
   cardCls,
   CcySelect,
@@ -119,6 +120,14 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
     setPickerOpen(false);
   };
 
+  /** «×» на закреплённом чипе — убрать валюту из набора (свои данные не трогаем). */
+  const removeCcy = (x: string) => {
+    const next = customCcys.filter((c) => c !== x);
+    setCustomCcys(next);
+    saveCustomCcys(next);
+    if (sel === x) setCcy(null); // вернётся к валюте дохода
+  };
+
   const r = rep.data;
   const c = r?.currency ?? 'USD';
   const parts = r
@@ -159,15 +168,53 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
         ))}
       </div>
       <div class="mb-3 flex flex-wrap items-center justify-center gap-2">
-        {chipCcys.map((x) => (
-          <button
-            type="button"
-            class={x === sel ? chipOnCls : chipCls}
-            onClick={() => setCcy(x)}
-          >
-            {x}
-          </button>
-        ))}
+        {chipCcys.map((x) =>
+          customCcys.includes(x) ? (
+            <span
+              key={x}
+              role="button"
+              tabIndex={0}
+              class={`${x === sel ? chipOnCls : chipCls} inline-flex cursor-pointer items-center gap-0.5`}
+              onClick={() => setCcy(x)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setCcy(x);
+                }
+              }}
+            >
+              {x}
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={`Убрать ${x} из чипов`}
+                class="-mr-1 rounded-full p-0.5 text-zinc-500 transition hover:text-red-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeCcy(x);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeCcy(x);
+                  }
+                }}
+              >
+                <X size={10} strokeWidth={2} />
+              </span>
+            </span>
+          ) : (
+            <button
+              key={x}
+              type="button"
+              class={x === sel ? chipOnCls : chipCls}
+              onClick={() => setCcy(x)}
+            >
+              {x}
+            </button>
+          ),
+        )}
         <button
           type="button"
           class={`${chipCls} inline-flex items-center`}
@@ -229,13 +276,13 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
           <div class="grid grid-cols-3 gap-2.5">
             <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
               <div class="whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums text-emerald-400">
-                {fmtMinor(r.received.total, c)}
+                {fmtMinorAuto(r.received.total, c)}
               </div>
               <div class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-400">Получено</div>
             </div>
             <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
               <div class="whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums">
-                {fmtMinor(r.spent.total, c)}
+                {fmtMinorAuto(r.spent.total, c)}
               </div>
               <div class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-400">Потрачено</div>
             </div>
@@ -244,7 +291,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                 class={`whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums ${r.net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
               >
                 {r.net >= 0 ? '+' : '−'}
-                {fmtMinor(Math.abs(r.net), c)}
+                {fmtMinorAuto(Math.abs(r.net), c)}
               </div>
               <div class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-400">Итог</div>
             </div>
@@ -279,14 +326,14 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                   {p.label}
                 </span>
                 <span>
-                  {fmtMinor(p.v, c)} · {r.spent.total > 0 ? Math.round((p.v / r.spent.total) * 100) : 0}%
+                  {fmtMinorAuto(p.v, c)} · {r.spent.total > 0 ? Math.round((p.v / r.spent.total) * 100) : 0}%
                 </span>
               </div>
             ))}
             <div class={`${rowCls} mt-2`}>
               <span class={mutedCls}>Бюджет</span>
               <span class={mutedCls}>
-                {Math.round(r.living_limit.used_pct * 100)}% (из {fmtMinor(r.living_limit.cap, c)})
+                {Math.round(r.living_limit.used_pct * 100)}% (из {fmtMinorAuto(r.living_limit.cap, c)})
               </span>
             </div>
             <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
@@ -311,7 +358,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                         <span class="ml-1 text-[11px] text-zinc-500">· {x.count}</span>
                       </span>
                       <span>
-                        {fmtMinor(x.amount, c)} · {Math.round(x.share * 100)}%
+                        {fmtMinorAuto(x.amount, c)} · {Math.round(x.share * 100)}%
                       </span>
                     </div>
                     <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
@@ -332,7 +379,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                 {r.buckets.map((b) => (
                   <button
                     type="button"
-                    class={`flex min-w-[18px] flex-1 basis-[18px] flex-col items-center rounded-md pt-0.5 transition ${selB === b.key ? 'bg-white/10' : 'hover:bg-white/5'}`}
+                    class={`flex min-w-[18px] flex-1 basis-[18px] flex-col items-center rounded-md pt-0.5 transition ${selB === b.key ? '' : selB ? 'opacity-50' : 'hover:bg-white/5'}`}
                     key={b.key}
                     onClick={() => setSelB((k) => (k === b.key ? null : b.key))}
                   >
@@ -378,9 +425,9 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
               <p class="mt-2 rounded-lg bg-white/5 px-3 py-2 text-center text-[12px] text-zinc-300">
                 <b>{selBucket.key.length > 7 ? fmtDay(selBucket.key) : selBucket.label}</b>
                 {' · '}
-                {fmtMinor(selBucket.living + selBucket.other, c)} потрачено
+                {fmtMinorAuto(selBucket.living + selBucket.other, c)} потрачено
                 {' · '}
-                {fmtMinor(selBucket.received, c)} поступило
+                {fmtMinorAuto(selBucket.received, c)} поступило
               </p>
             )}
           </div>
@@ -390,10 +437,11 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
               <h2 class={`${headCls} mt-6`}>
                 <Receipt size={16} strokeWidth={1.5} /> Крупные траты
                 <Info title="Крупные траты">
-                  Крупная — это ≥2× типичной суммы своей категории за период (и ≥2% всех
-                  повседневных трат): 10 000 ₽ в кафе — крупно, а на ремонт авто — норма.
-                  Бейдж «×2,4» — во сколько раз больше обычного в категории.
-                  Три самые большие траты показаны в любом случае.
+                  Крупная — статистический выброс внутри своей категории за период:
+                  заметно выше типичного разброса (правило Тьюки) и ≥2% всех повседневных
+                  трат. 10 000 ₽ в кафе — крупно, на ремонт авто — обычное дело; случайная
+                  трата в 1 ₽ статистику не ломает. Бейдж «×2,4» — во сколько раз больше
+                  медианы категории. Три самые большие траты показаны в любом случае.
                 </Info>
               </h2>
               <div class={`${listCardCls} mt-2`}>
@@ -411,10 +459,10 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                         <span class="ml-2 flex-none whitespace-nowrap tabular-nums">
                           {e.ratio !== null && (
                             <span class="mr-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 align-middle text-[10px] font-medium text-amber-300">
-                              ×{String(e.ratio).replace('.', ',')}
+                              {e.ratio > 99 ? '×99+' : `×${String(e.ratio).replace('.', ',')}`}
                             </span>
                           )}
-                          {fmtMinor(e.amount, c)}
+                          {fmtMinorAuto(e.amount, c)}
                         </span>
                       </div>
                       <div class="mt-0.5 text-[11px] text-zinc-500">

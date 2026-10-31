@@ -1,6 +1,10 @@
 /** format.ts — форматирование для сообщений бота. */
 
-const SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', RUB: '₽', KGS: 'с' };
+const SYMBOLS: Record<string, string> = {
+  USD: '$', EUR: '€', RUB: '₽', KGS: 'с', KZT: '₸', UAH: '₴', GEL: '₾',
+  AMD: '֏', AZN: '₼', BYN: 'Br', TRY: '₺', GBP: '£', JPY: '¥', CNY: '¥',
+  KRW: '₩', INR: '₹', THB: '฿', VND: '₫', PLN: 'zł', CZK: 'Kč', HUF: 'Ft',
+};
 
 /** fmtMoney_: 44 282 ₽ · 1 234,50 $ — тысячи NBSP, 0 или 2 знака. */
 export function fmtMoney(amount: number, currency: string): string {

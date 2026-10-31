@@ -6,7 +6,11 @@
  * поэтому держим маленькое чистое зеркало. Менять только вместе с ботом.
  */
 
-const SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', RUB: '₽', KGS: 'с' };
+const SYMBOLS: Record<string, string> = {
+  USD: '$', EUR: '€', RUB: '₽', KGS: 'с', KZT: '₸', UAH: '₴', GEL: '₾',
+  AMD: '֏', AZN: '₼', BYN: 'Br', TRY: '₺', GBP: '£', JPY: '¥', CNY: '¥',
+  KRW: '₩', INR: '₹', THB: '฿', VND: '₫', PLN: 'zł', CZK: 'Kč', HUF: 'Ft',
+};
 
 /** копия fmtMoney: «44 282 ₽» · «1 234,50 $» — тысячи NBSP, 0 или 2 знака. */
 export function fmtMoney(amount: number, currency: string): string {
@@ -26,6 +30,23 @@ export function fmtPct(x: number): string {
 
 /** minor units (копейки, как в D1) → fmtMoney. */
 export const fmtMinor = (minor: number, currency: string): string => fmtMoney(minor / 100, currency);
+
+/** Большие суммы компактно: «182,4 млн ₫», «1,2 млрд ₽» — для плиток и строк. */
+export function fmtCompact(amount: number, currency: string): string {
+  const c = currency.toUpperCase();
+  const sym = SYMBOLS[c] ?? c;
+  const a = Math.abs(amount);
+  const [v, unit] = a >= 1e9 ? [amount / 1e9, 'млрд'] : [amount / 1e6, 'млн'];
+  const rounded = (Math.round(v * 10) / 10).toFixed(1).replace('.', ',');
+  return `${rounded} ${unit} ${sym}`;
+}
+
+/** fmtMoney, но |amount| ≥ 1 млн — компактно (млн/млрд), чтобы не ломать вёрстку. */
+export const fmtAuto = (amount: number, currency: string): string =>
+  Math.abs(amount) >= 1e6 ? fmtCompact(amount, currency) : fmtMoney(amount, currency);
+
+/** minor units → fmtAuto (компактные миллионы). */
+export const fmtMinorAuto = (minor: number, currency: string): string => fmtAuto(minor / 100, currency);
 
 /** 'YYYY-MM-DD' → 'ДД.ММ'. */
 export const fmtDay = (iso: string): string => {
