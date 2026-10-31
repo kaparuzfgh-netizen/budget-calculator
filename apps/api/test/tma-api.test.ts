@@ -73,7 +73,7 @@ describe('/api/tma/* — контракт', () => {
     await scoped(env.DB, uid).addExpense({
       spent_on: todayInTz('UTC', new Date()), amount_minor: 32000, currency: 'USD', note: 'кофе', source: 'manual', source_key: 'x1',
     });
-    const o = (await (await api('/api/tma/week', { token })).json()) as { week_spent_minor: number; week_budget_minor: number; month_cap_minor: number; week_from: string; week_to: string; month_day: number; month_days: number };
+    const o = (await (await api('/api/tma/week', { token })).json()) as { week_spent_minor: number; week_budget_minor: number; month_cap_minor: number; week_from: string; week_to: string; month_day: number; month_days: number; month_daily_minor: number[] };
     expect(o.week_spent_minor).toBe(32000);
     expect(o.week_budget_minor).toBe(1384615);
     expect(o.month_cap_minor).toBe(6000000);
@@ -81,6 +81,8 @@ describe('/api/tma/* — контракт', () => {
     expect(o.week_from <= o.week_to).toBe(true);
     expect(o.month_day).toBeGreaterThanOrEqual(1);
     expect(o.month_day).toBeLessThanOrEqual(o.month_days);
+    // дневные суммы месяца — массив на каждый день для графика темпа
+    expect(o.month_daily_minor).toHaveLength(o.month_days);
   });
 
   it('plan: источник дохода аргумент > факт > базовый (typical); PATCH профиля меняет план', async () => {

@@ -10,6 +10,7 @@ import {
   CalendarDays,
   ChartColumn,
   ChartPie,
+  ChevronDown,
   CircleCheck,
   Handshake,
   Landmark,
@@ -34,7 +35,6 @@ import {
   listCardCls,
   Loading,
   mutedCls,
-  PaceBar,
   rowCls,
   smBtnCls,
   smGhostBtnCls,
@@ -52,6 +52,66 @@ const MONTHS = [
   'январе', 'феврале', 'марте', 'апреле', 'мае', 'июне',
   'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре',
 ];
+
+/**
+ * График темпа месяца: накопленные траты по дням (линия+заливка)
+ * vs ровный график бюджета (пунктир) + точка-прогноз итога месяца.
+ * Цвет — «температура»: зелёный в графике, янтарь/красный при перегреве.
+ */
+function TempoChart({
+  daily,
+  today,
+  dim,
+  cap,
+  proj,
+  color,
+}: {
+  daily: readonly number[];
+  today: number;
+  dim: number;
+  cap: number;
+  proj: number;
+  color: string;
+}) {
+  const W = 320;
+  const H = 112;
+  const padL = 6;
+  const padR = 12;
+  const padT = 10;
+  const padB = 8;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const cum: number[] = [];
+  for (let i = 0; i < dim; i++) cum.push((cum[i - 1] ?? 0) + (daily[i] ?? 0));
+  const cumToday = cum[today - 1] ?? 0;
+  const yMax = Math.max(cap, proj, cumToday, 1) * 1.08;
+  const x = (d: number) => padL + (dim > 1 ? ((d - 1) / (dim - 1)) * plotW : plotW / 2);
+  const y = (v: number) => padT + (1 - v / yMax) * plotH;
+  const yBase = y(0);
+  const pts = Array.from({ length: today }, (_, i) => `${x(i + 1).toFixed(1)},${y(cum[i]!).toFixed(1)}`);
+  const linePts = `${x(1).toFixed(1)},${yBase.toFixed(1)} ${pts.join(' ')}`;
+  const areaD = `M ${x(1).toFixed(1)} ${yBase.toFixed(1)} ${pts.map((p) => `L ${p}`).join(' ')} L ${x(today).toFixed(1)} ${yBase.toFixed(1)} Z`;
+  const projY = y(Math.min(proj, yMax * 0.98));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" class="mt-2 block h-28 w-full" aria-hidden>
+      <defs>
+        <linearGradient id="tempoFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {/* идеал: ровный график «бюджет/день × день» */}
+      <line x1={x(1)} y1={yBase} x2={x(dim)} y2={y(cap)} stroke="#71717a" strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
+      <path d={areaD} fill="url(#tempoFill)" />
+      <polyline points={linePts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {proj > 0 && (
+        <line x1={x(today)} y1={y(cumToday)} x2={x(dim)} y2={projY} stroke={color} strokeWidth="1.5" strokeDasharray="3 3" opacity="0.7" />
+      )}
+      <circle cx={x(today)} cy={y(cumToday)} r="3" fill={color} />
+      {proj > 0 && <circle cx={x(dim)} cy={projY} r="3.5" fill="#18181b" stroke={color} strokeWidth="1.5" />}
+    </svg>
+  );
+}
 
 function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: UpcomingItem; onPaid: () => void }) {
   const [confirm, setConfirm] = useState(false);
@@ -133,6 +193,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   const ov = useData(() => api.get<Overview>('/api/tma/overview'), onFatal, []);
   const wk = useData(() => api.get<WeekStatus>('/api/tma/week'), onFatal, []);
   const up = useData(() => api.get<Upcoming>('/api/tma/upcoming'), onFatal, []);
+  const [openB, setOpenB] = useState(false);
 
   if (ov.loading || wk.loading || up.loading) return <Loading />;
   const err = ov.error ?? wk.error ?? up.error;
@@ -158,13 +219,14 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   // статус бюджета — единый источник (в «Тратах» только журнал)
   const weekShare = w.week_budget_minor > 0 ? w.week_spent_minor / w.week_budget_minor : 0;
   const spentShare = w.month_cap_minor > 0 ? w.month_spent_minor / w.month_cap_minor : 0;
-  const dayShare = w.month_days > 0 ? w.month_day / w.month_days : 0;
   const pace =
     w.burn_rate <= 1
-      ? { t: 'в графике', cls: 'text-emerald-400' }
+      ? { t: 'в графике', cls: 'text-emerald-400', hex: '#34d399' }
       : w.burn_rate <= 1.3
-        ? { t: 'чуть быстрее', cls: 'text-amber-300' }
-        : { t: 'быстрее плана', cls: 'text-red-400' };
+        ? { t: 'чуть быстрее', cls: 'text-amber-300', hex: '#fbbf24' }
+        : { t: 'быстрее плана', cls: 'text-red-400', hex: '#f87171' };
+  // прогноз итога месяца при текущем темпе; с 3-го дня — раньше шум
+  const projMinor = w.month_day >= 3 ? Math.round((w.month_spent_minor / w.month_day) * w.month_days) : 0;
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
@@ -232,66 +294,94 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         <Wallet size={16} strokeWidth={1.5} /> Бюджет
       </h2>
       <div class={`${cardCls} mt-2`}>
-        <div class={rowCls}>
-          <span class={mutedCls}>
-            Неделя · {fmtDay(w.week_from)} – {fmtDay(w.week_to)}
-          </span>
-          <b>{fmtMinor(w.week_spent_minor, c)}</b>
+        {/* hero: темп месяца — тап раскрывает детали */}
+        <div class="cursor-pointer select-none" onClick={() => setOpenB((v) => !v)}>
+          <div class={rowCls}>
+            <span class={mutedCls}>
+              Темп месяца
+              <Info title="Темп месяца">
+                Линия — накопленные траты по дням месяца; пунктир — ровный
+                график бюджета; полая точка — прогноз итога при текущем
+                темпе. Пока линия ниже пунктира — вы в графике; выше и
+                краснее — тратите быстрее плана.
+              </Info>
+            </span>
+            <span class={pace.cls}>{pace.t}</span>
+          </div>
+          {w.month_cap_minor > 0 ? (
+            <TempoChart
+              daily={w.month_daily_minor}
+              today={w.month_day}
+              dim={w.month_days}
+              cap={w.month_cap_minor}
+              proj={projMinor}
+              color={pace.hex}
+            />
+          ) : (
+            <p class={`${mutedCls} mt-2`}>
+              Бюджет месяца не задан — потрачено {fmtMinor(w.month_spent_minor, c)}
+            </p>
+          )}
+          <div class={`${rowCls} mt-1`}>
+            <span class={`${mutedCls} text-[12px]`}>
+              {projMinor > 0
+                ? `прогноз ~${fmtMinor(projMinor, c)} из ${fmtMinor(w.month_cap_minor, c)}`
+                : `день ${w.month_day} из ${w.month_days}`}
+            </span>
+            <span class={`${mutedCls} inline-flex items-center gap-0.5 text-[12px]`}>
+              детали
+              <ChevronDown
+                size={13}
+                strokeWidth={1.5}
+                class={`transition-transform ${openB ? 'rotate-180' : ''}`}
+              />
+            </span>
+          </div>
         </div>
-        <BudgetBar share={weekShare} over={w.week_over} />
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>
-            Бюджет недели
-            <Info title="Бюджет недели">
-              Равномерная доля месячного бюджета: бюджет месяца × 12/52.
-              Задаётся в профиле («Норма трат»).
-            </Info>
-          </span>
-          <span>{fmtMinor(w.week_budget_minor, c)}</span>
-        </div>
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>Остаток</span>
-          <span class={w.week_over ? 'text-red-400' : ''}>
-            {fmtMinor(w.week_remaining_minor, c)}
-            {w.week_over ? ' — перебор' : ''}
-          </span>
-        </div>
-        <div class="my-3 border-t border-white/5" />
-        <div class={rowCls}>
-          <span class={mutedCls}>Месяц</span>
-          <b>{fmtMinor(w.month_spent_minor, c)}</b>
-        </div>
-        <BudgetBar share={spentShare} />
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>Бюджет месяца</span>
-          <span>{fmtMinor(w.month_cap_minor, c)}</span>
-        </div>
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>
-            Темп месяца
-            <Info title="Темп месяца">
-              Сравнивает долю прошедших дней месяца и долю потраченного
-              бюджета. Пока полоска бюджета не длиннее полоски дней — вы в
-              графике; длиннее — тратите быстрее плана.
-            </Info>
-          </span>
-          <span class={pace.cls}>{pace.t}</span>
-        </div>
-        <div class="mt-1.5 space-y-1">
-          <PaceBar label="дни" share={dayShare} fillCls="bg-zinc-400" right={`${w.month_day}/${w.month_days}`} />
-          <PaceBar
-            label="бюджет"
-            share={spentShare}
-            fillCls={w.burn_rate > 1 ? 'bg-red-400' : 'bg-sky-500'}
-            right={`${Math.round(spentShare * 100)}%`}
-          />
-        </div>
-        <div class={`${rowCls} mt-3`}>
-          <span class={mutedCls}>Лимит на день</span>
-          <span>
-            {fmtMinor(w.daily_allowance_minor, c)} · {w.days_left} дн. до конца месяца
-          </span>
-        </div>
+        {openB && (
+          <div class="mt-3 border-t border-white/5 pt-3">
+            <div class={rowCls}>
+              <span class={mutedCls}>
+                Неделя · {fmtDay(w.week_from)} – {fmtDay(w.week_to)}
+              </span>
+              <b>{fmtMinor(w.week_spent_minor, c)}</b>
+            </div>
+            <BudgetBar share={weekShare} over={w.week_over} />
+            <div class={`${rowCls} mt-2`}>
+              <span class={mutedCls}>
+                Бюджет недели
+                <Info title="Бюджет недели">
+                  Равномерная доля месячного бюджета: бюджет месяца × 12/52.
+                  Задаётся в профиле («Норма трат»).
+                </Info>
+              </span>
+              <span>{fmtMinor(w.week_budget_minor, c)}</span>
+            </div>
+            <div class={`${rowCls} mt-2`}>
+              <span class={mutedCls}>Остаток</span>
+              <span class={w.week_over ? 'text-red-400' : ''}>
+                {fmtMinor(w.week_remaining_minor, c)}
+                {w.week_over ? ' — перебор' : ''}
+              </span>
+            </div>
+            <div class="my-3 border-t border-white/5" />
+            <div class={rowCls}>
+              <span class={mutedCls}>Месяц</span>
+              <b>{fmtMinor(w.month_spent_minor, c)}</b>
+            </div>
+            <BudgetBar share={spentShare} />
+            <div class={`${rowCls} mt-2`}>
+              <span class={mutedCls}>Бюджет месяца</span>
+              <span>{fmtMinor(w.month_cap_minor, c)}</span>
+            </div>
+            <div class={`${rowCls} mt-3`}>
+              <span class={mutedCls}>Лимит на день</span>
+              <span>
+                {fmtMinor(w.daily_allowance_minor, c)} · {w.days_left} дн. до конца месяца
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       <h2 class={`${headCls} mt-6`}>

@@ -48,6 +48,11 @@ export const WEEK: WeekStatus = {
   month_cap_minor: 6000000,
   month_day: 18,
   month_days: 31,
+  month_daily_minor: [
+    180000, 95000, 210000, 140000, 60000, 320000, 150000, 110000, 190000,
+    85000, 200000, 130000, 70000, 240000, 0, 90000, 80000, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ],
   burn_rate: 0.67,
   daily_allowance_minor: 195000,
   days_left: 13,

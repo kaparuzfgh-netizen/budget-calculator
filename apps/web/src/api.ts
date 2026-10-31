@@ -73,6 +73,8 @@ export interface WeekStatus {
   /** День месяца и всего дней — для темпа «дни vs бюджет». */
   month_day: number;
   month_days: number;
+  /** Траты по дням месяца [день1..деньN], minor — график темпа. */
+  month_daily_minor: number[];
   /** >1 — тратим быстрее плана (форматировать через fmtPct). */
   burn_rate: number;
   daily_allowance_minor: number;

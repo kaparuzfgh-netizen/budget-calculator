@@ -316,6 +316,16 @@ export function registerTmaApi(
       });
       const wEnd = new Date(`${wStart}T00:00:00Z`);
       wEnd.setUTCDate(wEnd.getUTCDate() + 6);
+      // дневные траты месяца — для графика темпа (накопленные vs идеал)
+      const dim = daysInMonth(today);
+      const curMonth = today.slice(0, 7);
+      const daily = new Array<number>(dim).fill(0);
+      for (const e of inLiving) {
+        if (e.date.slice(0, 7) === curMonth) {
+          const d = Number(e.date.slice(8, 10));
+          if (d >= 1 && d <= dim) daily[d - 1]! += e.amount;
+        }
+      }
       return okJson(c, {
         currency: p.living_currency,
         week_from: wStart,
@@ -328,6 +338,7 @@ export function registerTmaApi(
         month_cap_minor: toMinor(round2(s.monthCap)),
         month_day: dayOfMonth(today),
         month_days: daysInMonth(today),
+        month_daily_minor: daily.map((v) => toMinor(round2(v))),
         burn_rate: s.burnRate,
         daily_allowance_minor: toMinor(round2(s.dailyAllowance)),
         days_left: s.daysLeft,
