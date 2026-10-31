@@ -5,6 +5,8 @@
  * шторка с редактируемыми строками (сумма/заметка/дата/категория, чекбоксы) →
  * пакетный POST /api/tma/expenses {items: ≤30, у каждой свой client_id} —
  * ретрай сабмита не плодит дубли (server-side дедуп по 'tma:<client_id>').
+ * Повторно выбранный файл узнаётся по SHA-256 (localStorage) → предупреждение
+ * «уже разбирали», решение о повторном разборе — за пользователем.
  * Коды ошибок сервера → дружелюбные тексты; фича opt-in — при выключенном
  * тогле кнопка не шлёт запрос, а показывает подсказку про Профиль.
  */
@@ -28,6 +30,41 @@ import {
 } from '../ui';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // как на сервере (tma/vision)
+
+// ── дедуп повторных файлов: SHA-256 байтов → localStorage (последние 50) ──
+
+const SEEN_KEY = 'vision_seen_v1';
+const SEEN_MAX = 50;
+
+const loadSeen = (): string[] => {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const markSeen = (fp: string) => {
+  try {
+    localStorage.setItem(
+      SEEN_KEY,
+      JSON.stringify([fp, ...loadSeen().filter((x) => x !== fp)].slice(0, SEEN_MAX)),
+    );
+  } catch {
+    /* private mode — дедуп просто не запоминается */
+  }
+};
+
+/** Отпечаток файла: SHA-256 байтов; без Web Crypto — name+size+mtime. */
+const fingerprint = async (f: File, buf: ArrayBuffer): Promise<string> => {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', buf);
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return `${f.name}:${f.size}:${f.lastModified}`;
+  }
+};
 
 /** Склонение «трата/траты/трат». */
 const plural = (n: number): string => {
@@ -68,7 +105,9 @@ interface SheetRow {
 }
 type Sheet =
   | { kind: 'review'; ccy: string; provider: string; batchId: string; rows: SheetRow[] }
-  | { kind: 'info'; title: string; text: string };
+  | { kind: 'info'; title: string; text: string }
+  /** Файл уже разбирали — спрашиваем, нужен ли повторный разбор. */
+  | { kind: 'dup'; file: File; buf: ArrayBuffer; fp: string };
 
 export function ShotButton({
   api,
@@ -96,21 +135,12 @@ export function ShotButton({
     fileRef.current?.click();
   };
 
-  const onFile = async (f: File | undefined) => {
-    if (!f) return;
-    if (f.size > MAX_IMAGE_BYTES) {
-      setErr('Файл больше 10 МБ — выберите скриншот поменьше');
-      return;
-    }
+  const analyze = async (buf: ArrayBuffer, mime: string, fp: string) => {
     setBusy(true);
     setErr(null);
     try {
-      const buf = await f.arrayBuffer();
-      const res = await api.postRaw<VisionAnalyzeResponse>(
-        '/api/tma/vision/analyze',
-        buf,
-        f.type || 'application/octet-stream',
-      );
+      const res = await api.postRaw<VisionAnalyzeResponse>('/api/tma/vision/analyze', buf, mime);
+      markSeen(fp);
       setSheet(sheetOf(res));
     } catch (e) {
       if (isAuthError(e)) {
@@ -124,6 +154,21 @@ export function ShotButton({
     }
   };
 
+  const onFile = async (f: File | undefined) => {
+    if (!f) return;
+    if (f.size > MAX_IMAGE_BYTES) {
+      setErr('Файл больше 10 МБ — выберите скриншот поменьше');
+      return;
+    }
+    const buf = await f.arrayBuffer();
+    const fp = await fingerprint(f, buf);
+    if (loadSeen().includes(fp)) {
+      setSheet({ kind: 'dup', file: f, buf, fp });
+      return;
+    }
+    await analyze(buf, f.type || 'application/octet-stream', fp);
+  };
+
   return (
     <>
       <input
@@ -134,7 +179,7 @@ export function ShotButton({
         onChange={(e) => void onFile((e.target as HTMLInputElement).files?.[0])}
       />
       <button type="button" class={`${secondaryBtnCls} mt-3`} disabled={busy} onClick={openPicker}>
-        <Camera size={16} strokeWidth={1.5} /> {busy ? 'Распознаю…' : '📷 Из скриншота'}
+        <Camera size={16} strokeWidth={1.5} /> {busy ? 'Распознаю…' : 'Из скриншота'}
       </button>
       <p class={`${mutedCls} mt-2`}>
         Скриншот истории операций или аналитики банка — строки можно проверить перед записью.
@@ -145,6 +190,16 @@ export function ShotButton({
       )}
       {sheet?.kind === 'info' && (
         <InfoSheet title={sheet.title} text={sheet.text} onClose={() => setSheet(null)} />
+      )}
+      {sheet?.kind === 'dup' && (
+        <DupSheet
+          onCancel={() => setSheet(null)}
+          onConfirm={() => {
+            const s = sheet;
+            setSheet(null);
+            void analyze(s.buf, s.file.type || 'application/octet-stream', s.fp);
+          }}
+        />
       )}
     </>
   );
@@ -382,6 +437,34 @@ function InfoSheet({ title, text, onClose }: { title: string; text: string; onCl
         <p class="mt-2 text-sm leading-relaxed text-zinc-300">{text}</p>
         <button type="button" class={`${secondaryBtnCls} mt-4`} onClick={onClose}>
           Понятно
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ── шторка «файл уже разбирали» — решение о повторном разборе за пользователем ──
+
+function DupSheet({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return createPortal(
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        class="w-full max-w-md rounded-t-2xl border-t border-white/10 bg-zinc-900 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <b class="text-base font-semibold text-zinc-100">Этот файл уже разбирали</b>
+        <p class="mt-2 text-sm leading-relaxed text-zinc-300">
+          Такой скриншот уже отправлялся на распознавание — повторная запись может продублировать
+          траты. Распознать ещё раз?
+        </p>
+        <button type="button" class={`${primaryBtnCls} mt-4`} onClick={onConfirm}>
+          Распознать ещё раз
+        </button>
+        <button type="button" class={`${smGhostBtnCls} mt-1 w-full`} onClick={onCancel}>
+          Отмена
         </button>
       </div>
     </div>,
