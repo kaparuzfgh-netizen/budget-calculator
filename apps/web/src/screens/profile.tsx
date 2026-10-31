@@ -665,8 +665,6 @@ function CommitmentCard({
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [openEv, setOpenEv] = useState<number | null>(null);
-  // client_id стабилен на время жизни формы — повторные тапы не дублируют запись
-  const [paidCid] = useState(() => crypto.randomUUID());
 
   const save = async (ev: Event) => {
     ev.preventDefault();
@@ -688,19 +686,6 @@ function CommitmentCard({
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const markPaid = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.post(`/api/tma/commitments/${item.id}/payments`, { client_id: paidCid });
-      nav.flash('Оплата записана');
-      reload();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Не удалось записать — проверьте соединение');
       setBusy(false);
     }
   };
@@ -753,7 +738,24 @@ function CommitmentCard({
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)}
               />
             </Field>
-            <Field label="День месяца (1–31, пусто — без дня)">
+            <Field
+              label={
+                <>
+                  День месяца
+                  <Info title="День платежа">
+                    <p>Число месяца 1–31. Пусто — платёж без даты.</p>
+                    <p>
+                      Если такого дня в месяце нет, срок — последний день
+                      месяца: 31-е в феврале означает 28/29 февраля.
+                    </p>
+                    <p>
+                      В день срока бот отметит оплату сам, за 2 дня до срока —
+                      напомнит. Без дня ни автопроводки, ни напоминаний нет.
+                    </p>
+                  </Info>
+                </>
+              }
+            >
               <input
                 class={inputCls}
                 inputMode="numeric"
@@ -776,19 +778,12 @@ function CommitmentCard({
               'не оплачен'
             )}
           </p>
-          <p class={`${mutedCls} mb-3`}>В день срока бот отметит оплату сам, напомнит за 2 дня.</p>
           <FormError msg={err} />
           <button type="submit" class={primaryBtnCls} disabled={busy}>
             Сохранить
           </button>
         </form>
       </div>
-
-      {!item.paid_this_month && (
-        <button type="button" class={`${secondaryBtnCls} mt-3`} disabled={busy} onClick={() => void markPaid()}>
-          <CircleCheck size={16} strokeWidth={1.5} /> Отметить оплаченным
-        </button>
-      )}
 
       <button type="button" class={`${ghostBtnCls} mt-1`} disabled={busy} onClick={() => void toggle()}>
         {item.active ? (
@@ -801,6 +796,10 @@ function CommitmentCard({
           </>
         )}
       </button>
+      <p class={`${mutedCls} mt-1`}>
+        Пауза — платёж останется в списке и журнале, но выпадет из «К оплате»
+        и напоминаний.
+      </p>
 
       <h2 class={`${headCls} mt-6`}>
         <History size={16} strokeWidth={1.5} /> Журнал оплат
