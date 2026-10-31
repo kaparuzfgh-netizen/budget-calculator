@@ -375,7 +375,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
           </h2>
           <div class={`${cardCls} mt-2`}>
             <div class="relative">
-              <div class="scrollbar-thin flex min-h-[110px] items-end gap-1 overflow-x-auto px-1 pb-1 pt-2">
+              <div class="scrollbar-thin flex min-h-[110px] items-end gap-1 overflow-x-auto px-2 pb-1 pt-2">
                 {r.buckets.map((b) => (
                   <button
                     type="button"
@@ -383,15 +383,17 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                     key={b.key}
                     onClick={() => setSelB((k) => (k === b.key ? null : b.key))}
                   >
-                    <div class="flex h-[88px] items-end gap-0.5">
+                    <div class="relative flex h-[88px] items-end">
                       <div
                         class={`flex w-3 flex-col-reverse rounded-t-sm ${selB === b.key && b.living + b.other > 0 ? 'ring-1 ring-sky-300/70' : ''}`}
                       >
                         <i class="block w-full" style={{ height: `${((b.living / maxB) * 88) | 0}px`, background: COLORS.living }} />
                         <i class="block w-full" style={{ height: `${((b.other / maxB) * 88) | 0}px`, background: COLORS.commitments }} />
                       </div>
+                      {/* поступление — тонкая полоска справа от стека, абсолютная:
+                          не сдвигает центровку столбца над подписью */}
                       {b.received > 0 && (
-                        <div class="w-[3px] self-end rounded-sm bg-emerald-500" style={{ height: `${((b.received / maxRecv) * 88) | 0}px` }} />
+                        <div class="absolute bottom-0 left-full ml-0.5 w-[3px] rounded-sm bg-emerald-500" style={{ height: `${((b.received / maxRecv) * 88) | 0}px` }} />
                       )}
                     </div>
                     <div class={`mt-1 text-[9px] ${selB === b.key ? 'font-medium text-sky-300' : 'text-zinc-500'}`}>
