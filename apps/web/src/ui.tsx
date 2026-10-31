@@ -257,6 +257,41 @@ export function FormError({ msg }: { msg: string | null }) {
   return msg ? <p class="mb-3 text-sm text-red-400">{msg}</p> : null;
 }
 
+/** Тонкая полоска «потрачено/бюджет» — нагляднее, чем «X из Y». */
+export function BudgetBar({ share, over }: { share: number; over?: boolean }) {
+  return (
+    <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10">
+      <div
+        class={`h-full rounded-full ${over ? 'bg-red-400' : 'bg-sky-500'}`}
+        style={{ width: `${Math.min(100, Math.round(share * 100))}%` }}
+      />
+    </div>
+  );
+}
+
+/** Мини-полоска для темпа месяца: «дни прошло» vs «бюджета потрачено». */
+export function PaceBar({
+  label,
+  share,
+  fillCls,
+  right,
+}: {
+  label: string;
+  share: number;
+  fillCls: string;
+  right: string;
+}) {
+  return (
+    <div class="flex items-center gap-2">
+      <span class="w-12 flex-none text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
+      <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+        <div class={`h-full rounded-full ${fillCls}`} style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} />
+      </div>
+      <span class="w-12 flex-none text-right text-[10px] tabular-nums text-zinc-500">{right}</span>
+    </div>
+  );
+}
+
 // ── селекты ──
 
 /** Опция Select: строка — и значение, и подпись; hint — доп. текст поиска. */

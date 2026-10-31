@@ -22,8 +22,9 @@ import {
 import { ApiError } from '../api';
 import type { Overview, Upcoming, UpcomingItem, WeekStatus } from '../api';
 import type { ScreenProps } from '../app';
-import { fmtDay, fmtMinor, fmtPct } from '../fmt';
+import { fmtDay, fmtMinor } from '../fmt';
 import {
+  BudgetBar,
   cardCls,
   confirmNeutralCls,
   ErrorView,
@@ -33,6 +34,7 @@ import {
   listCardCls,
   Loading,
   mutedCls,
+  PaceBar,
   rowCls,
   smBtnCls,
   smGhostBtnCls,
@@ -50,15 +52,6 @@ const MONTHS = [
   'январе', 'феврале', 'марте', 'апреле', 'мае', 'июне',
   'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре',
 ];
-
-function Bar({ pct }: { pct: number }) {
-  const w = Math.max(0, Math.min(100, Math.round(pct)));
-  return (
-    <div class="mb-2 mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
-      <i class={`block h-full rounded-full ${pct > 100 ? 'bg-red-400' : 'bg-sky-500'}`} style={{ width: `${w}%` }} />
-    </div>
-  );
-}
 
 function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: UpcomingItem; onPaid: () => void }) {
   const [confirm, setConfirm] = useState(false);
@@ -162,8 +155,16 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   const w = wk.data;
   const u = up.data;
   const c = o.living_currency;
-  const weekPct = o.weekly_budget_minor > 0 ? (o.spent_week_minor / o.weekly_budget_minor) * 100 : 0;
-  const monthPct = o.month_cap_minor > 0 ? (o.spent_month_minor / o.month_cap_minor) * 100 : 0;
+  // статус бюджета — единый источник (в «Тратах» только журнал)
+  const weekShare = w.week_budget_minor > 0 ? w.week_spent_minor / w.week_budget_minor : 0;
+  const spentShare = w.month_cap_minor > 0 ? w.month_spent_minor / w.month_cap_minor : 0;
+  const dayShare = w.month_days > 0 ? w.month_day / w.month_days : 0;
+  const pace =
+    w.burn_rate <= 1
+      ? { t: 'в графике', cls: 'text-emerald-400' }
+      : w.burn_rate <= 1.3
+        ? { t: 'чуть быстрее', cls: 'text-amber-300' }
+        : { t: 'быстрее плана', cls: 'text-red-400' };
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
@@ -231,38 +232,64 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
         <Wallet size={16} strokeWidth={1.5} /> Бюджет
       </h2>
       <div class={`${cardCls} mt-2`}>
-        <p class={mutedCls}>повседневных израсходовано</p>
-        <div class={`${rowCls} mt-2`}>
-          <span>Неделя</span>
-          <span>
-            <b>{fmtMinor(o.spent_week_minor, c)}</b> из {fmtMinor(o.weekly_budget_minor, c)}
-          </span>
-        </div>
-        <Bar pct={weekPct} />
-        <div class={rowCls}>
-          <span class={mutedCls}>Остаток недели</span>
-          <span class={o.week_remaining_minor < 0 ? 'text-red-400' : ''}>{fmtMinor(o.week_remaining_minor, c)}</span>
-        </div>
-        <div class={`${rowCls} mt-2`}>
-          <span>Месяц</span>
-          <span>
-            <b>{fmtMinor(o.spent_month_minor, c)}</b> из {fmtMinor(o.month_cap_minor, c)}
-          </span>
-        </div>
-        <Bar pct={monthPct} />
         <div class={rowCls}>
           <span class={mutedCls}>
-            Burn rate
-            <Info title="Burn rate">
-              <p>
-                Темп расхода бюджета: 100% — тратите ровно по плану к концу
-                недели; выше — быстрее, и бюджет кончится раньше.
-              </p>
+            Неделя · {fmtDay(w.week_from)} – {fmtDay(w.week_to)}
+          </span>
+          <b>{fmtMinor(w.week_spent_minor, c)}</b>
+        </div>
+        <BudgetBar share={weekShare} over={w.week_over} />
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>
+            Бюджет недели
+            <Info title="Бюджет недели">
+              Равномерная доля месячного бюджета: бюджет месяца × 12/52.
+              Задаётся в профиле («Норма трат»).
             </Info>
           </span>
-          <span class={w.burn_rate > 1 ? 'text-amber-400' : ''}>
-            {fmtPct(w.burn_rate)}
-            {w.burn_rate > 1 ? ' — тратим быстрее плана' : ''}
+          <span>{fmtMinor(w.week_budget_minor, c)}</span>
+        </div>
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>Остаток</span>
+          <span class={w.week_over ? 'text-red-400' : ''}>
+            {fmtMinor(w.week_remaining_minor, c)}
+            {w.week_over ? ' — перебор' : ''}
+          </span>
+        </div>
+        <div class="my-3 border-t border-white/5" />
+        <div class={rowCls}>
+          <span class={mutedCls}>Месяц</span>
+          <b>{fmtMinor(w.month_spent_minor, c)}</b>
+        </div>
+        <BudgetBar share={spentShare} />
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>Бюджет месяца</span>
+          <span>{fmtMinor(w.month_cap_minor, c)}</span>
+        </div>
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>
+            Темп месяца
+            <Info title="Темп месяца">
+              Сравнивает долю прошедших дней месяца и долю потраченного
+              бюджета. Пока полоска бюджета не длиннее полоски дней — вы в
+              графике; длиннее — тратите быстрее плана.
+            </Info>
+          </span>
+          <span class={pace.cls}>{pace.t}</span>
+        </div>
+        <div class="mt-1.5 space-y-1">
+          <PaceBar label="дни" share={dayShare} fillCls="bg-zinc-400" right={`${w.month_day}/${w.month_days}`} />
+          <PaceBar
+            label="бюджет"
+            share={spentShare}
+            fillCls={w.burn_rate > 1 ? 'bg-red-400' : 'bg-sky-500'}
+            right={`${Math.round(spentShare * 100)}%`}
+          />
+        </div>
+        <div class={`${rowCls} mt-3`}>
+          <span class={mutedCls}>Лимит на день</span>
+          <span>
+            {fmtMinor(w.daily_allowance_minor, c)} · {w.days_left} дн. до конца месяца
           </span>
         </div>
       </div>
@@ -296,7 +323,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
           <ChartPie size={18} strokeWidth={1.5} class={iconCls} /> План
         </button>
         <button type="button" class={tileCls} onClick={() => nav.push({ id: 'week' })}>
-          <CalendarDays size={18} strokeWidth={1.5} class={iconCls} /> Неделя
+          <Receipt size={18} strokeWidth={1.5} class={iconCls} /> Траты
         </button>
         <button type="button" class={tileCls} onClick={() => nav.push({ id: 'debts' })}>
           <Landmark size={18} strokeWidth={1.5} class={iconCls} /> Кредиты

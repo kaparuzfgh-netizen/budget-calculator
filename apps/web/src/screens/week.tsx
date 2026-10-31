@@ -1,20 +1,20 @@
 /**
- * week.tsx — «Неделя» и всё про траты.
+ * week.tsx — «Траты»: журнал расходов.
  *
- * WeekScreen: сводка /api/tma/week (неделя, burn rate, дневной остаток,
- * месяц) + список трат недели /api/tma/expenses → карточка.
+ * WeekScreen: список трат недели /api/tma/expenses → карточка; контекст
+ * недели — одной строкой из /api/tma/week (статус бюджета — на «Обзоре»).
  * ExpenseScreen: карточка траты — правка (PATCH: сумма/валюта/заметка)
  * и удаление (DELETE, только с подтверждением); после мутации —
- * обратно на «Неделю», она перемонтируется и перезагрузит данные.
+ * обратно на «Траты», экран перемонтируется и перезагрузит данные.
  * SpentAddScreen: форма сумма+валюта+заметка → POST /api/tma/expenses;
  * client_id = crypto.randomUUID() генерируется ОДИН раз при открытии
  * формы (useMemo []): повторный submit по сети-ретраю не дублирует запись.
  */
 import { useMemo, useState } from 'preact/hooks';
 import {
-  CalendarDays,
   CircleHelp,
   Plus,
+  Receipt,
   Sparkles,
   Trash2,
 } from 'lucide-preact';
@@ -53,42 +53,7 @@ const chipCls =
 const chipOnCls =
   'inline-flex items-center gap-1.5 rounded-full border border-sky-500/60 bg-sky-500/15 px-3.5 py-2 text-[13px] text-sky-300';
 
-/** Тонкая полоска «потрачено/бюджет» — нагляднее, чем «X из Y». */
-function BudgetBar({ share, over }: { share: number; over?: boolean }) {
-  return (
-    <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10">
-      <div
-        class={`h-full rounded-full ${over ? 'bg-red-400' : 'bg-sky-500'}`}
-        style={{ width: `${Math.min(100, Math.round(share * 100))}%` }}
-      />
-    </div>
-  );
-}
-
-/** Мини-полоска для темпа месяца: «дни прошло» vs «бюджета потрачено». */
-function PaceBar({
-  label,
-  share,
-  fillCls,
-  right,
-}: {
-  label: string;
-  share: number;
-  fillCls: string;
-  right: string;
-}) {
-  return (
-    <div class="flex items-center gap-2">
-      <span class="w-12 flex-none text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
-      <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-        <div class={`h-full rounded-full ${fillCls}`} style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} />
-      </div>
-      <span class="w-12 flex-none text-right text-[10px] tabular-nums text-zinc-500">{right}</span>
-    </div>
-  );
-}
-
-// ── Неделя ──
+// ── Траты ──
 
 export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
   const wk = useData(() => api.get<WeekStatus>('/api/tma/week'), onFatal, []);
@@ -114,92 +79,18 @@ export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
   const c = w.currency;
   const catEmoji = new Map(ct.data.categories.map((x) => [x.id, x.emoji]));
 
-  // темп месяца: доля прошедших дней vs доля потраченного бюджета
-  const dayShare = w.month_days > 0 ? w.month_day / w.month_days : 0;
-  const spentShare = w.month_cap_minor > 0 ? w.month_spent_minor / w.month_cap_minor : 0;
-  const pace =
-    w.burn_rate <= 1
-      ? { t: 'в графике', cls: 'text-emerald-400' }
-      : w.burn_rate <= 1.3
-        ? { t: 'чуть быстрее', cls: 'text-amber-300' }
-        : { t: 'быстрее плана', cls: 'text-red-400' };
-  const weekShare = w.week_budget_minor > 0 ? w.week_spent_minor / w.week_budget_minor : 0;
-
   return (
     <>
       <h1 class={h1Cls}>
-        <CalendarDays size={20} strokeWidth={1.5} class="text-sky-400" /> Неделя
-        <span class="ml-1 text-sm font-normal text-zinc-400">
-          {fmtDay(w.week_from)} – {fmtDay(w.week_to)}
-        </span>
+        <Receipt size={20} strokeWidth={1.5} class="text-sky-400" /> Траты
       </h1>
-      <div class={cardCls}>
-        <div class={rowCls}>
-          <span>Потрачено</span>
-          <b>{fmtMinor(w.week_spent_minor, c)}</b>
-        </div>
-        <BudgetBar share={weekShare} over={w.week_over} />
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>
-            Бюджет недели
-            <Info title="Бюджет недели">
-              Равномерная доля месячного бюджета: бюджет месяца × 12/52.
-              Задаётся в профиле («Норма трат»).
-            </Info>
-          </span>
-          <span>{fmtMinor(w.week_budget_minor, c)}</span>
-        </div>
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>Остаток</span>
-          <span class={w.week_over ? 'text-red-400' : ''}>
-            {fmtMinor(w.week_remaining_minor, c)}
-            {w.week_over ? ' — перебор' : ''}
-          </span>
-        </div>
-      </div>
+      <p class={mutedCls}>
+        Неделя {fmtDay(w.week_from)} – {fmtDay(w.week_to)} · потрачено{' '}
+        {fmtMinor(w.week_spent_minor, c)} · осталось {fmtMinor(w.week_remaining_minor, c)}
+      </p>
 
-      <h2 class={`${headCls} mt-6`}>Месяц</h2>
-      <div class={`${cardCls} mt-2`}>
-        <div class={rowCls}>
-          <span>Потрачено</span>
-          <b>{fmtMinor(w.month_spent_minor, c)}</b>
-        </div>
-        <BudgetBar share={spentShare} />
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>Бюджет месяца</span>
-          <span>{fmtMinor(w.month_cap_minor, c)}</span>
-        </div>
-        <div class={`${rowCls} mt-2`}>
-          <span class={mutedCls}>
-            Темп месяца
-            <Info title="Темп месяца">
-              Сравнивает долю прошедших дней месяца и долю потраченного
-              бюджета. Пока полоска бюджета не длиннее полоски дней — вы в
-              графике; длиннее — тратите быстрее плана.
-            </Info>
-          </span>
-          <span class={pace.cls}>{pace.t}</span>
-        </div>
-        <div class="mt-1.5 space-y-1">
-          <PaceBar label="дни" share={dayShare} fillCls="bg-zinc-400" right={`${w.month_day}/${w.month_days}`} />
-          <PaceBar
-            label="бюджет"
-            share={spentShare}
-            fillCls={w.burn_rate > 1 ? 'bg-red-400' : 'bg-sky-500'}
-            right={`${Math.round(spentShare * 100)}%`}
-          />
-        </div>
-        <div class={`${rowCls} mt-3`}>
-          <span class={mutedCls}>Лимит на день</span>
-          <span>
-            {fmtMinor(w.daily_allowance_minor, c)} · {w.days_left} дн. до конца месяца
-          </span>
-        </div>
-      </div>
-      <p class={`${mutedCls} mt-2`}>Курсы на {w.fx_as_of || '—'}</p>
-
-      <div class="mt-6 flex items-center justify-between">
-        <h2 class={headCls}>Траты недели</h2>
+      <div class="mt-5 flex items-center justify-between">
+        <h2 class={headCls}>Записи</h2>
         <button type="button" class={smBtnCls} onClick={() => nav.push({ id: 'spent-add' })}>
           <Plus size={14} strokeWidth={1.5} /> Трата
         </button>
