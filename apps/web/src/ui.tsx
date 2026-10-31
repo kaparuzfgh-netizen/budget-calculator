@@ -256,10 +256,11 @@ export function FormError({ msg }: { msg: string | null }) {
 
 // ── селекты ──
 
-/** Опция Select: строка — и значение, и подпись. */
+/** Опция Select: строка — и значение, и подпись; hint — доп. текст поиска. */
 export interface SelectOption {
   value: string;
   label: string;
+  hint?: string;
 }
 const optOf = (o: string | SelectOption): SelectOption => (typeof o === 'string' ? { value: o, label: o } : o);
 
@@ -274,14 +275,17 @@ export function Select({
   onChange,
   placeholder = '—',
   disabled = false,
+  searchable = false,
 }: {
   value: string;
   options: readonly (string | SelectOption)[];
   onChange: (v: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -298,8 +302,20 @@ export function Select({
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+  useEffect(() => {
+    if (!open) setQ('');
+  }, [open]);
   const opts = options.map(optOf);
   const cur = opts.find((o) => o.value === value);
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? opts.filter(
+        (o) =>
+          o.label.toLowerCase().includes(needle) ||
+          o.value.toLowerCase().includes(needle) ||
+          (o.hint?.toLowerCase().includes(needle) ?? false),
+      )
+    : opts;
   return (
     <div class="relative" ref={root}>
       <button
@@ -319,7 +335,22 @@ export function Select({
       </button>
       {open && (
         <div class="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-xl border border-white/10 bg-zinc-900 shadow-xl shadow-black/40">
-          {opts.map((o) => (
+          {searchable && (
+            <div class="sticky top-0 border-b border-white/10 bg-zinc-900 p-1.5">
+              <input
+                autoFocus
+                class="w-full rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-[14px] text-zinc-100 placeholder-zinc-500 outline-none focus:ring-2 focus:ring-sky-500/60"
+                placeholder="Поиск…"
+                value={q}
+                onInput={(e) => setQ((e.target as HTMLInputElement).value)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
+          {shown.length === 0 && (
+            <div class="px-3 py-2.5 text-sm text-zinc-500">Ничего не найдено</div>
+          )}
+          {shown.map((o) => (
             <button
               key={o.value}
               type="button"
@@ -341,6 +372,26 @@ export function Select({
 
 /** Маркер опции «Другое…» в селекте валют. */
 const CCY_CUSTOM = '__ccy_custom__';
+
+/** Русские имена ходовых валют — для поиска («доллар» → USD). */
+const CCY_RU: Record<string, string> = {
+  USD: 'доллар',
+  EUR: 'евро',
+  RUB: 'рубль',
+  KGS: 'сом',
+  KZT: 'тенге',
+  UAH: 'гривна',
+  UZS: 'сум',
+  GEL: 'лари',
+  AMD: 'драм',
+  AZN: 'манат',
+  BYN: 'белорусский рубль',
+  TRY: 'лира',
+  GBP: 'фунт',
+  CNY: 'юань',
+  JPY: 'иена',
+  AED: 'дирхам',
+};
 
 /**
  * Поле валюты: Select из CCY_LIST ∪ extra ∪ текущее значение и финальная
@@ -375,7 +426,7 @@ export function CcySelect({
   }, [value]);
   const options: SelectOption[] = [
     ...(allowEmpty ? [{ value: '', label: emptyLabel }] : []),
-    ...known.map((x) => ({ value: x, label: x })),
+    ...known.map((x) => ({ value: x, label: x, ...(CCY_RU[x] ? { hint: CCY_RU[x] } : {}) })),
     { value: CCY_CUSTOM, label: 'Другое…' },
   ];
   const pick = (v: string) => {
@@ -389,7 +440,7 @@ export function CcySelect({
   };
   return (
     <div>
-      <Select value={customMode ? CCY_CUSTOM : up(value)} options={options} onChange={pick} />
+      <Select value={customMode ? CCY_CUSTOM : up(value)} options={options} onChange={pick} searchable />
       {customMode && (
         <input
           class={`${inputCls} mt-2`}
