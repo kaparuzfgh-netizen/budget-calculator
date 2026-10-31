@@ -121,6 +121,20 @@
       "nav": "cancel"
     },
     {
+      "id": "PF_COMMIT_FREQ",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "PF_COMMITS",
+      "nav": "cancel"
+    },
+    {
+      "id": "PF_COMMIT_CAD",
+      "kind": "prompt",
+      "depth": 3,
+      "parent": "PF_COMMITS",
+      "nav": "cancel"
+    },
+    {
       "id": "PF_COMMIT_AMOUNT",
       "kind": "prompt",
       "depth": 4,
@@ -616,7 +630,11 @@
     ["PF_HOME", "PF_COMMITS"],
     ["PF_COMMITS", "PF_COMMIT"],
     ["PF_COMMITS", "PF_COMMIT_ADD"],
+    ["PF_COMMIT_ADD", "PF_COMMIT_FREQ"],
     ["PF_COMMIT_ADD", "PF_COMMITS"],
+    ["PF_COMMIT_FREQ", "PF_COMMIT_CAD"],
+    ["PF_COMMIT_FREQ", "PF_COMMITS"],
+    ["PF_COMMIT_CAD", "PF_COMMITS"],
     ["PF_COMMIT", "PF_COMMIT_AMOUNT"],
     ["PF_COMMIT", "PF_COMMIT_DAY"],
     ["PF_COMMIT_AMOUNT", "PF_COMMIT"],

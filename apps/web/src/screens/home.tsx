@@ -70,7 +70,12 @@ function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: Upcoming
     try {
       const client_id = crypto.randomUUID();
       if (item.kind === 'commitment') {
-        await api.post(`/api/tma/commitments/${item.id}/payments`, { client_id });
+        // просроченный срок закрываем оплатой его датой — иначе запись
+        // «сегодня» попадёт уже в окно следующего срока (isOccurrencePaid)
+        await api.post(`/api/tma/commitments/${item.id}/payments`, {
+          client_id,
+          ...(item.overdue ? { paid_on: item.due_on } : {}),
+        });
       } else {
         await api.post(`/api/tma/debts/${item.id}/events`, {
           kind: 'payment',
@@ -94,6 +99,7 @@ function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: Upcoming
             <Landmark size={15} strokeWidth={1.5} class="text-zinc-500" />
           )}
           {item.name}
+          {item.cadence ? <span class="text-[13px] text-zinc-500"> · {item.cadence}</span> : ''}
           {item.overdue ? <span class="text-[13px] text-red-400"> · просрочено</span> : ''}
         </span>
         <span class="text-[13px] text-zinc-500">до {fmtDay(item.due_on)}</span>
@@ -211,7 +217,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
           <div class={`${listCardCls} mt-2`}>
             <ul class="divide-y divide-white/5">
               {u.items.map((x) => (
-                <PayRow key={`${x.kind}:${x.id}`} api={api} item={x} onPaid={() => { nav.flash(`Оплачено: ${x.name}`); up.reload(); ov.reload(); }} />
+                <PayRow key={`${x.kind}:${x.id}:${x.due_on}`} api={api} item={x} onPaid={() => { nav.flash(`Оплачено: ${x.name}`); up.reload(); ov.reload(); }} />
               ))}
             </ul>
             <p class="border-t border-white/5 px-4 py-2.5 text-[13px] text-zinc-500">

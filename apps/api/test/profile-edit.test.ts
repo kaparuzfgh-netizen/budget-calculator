@@ -357,9 +357,12 @@ describe('редактирование профиля (pf:*)', () => {
     expect(last()).toContain('Удалить');
     await cb(OWNER + 52, 'pf:cdel:yes');
     expect((await scoped(env.DB, uid).listCommitments()).results.find((c) => c.id === cid)).toBeUndefined();
-    // добавить — ПЕРВЫЙ вернувшийся список содержит новый платёж (регрессия stale-render)
+    // добавить — строка → выбор каденса (месяц с днём из строки) → список
+    // ПЕРВЫЙ вернувшийся список содержит новый платёж (регрессия stale-render)
     await cb(OWNER + 52, 'pf:cadd');
     await msg(OWNER + 52, 'Интернет 600 kgs 5');
+    expect(last()).toContain('Как часто');
+    await cb(OWNER + 52, 'pf:cf:m');
     expect(last()).toContain('Интернет');
     const cbs = (
       (sent.at(-1)!.markup as { inline_keyboard?: { text: string; callback_data?: string }[][] })?.inline_keyboard ?? []

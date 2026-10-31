@@ -47,6 +47,14 @@ export interface CommitmentRow {
   amount_minor: number;
   currency: string;
   due_day: number | null;
+  /** Периодичность (миграция 0016): monthly|interval_days|yearly. Легаси — monthly. */
+  frequency: 'monthly' | 'interval_days' | 'yearly';
+  /** interval_days: шаг 1–366 от якоря anchor_on; NULL у прочих каденсов. */
+  interval_days: number | null;
+  /** interval_days: 'YYYY-MM-DD' первого платежа (точка отсчёта сроков). */
+  anchor_on: string | null;
+  /** yearly: месяц платежа 1–12; NULL у прочих каденсов. */
+  due_month: number | null;
   active: number;
   created_at: string;
 }
@@ -265,16 +273,51 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(id, userId)
         .first<CommitmentRow>().then((r) => decRow('commitments', r));
     },
-    async addCommitment(c: { name: string; amount_minor: number; currency: string; due_day: number | null }) {
+    async addCommitment(c: {
+      name: string;
+      amount_minor: number;
+      currency: string;
+      due_day: number | null;
+      /** Каденс (0016); без аргументов — monthly (дефолт миграции). */
+      frequency?: 'monthly' | 'interval_days' | 'yearly';
+      interval_days?: number | null;
+      anchor_on?: string | null;
+      due_month?: number | null;
+    }) {
       return db
-        .prepare('INSERT INTO commitments (user_id, name, amount_minor, currency, due_day) VALUES (?, ?, ?, ?, ?)')
-        .bind(userId, await en('commitments', 'name', c.name), await en('commitments', 'amount_minor', c.amount_minor), c.currency, c.due_day)
+        .prepare(
+          `INSERT INTO commitments
+             (user_id, name, amount_minor, currency, due_day, frequency, interval_days, anchor_on, due_month)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          userId,
+          await en('commitments', 'name', c.name),
+          await en('commitments', 'amount_minor', c.amount_minor),
+          c.currency,
+          c.due_day,
+          c.frequency ?? 'monthly',
+          c.interval_days ?? null,
+          c.anchor_on ?? null,
+          c.due_month ?? null,
+        )
         .run();
     },
     /** Точечные правки — все WHERE id=? AND user_id=? (чужие id молча игнорируются). */
     async patchCommitment(
       id: number,
-      patch: { amount_minor?: number; currency?: string; due_day?: number | null; active?: number; name?: string },
+      patch: {
+        amount_minor?: number;
+        currency?: string;
+        due_day?: number | null;
+        active?: number;
+        name?: string;
+        /** Каденс (0016) — plaintext-колонки планирования. */
+        frequency?: 'monthly' | 'interval_days' | 'yearly';
+        interval_days?: number | null;
+        anchor_on?: string | null;
+        due_month?: number | null;
+      },
     ) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string | null)[] = [];
@@ -297,6 +340,22 @@ export function scoped(db: Env['DB'], userId: number) {
       if (patch.active !== undefined) {
         sets.push('active = ?');
         binds.push(patch.active);
+      }
+      if (patch.frequency !== undefined) {
+        sets.push('frequency = ?');
+        binds.push(patch.frequency);
+      }
+      if (patch.interval_days !== undefined) {
+        sets.push('interval_days = ?');
+        binds.push(patch.interval_days);
+      }
+      if (patch.anchor_on !== undefined) {
+        sets.push('anchor_on = ?');
+        binds.push(patch.anchor_on);
+      }
+      if (patch.due_month !== undefined) {
+        sets.push('due_month = ?');
+        binds.push(patch.due_month);
       }
       binds.push(id, userId);
       return db

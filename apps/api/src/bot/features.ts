@@ -6,6 +6,7 @@ import { computeWaterfall } from '../domain/cashflow';
 import { weeklyStatus } from '../domain/budget';
 import { matchCategory } from '../domain/categories';
 import { convert, round2 } from '../domain/money';
+import { cadenceLabel, monthlyAmount } from '../domain/schedule';
 import type { Period } from '../domain/report';
 import { buildUserReport } from '../services/report';
 import { baselineIncome } from '../services/baseline';
@@ -121,8 +122,9 @@ export async function runPlan(
     ...(base.source === 'computed' ? { baseline: { amount: base.amount, currency: base.currency } } : {}),
   });
   const income = { amount: inc.amount, currency: inc.currency };
+  // месячный эквивалент по каденсу: interval → ×30.4375/n, yearly → /12
   const mandatoryUsd = commits.reduce(
-    (s: number, c: CommitmentRow) => s + usd(c.amount_minor / 100, c.currency, pu),
+    (s: number, c: CommitmentRow) => s + usd(monthlyAmount(c), c.currency, pu),
     0,
   );
   const w = computeWaterfall({
@@ -141,7 +143,7 @@ export async function runPlan(
     .slice(0, 5)
     .map(
       (c) =>
-        `  • ${escapeHtml(c.name)} — ${fmtMoney(c.amount_minor / 100, c.currency)}${c.due_day ? ` (${c.due_day})` : ''}`,
+        `  • ${escapeHtml(c.name)} — ${fmtMoney(c.amount_minor / 100, c.currency)}${c.due_day || c.frequency !== 'monthly' ? ` (${cadenceLabel(c)})` : ''}`,
     )
     .join('\n');
   const incLabel =

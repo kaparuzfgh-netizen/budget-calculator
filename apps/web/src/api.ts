@@ -38,6 +38,8 @@ export interface OverviewCommitment {
   amount_minor: number;
   currency: string;
   due_day: number | null;
+  /** Подпись каденса («1 числа», «каждые 14 дн», «15 марта») — есть в /plan. */
+  cadence?: string;
 }
 export interface Overview {
   month: string;
@@ -135,13 +137,24 @@ export interface Profile {
   vision_enabled?: number;
 }
 
+export type CommitmentFrequency = 'monthly' | 'interval_days' | 'yearly';
 export interface Commitment {
   id: number;
   name: string;
   amount_minor: number;
   currency: string;
   due_day: number | null;
+  /** Каденс (миграция 0016); легаси-строки — 'monthly'. */
+  frequency: CommitmentFrequency;
+  interval_days: number | null;
+  anchor_on: string | null; // 'YYYY-MM-DD' первый платёж interval_days
+  due_month: number | null;
+  /** Подпись каденса: «1 числа» · «каждые 14 дн» · «15 марта» · «без даты». */
+  cadence: string;
+  /** Ближайший срок 'YYYY-MM-DD'; null — платёж без расписания. */
+  next_due_on: string | null;
   active: number;
+  /** Текущий период/срок уже оплачен (для monthly без даты — «в этом месяце»). */
   paid_this_month: boolean;
   last_paid_on: string | null;
 }
@@ -399,6 +412,8 @@ export interface UpcomingItem {
   due_on: string;
   paid: boolean;
   overdue: boolean;
+  /** Подпись каденса платежа («каждые 14 дн»…); только kind='commitment'. */
+  cadence?: string;
 }
 export interface Upcoming {
   month: string;

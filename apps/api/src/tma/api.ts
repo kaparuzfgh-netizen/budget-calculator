@@ -24,6 +24,7 @@ import { baselineIncome } from '../services/baseline';
 import type { Period } from '../domain/report';
 import { debtViews } from '../services/debts';
 import { dueDateFor } from '../services/reminders';
+import { cadenceLabel, isOccurrencePaid, monthlyAmount, nextDueOn, occurrencesInRange } from '../domain/schedule';
 import {
   bad,
   CCY_RE,
@@ -82,20 +83,74 @@ const categoryPatchSchema = z.object({
   archived: z.boolean().optional(),
   sort: z.number().int().optional(),
 });
-const commitSchema = z.object({
-  name: z.string().trim().min(1).max(LIMITS.maxName),
-  amount: zAmount,
-  currency: zCcy.optional(),
-  due_day: zDay,
-  client_id: zClientId,
-});
-const commitPatchSchema = z.object({
-  name: z.string().trim().min(1).max(LIMITS.maxName).optional(),
-  amount: zAmount.optional(),
-  currency: zCcy.optional(),
-  due_day: z.number().int().min(1).max(31).nullable().optional(),
-  active: z.boolean().optional(),
-});
+/** Каденс платежа (миграция 0016): frequency + поля по каденсу. */
+const zFrequency = z.enum(['monthly', 'interval_days', 'yearly']);
+const cadenceFields = {
+  frequency: zFrequency.optional(),
+  interval_days: z.number().int().min(1).max(366).nullable().optional(),
+  anchor_on: zIso.nullable().optional(),
+  due_month: z.number().int().min(1).max(12).nullable().optional(),
+};
+/** Явный NULL обязательного для каденса поля — сразу ошибка (superRefine на схемах). */
+function cadenceNullIssues(
+  v: { frequency?: 'monthly' | 'interval_days' | 'yearly' | undefined } & Record<string, unknown>,
+  ctx: z.RefinementCtx,
+): void {
+  const f = v.frequency;
+  if (f === 'interval_days') {
+    if (v.interval_days === null) ctx.addIssue({ code: 'custom', message: 'interval_days: 1–366 обязателен' });
+    if (v.anchor_on === null) ctx.addIssue({ code: 'custom', message: 'anchor_on (YYYY-MM-DD) обязателен' });
+  }
+  if (f === 'yearly') {
+    if (v.due_day === null) ctx.addIssue({ code: 'custom', message: 'due_day: 1–31 обязателен' });
+    if (v.due_month === null) ctx.addIssue({ code: 'custom', message: 'due_month: 1–12 обязателен' });
+  }
+}
+const commitSchema = z
+  .object({
+    name: z.string().trim().min(1).max(LIMITS.maxName),
+    amount: zAmount,
+    currency: zCcy.optional(),
+    due_day: zDay,
+    ...cadenceFields,
+    client_id: zClientId,
+  })
+  .superRefine((v, ctx) => {
+    cadenceNullIssues(v, ctx);
+    const f = v.frequency ?? 'monthly';
+    if (f === 'interval_days') {
+      if (v.interval_days == null) ctx.addIssue({ code: 'custom', message: 'interval_days: 1–366 обязателен' });
+      if (!v.anchor_on) ctx.addIssue({ code: 'custom', message: 'anchor_on (YYYY-MM-DD) обязателен' });
+    }
+    if (f === 'yearly') {
+      if (v.due_day == null) ctx.addIssue({ code: 'custom', message: 'due_day: 1–31 обязателен' });
+      if (v.due_month == null) ctx.addIssue({ code: 'custom', message: 'due_month: 1–12 обязателен' });
+    }
+  });
+const commitPatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(LIMITS.maxName).optional(),
+    amount: zAmount.optional(),
+    currency: zCcy.optional(),
+    due_day: z.number().int().min(1).max(31).nullable().optional(),
+    ...cadenceFields,
+    active: z.boolean().optional(),
+  })
+  .superRefine(cadenceNullIssues);
+/** Итоговый каденс после merge патча со строкой — не должен быть битым. */
+function cadenceMergeError(m: {
+  frequency: 'monthly' | 'interval_days' | 'yearly';
+  interval_days: number | null;
+  anchor_on: string | null;
+  due_month: number | null;
+  due_day: number | null;
+}): string | null {
+  if (m.frequency === 'interval_days' && (m.interval_days == null || !m.anchor_on))
+    return 'для «каждые N дней» нужны interval_days (1–366) и anchor_on (YYYY-MM-DD)';
+  if (m.frequency === 'yearly' && (m.due_day == null || m.due_month == null))
+    return 'для «раз в год» нужны due_day (1–31) и due_month (1–12)';
+  return null;
+}
 const cpayPostSchema = z.object({
   amount: zAmount.optional(),
   paid_on: zIso.optional(),
@@ -158,7 +213,8 @@ export function registerTmaApi(
         ...(override ? { override } : {}),
         ...(base.source === 'computed' ? { baseline: { amount: base.amount, currency: base.currency } } : {}),
       });
-      const mandatoryUsd = commits.reduce((s, x) => s + usd(x.amount_minor / 100, x.currency, fxr.perUsd), 0);
+      // месячный эквивалент по каденсу: interval → ×30.4375/n, yearly → /12
+      const mandatoryUsd = commits.reduce((s, x) => s + usd(monthlyAmount(x), x.currency, fxr.perUsd), 0);
       const w = computeWaterfall({
         income: { amount: inc.amount, currency: inc.currency },
         baseIncomeUsd: usd(base.amount, base.currency, fxr.perUsd),
@@ -182,7 +238,13 @@ export function registerTmaApi(
           p.bonus_prepay_share + p.bonus_dca_share > 0 && w.bonusDeltaUsd > 0
             ? { delta_usd_minor: toMinor(round2(w.bonusDeltaUsd)), prepay_usd_minor: toMinor(round2(w.toPrepayUsd)), dca_usd_minor: toMinor(round2(w.toDcaUsd)) }
             : null,
-        commitments: commits.map((x) => ({ name: x.name, amount_minor: x.amount_minor, currency: x.currency, due_day: x.due_day })),
+        commitments: commits.map((x) => ({
+          name: x.name,
+          amount_minor: x.amount_minor,
+          currency: x.currency,
+          due_day: x.due_day,
+          cadence: cadenceLabel(x),
+        })),
         fx_as_of: fxr.asOf,
       });
     } catch (e) {
@@ -392,7 +454,9 @@ export function registerTmaApi(
     }
   });
 
-  // ── upcoming: оплаты текущего локального месяца ──
+  // ── upcoming: сроки текущего локального месяца ──
+  // commitment-строка — ближайший НЕОПЛАЧЕННЫЙ срок месяца, иначе последний
+  // оплаченный. «Оплачен» — по периоду срока: paid_on ∈ (prevDue, occurrence].
   app.get('/api/tma/upcoming', tmaAuth, async (c) => {
     const repo = repoOf(c);
     const p = await profile(repo);
@@ -403,12 +467,19 @@ export function registerTmaApi(
     const m = Number(month.slice(5, 7));
     const iso = (dd: { y: number; m: number; d: number }) =>
       `${dd.y}-${String(dd.m).padStart(2, '0')}-${String(dd.d).padStart(2, '0')}`;
+    const monthEnd = iso(dueDateFor(31, y, m));
     const [commits, cpays, dvs] = await Promise.all([
       repo.listCommitments(),
-      repo.listCommitmentPaymentsSince(`${month}-01`),
+      // окно ~год: период срока любого каденса (у yearly — до 12 мес.) покрыт
+      repo.listCommitmentPaymentsSince(`${y - 1}${month.slice(4)}-01`),
       debtViews(repo, today),
     ]);
-    const paidC = new Set(cpays.results.filter((x) => x.paid_on.startsWith(month)).map((x) => x.commitment_id));
+    const paidOns = new Map<number, string[]>();
+    for (const x of cpays.results) {
+      const a = paidOns.get(x.commitment_id) ?? [];
+      a.push(x.paid_on);
+      paidOns.set(x.commitment_id, a);
+    }
     const items: {
       kind: 'commitment' | 'debt';
       id: number;
@@ -418,11 +489,14 @@ export function registerTmaApi(
       due_on: string;
       paid: boolean;
       overdue: boolean;
+      cadence?: string;
     }[] = [];
     for (const cm of commits.results) {
-      if (!cm.due_day) continue;
-      const due = iso(dueDateFor(cm.due_day, y, m));
-      const paid = paidC.has(cm.id);
+      const occs = occurrencesInRange(cm, `${month}-01`, monthEnd);
+      if (!occs.length) continue; // в этом месяце сроков нет (без даты / yearly не этот месяц)
+      const mine = paidOns.get(cm.id) ?? [];
+      const unpaid = occs.filter((o) => !isOccurrencePaid(cm, o, mine));
+      const due = unpaid[0] ?? occs[occs.length - 1]!;
       items.push({
         kind: 'commitment',
         id: cm.id,
@@ -430,8 +504,9 @@ export function registerTmaApi(
         amount_minor: cm.amount_minor,
         currency: cm.currency,
         due_on: due,
-        paid,
-        overdue: !paid && due < today,
+        paid: !unpaid.length,
+        overdue: !!unpaid.length && due < today,
+        cadence: cadenceLabel(cm),
       });
     }
     for (const v of dvs) {
@@ -613,23 +688,36 @@ export function registerTmaApi(
     const repo = repoOf(c);
     const p = await profile(repo);
     if (!p) return c.json(notOnboarded().body, 403);
-    const month = monthInTz(p.timezone, new Date());
+    const today = todayInTz(p.timezone, new Date());
+    const month = today.slice(0, 7);
     const rows = (await repo.listCommitments(false)).results;
-    // оплаты за ~год одним запросом: paid_this_month + last_paid_on без N запросов
+    // оплаты за ~год одним запросом: статус срока + last_paid_on без N запросов
     const since = `${Number(month.slice(0, 4)) - 1}${month.slice(4)}-01`;
     const pays = (await repo.listCommitmentPaymentsSince(since)).results;
     return okJson(c, {
       commitments: rows.map((x) => {
         const mine = pays.filter((e) => e.commitment_id === x.id);
         const last = mine.at(-1) ?? null;
+        const next = nextDueOn(x, today);
+        // «оплачен»: срок текущего периода оплачен своим периодом; у monthly
+        // без даты — легаси-проверка по месяцу (как раньше)
+        const paid = next
+          ? isOccurrencePaid(x, next, mine.map((e) => e.paid_on))
+          : mine.some((e) => e.paid_on.startsWith(month));
         return {
           id: x.id,
           name: x.name,
           amount_minor: x.amount_minor,
           currency: x.currency,
           due_day: x.due_day,
+          frequency: x.frequency,
+          interval_days: x.interval_days,
+          anchor_on: x.anchor_on,
+          due_month: x.due_month,
+          cadence: cadenceLabel(x),
+          next_due_on: next,
           active: x.active,
-          paid_this_month: mine.some((e) => e.paid_on.startsWith(month)),
+          paid_this_month: paid,
           last_paid_on: last ? last.paid_on : null,
         };
       }),
@@ -638,7 +726,11 @@ export function registerTmaApi(
   app.post('/api/tma/commitments', tmaAuth, async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const parsed = commitSchema.safeParse(body);
-    if (!parsed.success) return c.json(bad('нужны name, amount (>0); due_day 1-31').body, 400);
+    if (!parsed.success)
+      return c.json(
+        bad(parsed.error.issues[0]?.message ?? 'нужны name, amount (>0) и корректный каденс').body,
+        400,
+      );
     const repo = repoOf(c);
     const p = await profile(repo);
     if (!p) return c.json(notOnboarded().body, 403);
@@ -650,6 +742,10 @@ export function registerTmaApi(
       amount_minor: toMinor(b.amount),
       currency: b.currency ?? p.income_currency,
       due_day: b.due_day ?? null,
+      frequency: b.frequency ?? 'monthly',
+      interval_days: b.interval_days ?? null,
+      anchor_on: b.anchor_on ?? null,
+      due_month: b.due_month ?? null,
     });
     return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
   });
@@ -658,15 +754,31 @@ export function registerTmaApi(
     if (!id) return c.json(notFound().body, 404);
     const body = await c.req.json().catch(() => ({}));
     const parsed = commitPatchSchema.safeParse(body);
-    if (!parsed.success) return c.json(bad('недопустимые поля').body, 400);
+    if (!parsed.success)
+      return c.json(bad(parsed.error.issues[0]?.message ?? 'недопустимые поля').body, 400);
     const repo = repoOf(c);
-    if (!(await repo.getCommitment(id))) return c.json(notFound().body, 404);
+    const cur = await repo.getCommitment(id);
+    if (!cur) return c.json(notFound().body, 404);
     const b = parsed.data;
+    // каденс после merge со строкой не должен остаться битым
+    const merged = {
+      frequency: b.frequency ?? cur.frequency,
+      interval_days: b.interval_days !== undefined ? b.interval_days : cur.interval_days,
+      anchor_on: b.anchor_on !== undefined ? b.anchor_on : cur.anchor_on,
+      due_month: b.due_month !== undefined ? b.due_month : cur.due_month,
+      due_day: b.due_day !== undefined ? b.due_day : cur.due_day,
+    };
+    const cadErr = cadenceMergeError(merged);
+    if (cadErr) return c.json(bad(cadErr).body, 400);
     const patch: Parameters<ScopedRepo['patchCommitment']>[1] = {};
     if (b.name !== undefined) patch.name = b.name;
     if (b.amount !== undefined) patch.amount_minor = toMinor(b.amount);
     if (b.currency !== undefined) patch.currency = b.currency;
     if (b.due_day !== undefined) patch.due_day = b.due_day;
+    if (b.frequency !== undefined) patch.frequency = b.frequency;
+    if (b.interval_days !== undefined) patch.interval_days = b.interval_days;
+    if (b.anchor_on !== undefined) patch.anchor_on = b.anchor_on;
+    if (b.due_month !== undefined) patch.due_month = b.due_month;
     if (b.active !== undefined) patch.active = b.active ? 1 : 0;
     await repo.patchCommitment(id, patch);
     return okJson(c, { ok: true });

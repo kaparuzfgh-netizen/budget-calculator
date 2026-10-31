@@ -8,7 +8,7 @@
 import { render } from 'preact';
 import { useRef, useState } from 'preact/hooks';
 import { Check } from 'lucide-preact';
-import type { Api } from '../api';
+import type { Api, Commitment } from '../api';
 import type { Nav } from '../app';
 import type { ScreenProps } from '../app';
 import { flashCls, mutedCls } from '../ui';
@@ -104,6 +104,12 @@ function applyPost(path: string, body: Record<string, unknown>): void {
       amount_minor: num(body.amount) ?? 0,
       currency: (body.currency as string) ?? 'USD',
       due_day: (body.due_day as number | null) ?? null,
+      frequency: (body.frequency as Commitment['frequency']) ?? 'monthly',
+      interval_days: (body.interval_days as number | null) ?? null,
+      anchor_on: (body.anchor_on as string | null) ?? null,
+      due_month: (body.due_month as number | null) ?? null,
+      cadence: '1 числа',
+      next_due_on: null,
       active: 1,
       paid_this_month: false,
       last_paid_on: null,

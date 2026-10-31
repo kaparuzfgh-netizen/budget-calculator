@@ -12,6 +12,7 @@
  * сбор данных из БД через scoped-repo и FX через getFxRates (кэш 6ч).
  */
 import { computedBaselineUsd } from '../domain/cashflow';
+import { monthlyAmount } from '../domain/schedule';
 import { convert, round2 } from '../domain/money';
 import type { FxResult } from '../fx/service';
 import type { ProfileRow, ScopedRepo } from '../db/repo';
@@ -46,7 +47,8 @@ export async function baselineIncome(
   ]);
   const fxr = await fx.get([...ccys]);
   const usd = computedBaselineUsd({
-    commits: commits.results.map((c) => ({ amount_minor: c.amount_minor, currency: c.currency })),
+    // платежи нормализуются в месячный эквивалент по каденсу (interval→×30.4375/n, yearly→/12)
+    commits: commits.results.map((c) => ({ amount: monthlyAmount(c), currency: c.currency })),
     livingCapMinor: p.living_cap_minor,
     livingCcy: p.living_currency,
     debtMonthly: debts.map((v) => ({ amount: v.monthlyPayment, currency: v.debt.currency })),

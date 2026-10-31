@@ -12,6 +12,7 @@ import { fmtMoney } from './format';
 import { isValidTimezone, parseAmount, parseCommitmentLine, parseCurrencyCode, type ParsedCommitment } from './parse';
 import { parseAmountDate } from './debts';
 import { toMinor } from '../domain/money';
+import { cadenceLabel, isOccurrencePaid, nextDueOn, prevDueOn } from '../domain/schedule';
 import { cancelBtn, navRow } from './nav/nav';
 import type { InlineButton } from '../telegram/client';
 
@@ -25,6 +26,9 @@ export interface PfState {
     pendingCcy?: string | undefined;
     ccyTarget?: 'income' | 'living' | undefined;
     origin?: string | undefined; // экран-источник для «Назад»/«Отмена»
+    /** добавление платежа: разобранная строка до выбора каденса (0016). */
+    pendingCommit?: ParsedCommitment | undefined;
+    pendingFreq?: 'monthly' | 'interval_days' | 'yearly' | undefined;
   };
 }
 
@@ -64,7 +68,16 @@ export type PfEffect =
   | {
       kind: 'commit_patch';
       id: number;
-      patch: { amount_minor?: number; currency?: string; due_day?: number | null; active?: number };
+      patch: {
+        amount_minor?: number;
+        currency?: string;
+        due_day?: number | null;
+        active?: number;
+        frequency?: 'monthly' | 'interval_days' | 'yearly';
+        interval_days?: number | null;
+        anchor_on?: string | null;
+        due_month?: number | null;
+      };
     }
   | { kind: 'commit_del'; id: number }
   | { kind: 'cpay_add'; id: number } // ручная «✅ Оплачено» по платежу id (commitment)
@@ -97,6 +110,8 @@ export const STEP_SCREEN: Record<string, string> = {
   edit_typical: 'PF_TYPICAL_ASK',
   edit_living: 'PF_LIVING_ASK',
   add_commit: 'PF_COMMIT_ADD',
+  add_commit_freq: 'PF_COMMIT_FREQ',
+  add_commit_cad: 'PF_COMMIT_CAD',
   edit_commit_amount: 'PF_COMMIT_AMOUNT',
   edit_commit_day: 'PF_COMMIT_DAY',
   confirm_del_commit: 'PF_COMMIT_DEL',
@@ -142,6 +157,8 @@ export const PF_STEPS: Record<string, string> = {
   edit_commit_amount: 'pf:sec:',
   edit_commit_day: 'pf:sec:',
   add_commit: 'pf:sec:',
+  add_commit_freq: 'pf:cf:|pf:sec:',
+  add_commit_cad: 'pf:sec:',
   confirm_del_commit: 'pf:cdel:',
   edit_income_ccy: 'pf:sec:',
   edit_living_ccy: 'pf:sec:',
@@ -201,7 +218,7 @@ export function incomeSectionText(ctx: PfCtx): string {
   return `💵 <b>Доход</b>\nБазовый доход: ${baseline}\n` + `Факт за ${ctx.month}:\n${list}`;
 }
 const COMMITS_HINT =
-  'Аренда, связь, подписки — списываются каждый месяц. В день срока бот отметит оплату сам, напомнит за 2 дня. Кредиты — отдельно в 🏦.';
+  'Аренда, связь, подписки — каждый месяц, каждые N дней или раз в год. В день срока бот отметит оплату сам, напомнит за 2 дня. Кредиты — отдельно в 🏦.';
 export function commitsText(ctx: PfCtx): string {
   if (!ctx.commitments.length) return `🧾 <b>Регулярные платежи</b>\nСписок пуст.\n<i>${COMMITS_HINT}</i>`;
   return (
@@ -209,18 +226,39 @@ export function commitsText(ctx: PfCtx): string {
     ctx.commitments
       .map(
         (c) =>
-          `${c.active ? '' : '⏸ '}${escapeHtml(c.name)} — ${fmtMoney(c.amount_minor / 100, c.currency)}${c.due_day ? ` (${c.due_day})` : ''}`,
+          `${c.active ? '' : '⏸ '}${escapeHtml(c.name)} — ${fmtMoney(c.amount_minor / 100, c.currency)}${
+            c.frequency !== 'monthly' || c.due_day ? ` (${cadenceLabel(c)})` : ''
+          }`,
       )
       .join('\n')
   );
+}
+/** Статус текущего периода: «ближайший срок … оплачен/не оплачен» или месяц для платежа без даты. */
+export function commitPeriodLine(c: CommitmentRow, ctx: PfCtx): string {
+  const occ = nextDueOn(c, ctx.today);
+  if (!occ) {
+    const monthPay = ctx.commitPayments.filter((x) => x.commitment_id === c.id && x.paid_on.startsWith(ctx.month)).at(-1);
+    return monthPay ? `Этот месяц: ✅ оплачен ${dm(monthPay.paid_on)}` : 'Этот месяц: не оплачен';
+  }
+  const prev = prevDueOn(c, occ);
+  const covering = ctx.commitPayments
+    .filter((x) => x.commitment_id === c.id && x.paid_on <= occ && (prev === null || x.paid_on > prev))
+    .at(-1);
+  return covering
+    ? `Ближайший срок ${dm(occ)}: ✅ оплачен ${dm(covering.paid_on)}`
+    : `Ближайший срок ${dm(occ)}: не оплачен`;
 }
 export function commitDetailText(c: CommitmentRow, monthLine?: string): string {
   return (
     `🧾 <b>${escapeHtml(c.name)}</b>\n` +
     `Сумма: ${fmtMoney(c.amount_minor / 100, c.currency)}\n` +
-    `День: ${c.due_day ?? '—'}\nСтатус: ${c.active ? 'активен' : '⏸ выключен'}` +
+    `Период: ${cadenceLabel(c)}\nСтатус: ${c.active ? 'активен' : '⏸ выключен'}` +
     (monthLine ? `\n${monthLine}` : '') +
-    (c.due_day && c.active ? `\n<i>В день срока бот отметит оплату сам, напомнит за 2 дня.</i>` : '')
+    (c.frequency === 'monthly' && !c.due_day
+      ? ''
+      : c.active
+        ? `\n<i>В день срока бот отметит оплату сам, напомнит за 2 дня.</i>`
+        : '')
   );
 }
 
@@ -294,8 +332,12 @@ export function renderPf(
       const c = ctx.commitments.find((x) => x.id === data.commitId);
       if (!c) return renderPf('PF_COMMITS', {}, ctx);
       const pays = ctx.commitPayments.filter((x) => x.commitment_id === c.id);
-      const monthPay = pays.filter((x) => x.paid_on.startsWith(ctx.month)).at(-1);
-      const monthLine = monthPay ? `Этот месяц: ✅ оплачен ${dm(monthPay.paid_on)}` : 'Этот месяц: не оплачен';
+      const statusLine = commitPeriodLine(c, ctx);
+      // «✅ Оплачено» — пока текущий период не оплачен своим окном (или месяцем у платежа без даты)
+      const occ = nextDueOn(c, ctx.today);
+      const paidNow = occ
+        ? isOccurrencePaid(c, occ, pays.map((x) => x.paid_on))
+        : pays.some((x) => x.paid_on.startsWith(ctx.month));
       const rows: InlineButton[][] = [
         // последние ≤5 оплат → карточка оплаты (🤖 — автопроводка кроном)
         ...pays
@@ -304,13 +346,16 @@ export function renderPf(
           .map((e) => [
             btn(`${dm(e.paid_on)} — ${fmtMoney(e.amount_minor / 100, e.currency)}${e.source === 'auto' ? ' 🤖' : ''}`, `pf:cp:${e.id}`),
           ]),
-        ...(monthPay ? [] : [[btn('✅ Оплачено', `pf:cpay:${c.id}`)]]),
-        [btn('✏️ Сумма', `pf:ca:${c.id}`), btn('📅 День', `pf:cday:${c.id}`)],
+        ...(paidNow ? [] : [[btn('✅ Оплачено', `pf:cpay:${c.id}`)]]),
+        // правка «день» — только monthly (прочие каденсы задаются при создании)
+        ...(c.frequency === 'monthly'
+          ? [[btn('✏️ Сумма', `pf:ca:${c.id}`), btn('📅 День', `pf:cday:${c.id}`)]]
+          : [[btn('✏️ Сумма', `pf:ca:${c.id}`)]]),
         [btn(c.active ? '⏸ Выключить' : '▶️ Включить', `pf:ctog:${c.id}`), btn('🗑 Удалить', `pf:cdel:${c.id}`)],
       ];
       return {
         step: 'pf:commit',
-        text: commitDetailText(c, monthLine),
+        text: commitDetailText(c, statusLine),
         markup: kb(rows, 'PF_COMMIT'),
       };
     }
@@ -387,6 +432,32 @@ export function renderPf(
         text: `Новый платёж: <code>Аренда 700 usd 1</code>\n<i>${COMMITS_HINT}</i>`,
         markup: promptKb('PF_COMMIT_ADD'),
       };
+    case 'PF_COMMIT_FREQ': {
+      const pc = data.pendingCommit;
+      if (!pc) return renderPf('PF_COMMITS', {}, ctx);
+      return {
+        step: 'add_commit_freq',
+        text:
+          `Новый платёж «${escapeHtml(pc.name)}» — ${fmtMoney(pc.amount, pc.currency ?? p.income_currency)}\n` +
+          'Как часто платите?',
+        markup: kb(
+          [[btn('Каждый месяц', 'pf:cf:m'), btn('Каждые N дней', 'pf:cf:i'), btn('Раз в год', 'pf:cf:y')]],
+          'PF_COMMIT_FREQ',
+        ),
+      };
+    }
+    case 'PF_COMMIT_CAD': {
+      const pc = data.pendingCommit;
+      const f = data.pendingFreq;
+      if (!pc || !f) return renderPf('PF_COMMITS', {}, ctx);
+      const text =
+        f === 'interval_days'
+          ? `«${escapeHtml(pc.name)}» — интервал в днях и дата первого платежа (например: <code>14 01.11</code>):`
+          : f === 'yearly'
+            ? `«${escapeHtml(pc.name)}» — день и месяц платежа (например: <code>15 3</code> или <code>15.03</code>):`
+            : `«${escapeHtml(pc.name)}» — день месяца 1–31 (0 — без даты):`;
+      return { step: 'add_commit_cad', text, markup: promptKb('PF_COMMIT_CAD') };
+    }
     case 'PF_COMMIT_AMOUNT': {
       const c = ctx.commitments.find((x) => x.id === data.commitId);
       return {
@@ -552,6 +623,8 @@ export function cancelTarget(state: PfState): string {
         PF_TYPICAL_ASK: 'PF_INCOME',
         PF_LIVING_ASK: 'PF_LIVING',
         PF_COMMIT_ADD: 'PF_COMMITS',
+        PF_COMMIT_FREQ: 'PF_COMMITS',
+        PF_COMMIT_CAD: 'PF_COMMITS',
         PF_COMMIT_AMOUNT: 'PF_COMMIT',
         PF_COMMIT_DAY: 'PF_COMMIT',
         PF_COMMIT_DEL: 'PF_COMMIT',
@@ -756,7 +829,10 @@ export function advancePf(state: PfState, input: PfInput, ctx: PfCtx): { state: 
       if (cb === `pf:cdel:${c.id}`) return go('PF_COMMIT_DEL', d);
       // «✅ Оплачено» — ручная запись оплаты (сумма платежа, сегодня, tg:<update_id>)
       if (cb === `pf:cpay:${c.id}`) {
-        const paid = ctx.commitPayments.some((x) => x.commitment_id === c.id && x.paid_on.startsWith(ctx.month));
+        const occ = nextDueOn(c, ctx.today);
+        const paid = occ
+          ? isOccurrencePaid(c, occ, ctx.commitPayments.filter((x) => x.commitment_id === c.id).map((x) => x.paid_on))
+          : ctx.commitPayments.some((x) => x.commitment_id === c.id && x.paid_on.startsWith(ctx.month));
         if (paid) return ok({ step: 'pf:commit', data: d }, { kind: 'render', screen: 'PF_COMMIT', data: d });
         return ok(
           { step: 'pf:commit', data: d },
@@ -930,14 +1006,91 @@ export function advancePf(state: PfState, input: PfInput, ctx: PfCtx): { state: 
       try {
         const c = parseCommitmentLine(text);
         if (!c.currency) c.currency = p.income_currency;
-        return ok(
+        // строка разобрана → выбор периодичности (день из строки — для monthly)
+        return go('PF_COMMIT_FREQ', { pendingCommit: c });
+      } catch (e) {
+        return ok(state, send((e as Error).message));
+      }
+    }
+
+    case 'add_commit_freq': {
+      const pc = d.pendingCommit;
+      if (!pc) return go('PF_COMMITS');
+      const add = (c: ParsedCommitment) =>
+        ok(
           { step: 'pf:commits', data: {} },
           { kind: 'commit_add', c },
           { kind: 'render', screen: 'PF_COMMITS' },
         );
-      } catch (e) {
-        return ok(state, send((e as Error).message));
+      if (cb === 'pf:cf:m') {
+        // день уже был в строке — monthly сохраняем сразу, иначе спросим
+        if (pc.dueDay) return add({ ...pc, frequency: 'monthly' });
+        return go('PF_COMMIT_CAD', { ...d, pendingFreq: 'monthly' });
       }
+      if (cb === 'pf:cf:i') return go('PF_COMMIT_CAD', { ...d, pendingFreq: 'interval_days' });
+      if (cb === 'pf:cf:y') return go('PF_COMMIT_CAD', { ...d, pendingFreq: 'yearly' });
+      return { state, effects: [] };
+    }
+
+    case 'add_commit_cad': {
+      const pc = d.pendingCommit;
+      const f = d.pendingFreq;
+      if (!pc || !f) return go('PF_COMMITS');
+      if (input.type !== 'text') return { state, effects: [] };
+      const add = (c: ParsedCommitment) =>
+        ok(
+          { step: 'pf:commits', data: {} },
+          { kind: 'commit_add', c },
+          { kind: 'render', screen: 'PF_COMMITS' },
+        );
+      if (f === 'monthly') {
+        const day = Number(text);
+        if (!Number.isInteger(day) || day < 0 || day > 31)
+          return ok(state, send('День месяца — число от 1 до 31 (0 — без даты).'));
+        return add({ ...pc, frequency: 'monthly', dueDay: day === 0 ? undefined : day });
+      }
+      if (f === 'interval_days') {
+        // «14 01.11» | «14 01.11.2026» | «14 2026-11-01»
+        let nText = '';
+        let anchor: string | null = null;
+        const isoM = /^(\d{1,3})\s+(\d{4}-\d{2}-\d{2})$/.exec(text);
+        if (isoM) {
+          nText = isoM[1]!;
+          anchor = isoM[2]!;
+          if (Number.isNaN(Date.parse(`${anchor}T00:00:00Z`))) anchor = null;
+        } else {
+          const ad = parseAmountDate(text, ctx.today);
+          if (ad.badDate) return ok(state, send('Не понял дату — формат ДД.ММ (или ДД.ММ.ГГГГ).'));
+          nText = ad.amountText;
+          anchor = ad.eventOn;
+        }
+        const n = Number(nText);
+        if (!anchor || !Number.isInteger(n) || n < 1 || n > 366)
+          return ok(state, send('Формат: интервал и дата — «14 01.11» (1–366 дней).'));
+        return add({ ...pc, frequency: 'interval_days', intervalDays: n, anchorOn: anchor, dueDay: undefined });
+      }
+      // yearly: «15 3» | «15.03»; только число — день из исходной строки
+      let day = pc.dueDay;
+      let mon: number | undefined;
+      {
+        const dmM = /^(\d{1,2})[.\-/](\d{1,2})$/.exec(text);
+        const pair = /^(\d{1,2})\s+(\d{1,2})$/.exec(text);
+        const solo = /^(\d{1,2})$/.exec(text);
+        if (dmM) {
+          day = Number(dmM[1]);
+          mon = Number(dmM[2]);
+        } else if (pair) {
+          day = Number(pair[1]);
+          mon = Number(pair[2]);
+        } else if (solo) {
+          mon = Number(solo[1]);
+        }
+        if (day === undefined || !Number.isInteger(day) || day < 1 || day > 31)
+          return ok(state, send('Формат: день и месяц — «15 3» или «15.03».'));
+        if (mon === undefined || !Number.isInteger(mon) || mon < 1 || mon > 12)
+          return ok(state, send('Месяц — число от 1 до 12.'));
+      }
+      return add({ ...pc, frequency: 'yearly', dueDay: day, dueMonth: mon });
     }
 
     case 'pf:ccytz': {

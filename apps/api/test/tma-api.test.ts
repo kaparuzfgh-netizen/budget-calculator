@@ -224,6 +224,100 @@ describe('/api/tma/* — контракт', () => {
     };
     expect(list2.commitments[0]!.paid_this_month).toBe(false);
   });
+
+  it('каденсы (0016): POST/PATCH валидация, поля в GET, upcoming по срокам, baseline-нормализация', async () => {
+    const A = await user(900030);
+    const B = await user(900031);
+    const today = new Date().toISOString().slice(0, 10); // профиль UTC
+    const curMonth = Number(today.slice(5, 7));
+
+    // валидация: interval_days без шага/якоря → 400; yearly без дня/месяца → 400
+    expect(
+      (await api('/api/tma/commitments', { method: 'POST', token: A.token, body: { name: 'X', amount: 1, frequency: 'interval_days', anchor_on: '2020-01-01' } })).status,
+    ).toBe(400);
+    expect(
+      (await api('/api/tma/commitments', { method: 'POST', token: A.token, body: { name: 'X', amount: 1, frequency: 'interval_days', interval_days: 14 } })).status,
+    ).toBe(400);
+    expect(
+      (await api('/api/tma/commitments', { method: 'POST', token: A.token, body: { name: 'X', amount: 1, frequency: 'yearly', due_day: 15 } })).status,
+    ).toBe(400);
+    expect(
+      (await api('/api/tma/commitments', { method: 'POST', token: A.token, body: { name: 'X', amount: 1, frequency: 'yearly', due_month: 10 } })).status,
+    ).toBe(400);
+    // monthly без дня — ок (легаси «платёж без даты»)
+    expect((await api('/api/tma/commitments', { method: 'POST', token: A.token, body: { name: 'БезДаты', amount: 1 } })).status).toBe(201);
+
+    // валидные каденсы
+    const ri = await api('/api/tma/commitments', {
+      method: 'POST', token: A.token,
+      body: { name: 'Фитнес', amount: 15, frequency: 'interval_days', interval_days: 30, anchor_on: '2020-01-01' },
+    });
+    expect(ri.status).toBe(201);
+    const iid = ((await ri.json()) as { id: number }).id;
+    const ry = await api('/api/tma/commitments', {
+      method: 'POST', token: A.token,
+      body: { name: 'Страховка', amount: 1200, frequency: 'yearly', due_day: 15, due_month: curMonth },
+    });
+    expect(ry.status).toBe(201);
+    const yid = ((await ry.json()) as { id: number }).id;
+
+    // GET: поля каденса + подпись + ближайший срок
+    const list = (await (await api('/api/tma/commitments', { token: A.token })).json()) as {
+      commitments: {
+        name: string; frequency: string; interval_days: number | null;
+        anchor_on: string | null; due_month: number | null;
+        cadence: string; next_due_on: string | null;
+      }[];
+    };
+    const gym = list.commitments.find((x) => x.name === 'Фитнес')!;
+    expect(gym).toMatchObject({ frequency: 'interval_days', interval_days: 30, anchor_on: '2020-01-01', cadence: 'каждые 30 дн' });
+    expect(gym.next_due_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const ins = list.commitments.find((x) => x.name === 'Страховка')!;
+    expect(ins.frequency).toBe('yearly');
+    expect(ins.due_month).toBe(curMonth);
+    expect(list.commitments.find((x) => x.name === 'БезДаты')!.next_due_on).toBeNull();
+
+    // PATCH: смена каденса без обязательных полей → 400; явный null обязательного → 400; с полями → 200
+    expect((await api(`/api/tma/commitments/${yid}`, { method: 'PATCH', token: A.token, body: { frequency: 'interval_days' } })).status).toBe(400);
+    expect(
+      (await api(`/api/tma/commitments/${yid}`, { method: 'PATCH', token: A.token, body: { frequency: 'interval_days', interval_days: null, anchor_on: '2020-01-01' } })).status,
+    ).toBe(400);
+    expect(
+      (await api(`/api/tma/commitments/${yid}`, { method: 'PATCH', token: A.token, body: { frequency: 'interval_days', interval_days: 30, anchor_on: '2020-01-01' } })).status,
+    ).toBe(200);
+    expect((await scoped(env.DB, A.uid).getCommitment(yid))!.frequency).toBe('interval_days');
+    // чужой каденс-патч → 404
+    expect(
+      (await api(`/api/tma/commitments/${iid}`, { method: 'PATCH', token: B.token, body: { frequency: 'yearly', due_day: 1, due_month: 1 } })).status,
+    ).toBe(404);
+
+    // upcoming: строка — ближайший неоплаченный срок текущего месяца, с подписью каденса
+    const up = (await (await api('/api/tma/upcoming', { token: A.token })).json()) as {
+      items: { kind: string; name: string; due_on: string; paid: boolean; overdue: boolean; cadence?: string }[];
+    };
+    const gymUp = up.items.find((x) => x.name === 'Фитнес')!;
+    expect(gymUp.cadence).toBe('каждые 30 дн');
+    expect(gymUp.due_on.slice(0, 7)).toBe(today.slice(0, 7));
+    // ручная оплата ДАТОЙ срока закрывает именно его — строка либо paid, либо следующий срок
+    expect(
+      (await api(`/api/tma/commitments/${iid}/payments`, { method: 'POST', token: A.token, body: { client_id: 'c-up', paid_on: gymUp.due_on } })).status,
+    ).toBe(201);
+    const up2 = (await (await api('/api/tma/upcoming', { token: A.token })).json()) as {
+      items: { name: string; due_on: string; paid: boolean }[];
+    };
+    const gymUp2 = up2.items.find((x) => x.name === 'Фитнес')!;
+    expect(gymUp2.paid || gymUp2.due_on > gymUp.due_on).toBe(true);
+
+    // baseline: yearly/interval нормализуются в месячный эквивалент
+    // БезДаты monthly $1 + Фитнес $15×30.4375/30 + Страховка $1200×30.4375/30 (после патча)
+    await scoped(env.DB, A.uid).patchProfile({ income_minor: 0, living_cap_minor: 0 });
+    const prof = (await (await api('/api/tma/profile', { token: A.token })).json()) as {
+      baseline_income_minor: number;
+      baseline_source: string;
+    };
+    expect(prof.baseline_source).toBe('computed');
+    expect(prof.baseline_income_minor).toBe(Math.round((1 + (15 * 30.4375) / 30 + (1200 * 30.4375) / 30) * 100));
+  });
 });
 
 describe('базовый доход: explicit/computed/none, напоминания, экспорт', () => {

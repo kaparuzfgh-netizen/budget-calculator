@@ -5,3 +5,4 @@ export * from './debt';
 export * from './cashflow';
 export * from './budget';
 export * from './fx';
+export * from './schedule';

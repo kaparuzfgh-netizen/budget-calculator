@@ -6,9 +6,9 @@
  *   БЮДЖЕТ (living_cap+living_currency+expense_currency — сервер пересчитает
  *   недельный бюджет ×12/52), ЧАСОВОЙ ПОЯС, НАПОМИНАНИЯ (4 переключателя),
  *   ДАННЫЕ (экспорт JSON через getBlob; удаление — в боте).
- * CommitmentScreen: карточка платежа — PATCH amount/due_day и
- *   тогл active; удаление только с подтверждением.
- * CommitmentAddScreen: name+amount+currency+due_day → POST.
+ * CommitmentScreen: карточка платежа — PATCH amount + каденс
+ *   (monthly/interval_days/yearly) и тогл active; удаление с подтверждением.
+ * CommitmentAddScreen: name+amount+currency+каденс → POST.
  * После мутации — reload/возврат на экран-источник со свежими данными.
  */
 import type { ComponentChildren } from 'preact';
@@ -35,7 +35,14 @@ import {
   Wallet,
 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { Api, CommitmentPayment, CommitmentPaymentsList, CommitmentsList, Profile } from '../api';
+import type {
+  Api,
+  CommitmentFrequency,
+  CommitmentPayment,
+  CommitmentPaymentsList,
+  CommitmentsList,
+  Profile,
+} from '../api';
 import type { Nav, ScreenProps } from '../app';
 import {
   amountError,
@@ -79,6 +86,199 @@ import {
 
 const TZ_PRESETS = ['Europe/Moscow', 'Asia/Bishkek', 'Europe/Berlin', 'UTC'] as const;
 
+// ── каденс платежа (monthly / interval_days / yearly — миграция 0016) ──
+
+const FREQ_LABELS: Record<CommitmentFrequency, string> = {
+  monthly: 'Каждый месяц',
+  interval_days: 'Каждые N дней',
+  yearly: 'Раз в год',
+};
+const MONTH_NAMES = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+];
+
+/** Поля каденса для POST/PATCH: лишние для каденса поля обнуляем явно. */
+function cadenceBody(
+  freq: CommitmentFrequency,
+  day: string,
+  month: string,
+  every: string,
+  anchor: string,
+): {
+  frequency: CommitmentFrequency;
+  due_day: number | null;
+  due_month: number | null;
+  interval_days: number | null;
+  anchor_on: string | null;
+} {
+  return {
+    frequency: freq,
+    due_day: freq === 'interval_days' ? null : day.trim() ? Number(day.trim()) : null,
+    due_month: freq === 'yearly' ? Number(month) : null,
+    interval_days: freq === 'interval_days' ? Number(every.trim()) : null,
+    anchor_on: freq === 'interval_days' && anchor ? anchor : null,
+  };
+}
+
+/** Клиентская проверка полей каденса перед POST/PATCH (зеркало superRefine в api). */
+function cadenceError(
+  freq: CommitmentFrequency,
+  day: string,
+  month: string,
+  every: string,
+  anchor: string,
+): string | null {
+  if (freq === 'interval_days') {
+    const n = Number(every.trim());
+    if (!Number.isInteger(n) || n < 1 || n > 366) return 'Интервал — целое число от 1 до 366 дней';
+    if (!anchor) return 'Укажите дату первого платежа';
+    return null;
+  }
+  if (freq === 'yearly') {
+    if (!day.trim()) return 'Укажите день месяца (1–31)';
+    const dErr = dayError(day);
+    if (dErr) return dErr;
+    if (!month) return 'Укажите месяц платежа';
+    return null;
+  }
+  return dayError(day); // monthly: день необязателен
+}
+
+/** Селектор периодичности + поля под выбранный каденс (форма платежа). */
+function CadenceFields({
+  freq,
+  setFreq,
+  day,
+  setDay,
+  month,
+  setMonth,
+  every,
+  setEvery,
+  anchor,
+  setAnchor,
+}: {
+  freq: CommitmentFrequency;
+  setFreq: (f: CommitmentFrequency) => void;
+  day: string;
+  setDay: (s: string) => void;
+  month: string;
+  setMonth: (s: string) => void;
+  every: string;
+  setEvery: (s: string) => void;
+  anchor: string;
+  setAnchor: (s: string) => void;
+}) {
+  return (
+    <>
+      <Field label="Периодичность">
+        <select
+          class={inputCls}
+          value={freq}
+          onChange={(e) => setFreq((e.target as HTMLSelectElement).value as CommitmentFrequency)}
+        >
+          {(Object.keys(FREQ_LABELS) as CommitmentFrequency[]).map((f) => (
+            <option key={f} value={f}>
+              {FREQ_LABELS[f]}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {freq === 'monthly' && (
+        <Field
+          label={
+            <>
+              День месяца
+              <Info title="День платежа">
+                <p>Число месяца 1–31. Пусто — платёж без даты.</p>
+                <p>
+                  Если такого дня в месяце нет, срок — последний день месяца:
+                  31-е в феврале означает 28/29 февраля.
+                </p>
+                <p>
+                  В день срока бот отметит оплату сам, за 2 дня до срока —
+                  напомнит. Без дня ни автопроводки, ни напоминаний нет.
+                </p>
+              </Info>
+            </>
+          }
+        >
+          <input
+            class={inputCls}
+            inputMode="numeric"
+            maxLength={2}
+            placeholder="—"
+            value={day}
+            onInput={(e) => setDay((e.target as HTMLInputElement).value)}
+          />
+        </Field>
+      )}
+      {freq === 'interval_days' && (
+        <div class="flex gap-3">
+          <Field label="Интервал, дней">
+            <input
+              class={inputCls}
+              inputMode="numeric"
+              maxLength={3}
+              placeholder="30"
+              value={every}
+              onInput={(e) => setEvery((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+          <Field
+            label={
+              <>
+                Первый платёж
+                <Info title="Якорная дата">
+                  <p>
+                    Дата, от которой считается каждый N-й день. Следующие
+                    сроки — через каждые N дней после неё.
+                  </p>
+                </Info>
+              </>
+            }
+          >
+            <input
+              class={inputCls}
+              type="date"
+              value={anchor}
+              onInput={(e) => setAnchor((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+        </div>
+      )}
+      {freq === 'yearly' && (
+        <div class="flex gap-3">
+          <Field label="День">
+            <input
+              class={inputCls}
+              inputMode="numeric"
+              maxLength={2}
+              placeholder="15"
+              value={day}
+              onInput={(e) => setDay((e.target as HTMLInputElement).value)}
+            />
+          </Field>
+          <Field label="Месяц">
+            <select
+              class={inputCls}
+              value={month}
+              onChange={(e) => setMonth((e.target as HTMLSelectElement).value)}
+            >
+              <option value="">—</option>
+              {MONTH_NAMES.map((m, i) => (
+                <option key={m} value={i + 1}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Профиль ──
 
 export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
@@ -111,7 +311,8 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
           <CalendarClock size={16} strokeWidth={1.5} /> Регулярные платежи
           <Info title="Регулярные платежи">
             <p>
-              Аренда, связь, подписки, ЖКХ — то, что списывается каждый месяц.
+              Аренда, связь, подписки, ЖКХ — то, что списывается каждый месяц,
+              каждые N дней или раз в год.
             </p>
             <p>
               В день срока бот отметит оплату сам и напомнит за 2 дня. Кредиты —
@@ -142,7 +343,7 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
                   </span>
                   <span>
                     {fmtMinor(x.amount_minor, x.currency)}
-                    {x.due_day ? ` · ${x.due_day} числа` : ''}
+                    {x.cadence !== 'без даты' ? ` · ${x.cadence}` : ''}
                   </span>
                 </div>
               </li>
@@ -660,7 +861,11 @@ function CommitmentCard({
   reload: () => void;
 }) {
   const [amount, setAmount] = useState(String(item.amount_minor / 100));
+  const [freq, setFreq] = useState<CommitmentFrequency>(item.frequency);
   const [day, setDay] = useState(item.due_day ? String(item.due_day) : '');
+  const [month, setMonth] = useState(item.due_month ? String(item.due_month) : '');
+  const [every, setEvery] = useState(item.interval_days ? String(item.interval_days) : '');
+  const [anchor, setAnchor] = useState(item.anchor_on ?? todayIso());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -669,9 +874,9 @@ function CommitmentCard({
   const save = async (ev: Event) => {
     ev.preventDefault();
     const aErr = amountError(amount);
-    const dErr = dayError(day);
-    if (aErr || dErr) {
-      setErr(aErr ?? dErr);
+    const cErr = cadenceError(freq, day, month, every, anchor);
+    if (aErr || cErr) {
+      setErr(aErr ?? cErr);
       return;
     }
     setBusy(true);
@@ -679,7 +884,7 @@ function CommitmentCard({
     try {
       await api.patch(`/api/tma/commitments/${item.id}`, {
         amount: parseAmount(amount),
-        due_day: day.trim() ? Number(day.trim()) : null,
+        ...cadenceBody(freq, day, month, every, anchor),
       });
       nav.flash('Платёж обновлён');
       reload();
@@ -738,37 +943,22 @@ function CommitmentCard({
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)}
               />
             </Field>
-            <Field
-              label={
-                <>
-                  День месяца
-                  <Info title="День платежа">
-                    <p>Число месяца 1–31. Пусто — платёж без даты.</p>
-                    <p>
-                      Если такого дня в месяце нет, срок — последний день
-                      месяца: 31-е в феврале означает 28/29 февраля.
-                    </p>
-                    <p>
-                      В день срока бот отметит оплату сам, за 2 дня до срока —
-                      напомнит. Без дня ни автопроводки, ни напоминаний нет.
-                    </p>
-                  </Info>
-                </>
-              }
-            >
-              <input
-                class={inputCls}
-                inputMode="numeric"
-                maxLength={2}
-                placeholder="—"
-                value={day}
-                onInput={(e) => setDay((e.target as HTMLInputElement).value)}
-              />
-            </Field>
           </div>
+          <CadenceFields
+            freq={freq}
+            setFreq={setFreq}
+            day={day}
+            setDay={setDay}
+            month={month}
+            setMonth={setMonth}
+            every={every}
+            setEvery={setEvery}
+            anchor={anchor}
+            setAnchor={setAnchor}
+          />
           <p class={`${mutedCls} mb-2`}>Валюта: {item.currency}</p>
           <p class={`${mutedCls} mb-2 flex items-center gap-1`}>
-            Этот месяц:{' '}
+            {item.next_due_on ? `Срок ${fmtDay(item.next_due_on)}` : 'Этот месяц'}:{' '}
             {item.paid_this_month ? (
               <>
                 <CircleCheck size={14} strokeWidth={1.5} class="text-emerald-400" />
@@ -960,7 +1150,11 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [ccy, setCcy] = useState('');
+  const [freq, setFreq] = useState<CommitmentFrequency>('monthly');
   const [day, setDay] = useState('');
+  const [month, setMonth] = useState('');
+  const [every, setEvery] = useState('');
+  const [anchor, setAnchor] = useState(todayIso());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -976,8 +1170,8 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
     const nErr = nameError(name);
     const aErr = amountError(amount);
     const cErr = ccy.trim() ? currencyError(ccy) : null;
-    const dErr = dayError(day);
-    const first = nErr ?? aErr ?? cErr ?? dErr;
+    const cdErr = cadenceError(freq, day, month, every, anchor);
+    const first = nErr ?? aErr ?? cErr ?? cdErr;
     if (first) {
       setErr(first);
       return;
@@ -989,7 +1183,7 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
         name: name.trim(),
         amount: parseAmount(amount),
         ...(ccy.trim() ? { currency: ccy.trim().toUpperCase() } : {}),
-        due_day: day.trim() ? Number(day.trim()) : null,
+        ...cadenceBody(freq, day, month, every, anchor),
       });
       nav.flash('Платёж добавлен');
       nav.back(); // → список платежей, перезагрузится
@@ -1035,17 +1229,19 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
                 onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
               />
             </Field>
-            <Field label="День (1–31)">
-              <input
-                class={inputCls}
-                inputMode="numeric"
-                maxLength={2}
-                placeholder="—"
-                value={day}
-                onInput={(e) => setDay((e.target as HTMLInputElement).value)}
-              />
-            </Field>
           </div>
+          <CadenceFields
+            freq={freq}
+            setFreq={setFreq}
+            day={day}
+            setDay={setDay}
+            month={month}
+            setMonth={setMonth}
+            every={every}
+            setEvery={setEvery}
+            anchor={anchor}
+            setAnchor={setAnchor}
+          />
           <FormError msg={err} />
           <button type="submit" class={primaryBtnCls} disabled={busy}>
             {busy ? 'Сохраняю…' : 'Добавить платёж'}

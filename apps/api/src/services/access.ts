@@ -118,6 +118,7 @@ const PF_TEXT_STEPS = new Set([
   'edit_commit_amount',
   'edit_commit_day',
   'add_commit',
+  'add_commit_cad',
   'edit_cpay',
   'edit_income_ccy',
   'edit_living_ccy',
@@ -382,6 +383,10 @@ async function runPfEffects(
         amount_minor: Math.round(e.c.amount * 100),
         currency: e.c.currency ?? 'USD',
         due_day: e.c.dueDay ?? null,
+        frequency: e.c.frequency ?? 'monthly',
+        interval_days: e.c.intervalDays ?? null,
+        anchor_on: e.c.anchorOn ?? null,
+        due_month: e.c.dueMonth ?? null,
       });
     else if (e.kind === 'commit_patch') await repo.patchCommitment(e.id, e.patch);
     else if (e.kind === 'commit_del') await repo.deleteCommitment(e.id);

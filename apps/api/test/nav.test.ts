@@ -238,6 +238,9 @@ function screenOf(): string {
   if (t.includes('Сколько получили')) return 'INCOME_ASK';
   if (t.includes('Новый базовый')) return 'PF_TYPICAL_ASK';
   if (t.includes('бюджет повседневных')) return 'PF_LIVING_ASK';
+  if (cbs.some((d) => d.startsWith('pf:cf:'))) return 'PF_COMMIT_FREQ';
+  if (t.includes('интервал в днях и дата') || t.includes('день и месяц платежа') || t.includes('день месяца 1–31'))
+    return 'PF_COMMIT_CAD';
   if (t.includes('Новый платёж')) return 'PF_COMMIT_ADD';
   if (t.includes('Новая сумма')) return 'PF_COMMIT_AMOUNT';
   if (t.includes('День месяца')) return 'PF_COMMIT_DAY';
@@ -409,13 +412,43 @@ describe('контракт навигации (walk)', () => {
     // back из карточки → список
     await cb(tgId, 'nv:back:PF_COMMITS');
     expect(screenOf()).toBe('PF_COMMITS');
-    // добавить платёж → после ввода список
+    // добавить платёж → каденс → (день из строки) сохранено в список
     await cb(tgId, 'pf:cadd');
     expect(screenOf()).toBe('PF_COMMIT_ADD');
     expectNav('PF_COMMIT_ADD');
     await msg(tgId, 'Связь 300 usd 3');
+    expect(screenOf()).toBe('PF_COMMIT_FREQ');
+    expectNav('PF_COMMIT_FREQ');
+    // monthly с днём из строки — сразу в список; interval — параметры
+    await cb(tgId, 'pf:cf:m');
     expect(screenOf()).toBe('PF_COMMITS');
     expectNav('PF_COMMITS');
+    // ввод без дня → каденс → параметры: «0» = без даты → список
+    await cb(tgId, 'pf:cadd');
+    await msg(tgId, 'Интернет 700');
+    expect(screenOf()).toBe('PF_COMMIT_FREQ');
+    await cb(tgId, 'pf:cf:m');
+    expect(screenOf()).toBe('PF_COMMIT_CAD');
+    expectNav('PF_COMMIT_CAD');
+    await msg(tgId, '0');
+    expect(screenOf()).toBe('PF_COMMITS');
+    // отмена параметров → список (как у прочих мастеров); interval «14 01.11» → список
+    await cb(tgId, 'pf:cadd');
+    await msg(tgId, 'Спорт 1500');
+    await cb(tgId, 'pf:cf:i');
+    expect(screenOf()).toBe('PF_COMMIT_CAD');
+    await cb(tgId, 'nv:back:PF_COMMITS');
+    expect(screenOf()).toBe('PF_COMMITS');
+    await cb(tgId, 'pf:cadd');
+    await msg(tgId, 'Спорт 1500');
+    await cb(tgId, 'pf:cf:i');
+    await msg(tgId, '14 01.11');
+    expect(screenOf()).toBe('PF_COMMITS');
+    expect(
+      (await scoped(env.DB, uid).listCommitments()).results.some(
+        (c) => c.name === 'Спорт' && c.frequency === 'interval_days' && c.interval_days === 14,
+      ),
+    ).toBe(true);
 
     // PF_LOCALE / pick
     await cb(tgId, 'nv:back:PF_HOME');

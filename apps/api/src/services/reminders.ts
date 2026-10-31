@@ -4,16 +4,17 @@
  * (profile.timezone; невалидная → UTC) и шлём В ОКНАХ (часовой тик может
  * пропасть — окно, а не точный час, даёт ретрай):
  *   a) weekly: воскресенье 20:00–23:59 local → «Итоги недели» (через runWeek)
- *   b) payment: 10:00–21:59 local → платежи (commitments и monthly-долги), чей
- *      дедлайн через 2 дня; платёж/долг, уже оплаченный в этом месяце,
- *      не напоминает
+ *   b) payment: 10:00–21:59 local → платежи (commitments любого каденса и
+ *      monthly-долги), чей дедлайн через 2 дня; срок, уже оплаченный своим
+ *      периодом (платёж ∈ (prevDue, occurrence]), не напоминает
  *   c) auto_post: в том же окне автопроводка monthly-долгов и активных
- *      commitments с due_day, чей срок в этом месяце УЖЕ наступил
- *      (catch-up за пропущенные дни). Дата события — день срока, не день
- *      прогона. Claim на объект+месяц ('d:<id>:<YYYY-MM>' / 'c:<id>:<YYYY-MM>')
- *      — удалённая юзером автозапись не воскресает до конца месяца, а
- *      следующий месяц проводится снова. Объект, заведённый после даты
- *      срока этого месяца, начнёт проводиться со следующего месяца.
+ *      commitments с каденсом, чей срок УЖЕ наступил (catch-up за
+ *      пропущенные дни и периоды). Дата события — день срока, не день
+ *      прогона. Claim: долги 'd:<id>:<YYYY-MM>', monthly-платежи
+ *      'c:<id>:<YYYY-MM>' (легаси-семантика «на объект+месяц»), прочие
+ *      каденсы 'c:<id>:<occurrence>' — удалённая юзером автозапись не
+ *      воскресает, а следующий срок проводится снова. Объект, заведённый
+ *      после даты срока, начнёт проводиться со следующего срока.
  *      Уведомление — одно на прогон, best-effort: записи уже корректны,
  *      поэтому при не-403 ошибке отправки claim'ы и события остаются
  *      (дублировать данные нельзя), а день считается failed.
@@ -34,6 +35,8 @@ import { createFrankfurter } from '../fx/frankfurter';
 import { getFxRates } from '../fx/service';
 import { runWeek } from '../bot/features';
 import { periodsPerYear } from '../domain/debt';
+import { dueDateFor, isOccurrencePaid, nextDueOn, occurrencesInRange } from '../domain/schedule';
+export { dueDateFor };
 import { todayInTz } from '../bot/parse';
 import { fmtMoney } from '../bot/format';
 import { runFxAlerts } from './fx';
@@ -80,16 +83,10 @@ export function localParts(tz: string, now: Date): LocalParts {
 }
 
 /**
- * Дата дедлайна платежа в текущем (или следующем) месяце: due_day зажат в
- * последний день месяца (due_day 31 → февраль = 28/29). Если дедлайн уже прошёл
- * в этом месяце — берём следующий. Возвращает Date в UTC-полночь локальной даты.
+ * dueDateFor теперь живёт в domain/schedule.ts (та же семантика клампа
+ * дня к концу месяца); здесь — реэкспорт для существующих импортов.
+ * Сдвиг даты на -2 дня от дедлайна (с ролловером месяца/года).
  */
-export function dueDateFor(dueDay: number, year: number, month: number): { y: number; m: number; d: number } {
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const d = Math.min(dueDay, daysInMonth);
-  return { y: year, m: month, d };
-}
-/** Сдвиг даты на -2 дня от дедлайна (с ролловером месяца/года). */
 export function minus2days(y: number, m: number, d: number): { y: number; m: number; d: number } {
   const t = new Date(Date.UTC(y, m - 1, d) - 2 * 86400_000);
   return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
@@ -215,7 +212,9 @@ export async function runReminders(
           }
         };
 
-        // (b) напоминания за 2 дня: commitments + monthly-долги с due_day
+        // (b) напоминания за 2 дня: commitments (любой каденс — ближайший
+        // срок nextDueOn) + monthly-долги с due_day. «Оплачен» — по периоду
+        // срока: платёж с paid_on ∈ (prevDue, occurrence] гасит именно его.
         const monthKey = lp.iso.slice(0, 7);
         const dvs = (await debtViews(repo, lp.iso)).filter(
           (v) => v.debt.frequency === 'monthly' && v.debt.due_day && v.balance > 0 && v.payment > 0,
@@ -229,13 +228,22 @@ export async function runReminders(
           return r.y === lp.year && r.m === lp.month && r.d === lp.day;
         };
         const commits = (await repo.listCommitments()).results;
-        /** Оплаты юзера за месяц одним запросом — «оплачен в этом месяце» для commitment. */
-        const cpays = (await repo.listCommitmentPaymentsSince(`${monthKey}-01`)).results;
-        const commitPaidThisMonth = (cId: number) =>
-          cpays.some((x) => x.commitment_id === cId && x.paid_on.startsWith(monthKey));
+        /** Оплаты окном ~год одним запросом — период срока любого каденса покрыт. */
+        const cpays = (await repo.listCommitmentPaymentsSince(plusDays(lp, -370))).results;
+        const paidOns = new Map<number, string[]>();
+        for (const x of cpays) {
+          const a = paidOns.get(x.commitment_id) ?? [];
+          a.push(x.paid_on);
+          paidOns.set(x.commitment_id, a);
+        }
+        const in2iso = plusDays(lp, 2);
         const dueLines = commits
-          .filter((c) => c.due_day && in2days(c.due_day) && !commitPaidThisMonth(c.id))
-          .map((c) => `  • ${c.name} — ${fmtMoney(c.amount_minor / 100, c.currency)} (срок ${dd(lp, c.due_day!)})`);
+          .map((c) => ({ c, occ: nextDueOn(c, lp.iso) }))
+          .filter(({ c, occ }) => occ === in2iso && !isOccurrencePaid(c, occ!, paidOns.get(c.id) ?? []))
+          .map(
+            ({ c, occ }) =>
+              `  • ${c.name} — ${fmtMoney(c.amount_minor / 100, c.currency)} (срок ${occ!.slice(8)}.${occ!.slice(5, 7)})`,
+          );
         dueLines.push(
           ...dvs
             .filter((v) => !paidThisMonth(v) && in2days(v.debt.due_day!))
@@ -281,28 +289,34 @@ export async function runReminders(
           }
         }
         for (const c of commits) {
-          if (!c.due_day || commitPaidThisMonth(c.id)) continue;
-          const ddue = dueDateFor(c.due_day, lp.year, lp.month);
-          if (ddue.d > lp.day) continue;
-          const evOn = isoOf(ddue);
-          if (c.created_at.slice(0, 10) > evOn) continue;
-          const key = `c:${c.id}:${monthKey}`;
-          const claim = await repo.claimReminder('auto_post', key);
-          if (claim.meta.changes !== 1) continue;
-          try {
-            await repo.addCommitmentPayment({
-              commitment_id: c.id,
-              amount_minor: c.amount_minor,
-              currency: c.currency,
-              paid_on: evOn,
-              source: 'auto',
-              source_key: `auto:c:${c.id}:${monthKey}`,
-            });
-            lines.push(`  • ${c.name} — ${fmtMoney(c.amount_minor / 100, c.currency)}`);
-            postedCommit = true;
-          } catch (e) {
-            await repo.releaseReminder('auto_post', key);
-            throw e;
+          const mine = paidOns.get(c.id) ?? [];
+          // Окно развёртки сроков: monthly — сроки текущего месяца (легаси-
+          // семантика «раз в месяц, в день срока»); interval/yearly — все
+          // пропущенные сроки за последние ~370 дней (loop bound внутри).
+          const from = c.frequency === 'monthly' ? `${monthKey}-01` : plusDays(lp, -370);
+          for (const occ of occurrencesInRange(c, from, lp.iso)) {
+            if (c.created_at.slice(0, 10) > occ) continue; // заведён после срока — со след. срока
+            if (isOccurrencePaid(c, occ, mine)) continue; // срок уже оплачен своим периодом
+            const key = c.frequency === 'monthly' ? `c:${c.id}:${occ.slice(0, 7)}` : `c:${c.id}:${occ}`;
+            const claim = await repo.claimReminder('auto_post', key);
+            if (claim.meta.changes !== 1) continue;
+            try {
+              await repo.addCommitmentPayment({
+                commitment_id: c.id,
+                amount_minor: c.amount_minor,
+                currency: c.currency,
+                paid_on: occ,
+                source: 'auto',
+                source_key: `auto:${key}`, // monthly — легаси auto:c:<id>:<YYYY-MM>
+              });
+              lines.push(
+                `  • ${c.name} — ${fmtMoney(c.amount_minor / 100, c.currency)} (срок ${occ.slice(8)}.${occ.slice(5, 7)})`,
+              );
+              postedCommit = true;
+            } catch (e) {
+              await repo.releaseReminder('auto_post', key);
+              throw e;
+            }
           }
         }
         if (lines.length) {

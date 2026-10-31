@@ -25,7 +25,12 @@ beforeEach(async () => {
 });
 async function user(tgId: number, tz: string, opts: {
   weekly?: number; pay?: number;
-  commits?: { name: string; minor: number; ccy: string; due: number | null; active?: number }[];
+  commits?: {
+    name: string; minor: number; ccy: string; due: number | null; active?: number;
+    /** Каденс (0016); без полей — monthly. */
+    frequency?: 'monthly' | 'interval_days' | 'yearly';
+    interval_days?: number; anchor_on?: string; due_month?: number;
+  }[];
   debts?: { name: string; ccy: string; rate: number; bal: number; pay: number; due: number | null; freq?: 'monthly' | 'biweekly' }[];
   loans?: { cp: string; dir: 'owe' | 'owed'; minor: number; ccy: string; due: string | null }[];
 } = {}) {
@@ -40,7 +45,13 @@ async function user(tgId: number, tz: string, opts: {
   // kb-миграция снятия клавиатуры у этих юзеров «уже пройдена» — считаем только напоминания
   await scoped(env.DB, uid).claimReminder('kb_removed', 'v1');
   for (const c of opts.commits ?? [])
-    await scoped(env.DB, uid).addCommitment({ name: c.name, amount_minor: c.minor, currency: c.ccy, due_day: c.due });
+    await scoped(env.DB, uid).addCommitment({
+      name: c.name, amount_minor: c.minor, currency: c.ccy, due_day: c.due,
+      frequency: c.frequency ?? 'monthly',
+      interval_days: c.interval_days ?? null,
+      anchor_on: c.anchor_on ?? null,
+      due_month: c.due_month ?? null,
+    });
   if (opts.commits) for (const c of opts.commits) {
     if (c.active === 0) {
       const all = (await scoped(env.DB, uid).listCommitments(false)).results;
@@ -437,6 +448,124 @@ describe('runReminders — долги и займы (H4)', () => {
     await run(new Date(Date.UTC(2026, 9, 31, 10, 0)));
     const vasya = sent.find((m) => m.text.includes('Вася'));
     expect(vasya?.text).toContain('Сегодня');
+  });
+});
+
+describe('runReminders — каденсы платежей (миграция 0016)', () => {
+  it('interval_days: напоминание за 2 дня до КАЖДОГО срока; период, оплаченный своим окном, — молча', async () => {
+    // Йога: сроки 15.10, 29.10…; Спортзал: 08.10, 15.10, 22.10, 29.10…
+    const uid = await user(700110, 'UTC', {
+      commits: [
+        { name: 'Йога', minor: 1000, ccy: 'USD', due: null, frequency: 'interval_days', interval_days: 14, anchor_on: '2026-10-15' },
+        { name: 'Спортзал', minor: 2000, ccy: 'USD', due: null, frequency: 'interval_days', interval_days: 7, anchor_on: '2026-10-08' },
+      ],
+    });
+    const repo = scoped(env.DB, uid);
+    const gym = (await repo.listCommitments(false)).results.find((c) => c.name === 'Спортзал')!;
+    // сроки 08.10 и 15.10 Спортзала оплачены своими окнами
+    await repo.addCommitmentPayment({ commitment_id: gym.id, amount_minor: 2000, currency: 'USD', paid_on: '2026-10-08', source: 'manual', source_key: 'tg:g1' });
+    await repo.addCommitmentPayment({ commitment_id: gym.id, amount_minor: 2000, currency: 'USD', paid_on: '2026-10-10', source: 'manual', source_key: 'tg:g2' });
+    // 13.10: до срока 15.10 — 2 дня: Йога напомнит, оплаченный Спортзал — нет
+    await run(new Date(Date.UTC(2026, 9, 13, 10, 0)));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain('Йога');
+    expect(sent[0]!.text).not.toContain('Спортзал');
+    // 15.10: автопост Йоги (срок наступил); Спортзал — покрыт
+    await run(new Date(Date.UTC(2026, 9, 15, 10, 0)));
+    expect(sent).toHaveLength(2);
+    const yoga = (await repo.listCommitments(false)).results.find((c) => c.name === 'Йога')!;
+    expect((await repo.listCommitmentPayments(yoga.id)).results).toMatchObject([
+      { paid_on: '2026-10-15', source: 'auto', source_key: `auto:c:${yoga.id}:2026-10-15` },
+    ]);
+    // 20.10: до срока Спортзала 22.10 — 2 дня → напоминание (15.10-й срок уже не тот период)
+    await run(new Date(Date.UTC(2026, 9, 20, 10, 0)));
+    expect(sent).toHaveLength(3);
+    expect(sent[2]!.text).toContain('Спортзал');
+    expect(sent[2]!.text).toContain('22.10');
+  });
+
+  it('interval_days: автопост каждого срока ключом auto:c:<id>:<date>; catch-up пропущенных; удалённое не воскресает', async () => {
+    const uid = await user(700111, 'UTC', {
+      commits: [
+        { name: 'Фитнес', minor: 1500, ccy: 'USD', due: null, frequency: 'interval_days', interval_days: 7, anchor_on: '2026-10-01' },
+      ],
+    });
+    const repo = scoped(env.DB, uid);
+    const cid = (await repo.listCommitments()).results[0]!.id;
+    // первый прогон 15.10 — догон всех пропущенных сроков: 01, 08, 15
+    await run(new Date(Date.UTC(2026, 9, 15, 10, 0)));
+    let pays = (await repo.listCommitmentPayments(cid)).results;
+    expect(pays.map((x) => x.paid_on)).toEqual(['2026-10-01', '2026-10-08', '2026-10-15']);
+    expect(pays.every((x) => x.source === 'auto' && x.source_key === `auto:c:${cid}:${x.paid_on}`)).toBe(true);
+    expect(sent).toHaveLength(1); // одно сводное сообщение
+    // повтор — ничего
+    await run(new Date(Date.UTC(2026, 9, 15, 10, 0)));
+    expect((await repo.listCommitmentPayments(cid)).results).toHaveLength(3);
+    // ручная оплата в окне срока 22.10 (15.10 < paid_on ≤ 22.10) отменяет автопост
+    await repo.addCommitmentPayment({ commitment_id: cid, amount_minor: 1500, currency: 'USD', paid_on: '2026-10-20', source: 'manual', source_key: 'tg:m1' });
+    await run(new Date(Date.UTC(2026, 9, 22, 10, 0)));
+    pays = (await repo.listCommitmentPayments(cid)).results;
+    expect(pays).toHaveLength(4);
+    expect(pays.filter((x) => x.source === 'auto')).toHaveLength(3);
+    // 29.10 — автопост; юзер удалил → повтор не воскресает (claim срока занят)
+    await run(new Date(Date.UTC(2026, 9, 29, 10, 0)));
+    pays = (await repo.listCommitmentPayments(cid)).results;
+    const auto29 = pays.find((x) => x.paid_on === '2026-10-29' && x.source === 'auto')!;
+    expect(auto29).toBeDefined();
+    await repo.deleteCommitmentPayment(auto29.id);
+    await run(new Date(Date.UTC(2026, 9, 29, 10, 0)));
+    expect((await repo.listCommitmentPayments(cid)).results.every((x) => x.paid_on !== '2026-10-29')).toBe(true);
+    // следующий срок 05.11 — проводится снова
+    await run(new Date(Date.UTC(2026, 10, 5, 10, 0)));
+    expect((await repo.listCommitmentPayments(cid)).results.some((x) => x.paid_on === '2026-11-05')).toBe(true);
+  });
+
+  it('yearly: срок раз в год — напоминание за 2 дня и автопост в день срока; вне срока — тишина; год спустя — снова', async () => {
+    const uid = await user(700112, 'UTC', {
+      commits: [
+        { name: 'Страховка', minor: 120000, ccy: 'USD', due: 20, frequency: 'yearly', due_month: 10 },
+      ],
+    });
+    const repo = scoped(env.DB, uid);
+    const cid = (await repo.listCommitments()).results[0]!.id;
+    // 05.10 — до срока 15 дней: ни напоминания, ни проводки
+    await run(new Date(Date.UTC(2026, 9, 5, 10, 0)));
+    expect(sent).toHaveLength(0);
+    // 18.10 — за 2 дня → напоминание
+    await run(new Date(Date.UTC(2026, 9, 18, 10, 0)));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain('Страховка');
+    expect(sent[0]!.text).toContain('20.10');
+    // 20.10 — автопост ключом на срок
+    await run(new Date(Date.UTC(2026, 9, 20, 10, 0)));
+    const pays = (await repo.listCommitmentPayments(cid)).results;
+    expect(pays).toMatchObject([
+      { paid_on: '2026-10-20', source: 'auto', source_key: `auto:c:${cid}:2026-10-20` },
+    ]);
+    // после срока — ничего до следующего года
+    await run(new Date(Date.UTC(2026, 10, 18, 10, 0)));
+    expect(sent).toHaveLength(2); // напоминание + автопост, больше ничего
+    // год спустя — тот же цикл
+    await run(new Date(Date.UTC(2027, 9, 18, 10, 0)));
+    expect(sent).toHaveLength(3);
+    expect(sent[2]!.text).toContain('Страховка');
+    await run(new Date(Date.UTC(2027, 9, 20, 10, 0)));
+    expect((await repo.listCommitmentPayments(cid)).results.map((x) => x.paid_on)).toEqual([
+      '2026-10-20',
+      '2027-10-20',
+    ]);
+  });
+
+  it('yearly 29.02: в невисокосном году срок — 28.02', async () => {
+    const uid = await user(700113, 'UTC', {
+      commits: [
+        { name: 'Високосный', minor: 100, ccy: 'USD', due: 29, frequency: 'yearly', due_month: 2 },
+      ],
+    });
+    const repo = scoped(env.DB, uid);
+    const cid = (await repo.listCommitments()).results[0]!.id;
+    await run(new Date(Date.UTC(2026, 1, 28, 10, 0))); // 2026 — не високосный
+    expect((await repo.listCommitmentPayments(cid)).results).toMatchObject([{ paid_on: '2026-02-28' }]);
   });
 });
 

@@ -40,18 +40,19 @@ export interface WaterfallResult {
  * (регулярные платежи + бюджет повседневных + месячный платёж каждого
  * активного кредита) в USD, округлённая до центов.
  * Личные займы (loans) не входят — выплаты нерегулярные.
- * Входные суммы: commitments в minor units, платежи кредитов — float
- * (уже нормализованные в месяц через DebtView.monthlyPayment).
+ * Входные суммы: commitments — float, уже нормализованные в месяц
+ * (schedule.monthlyAmount: interval → ×30.4375/n, yearly → /12);
+ * платежи кредитов — float (DebtView.monthlyPayment).
  */
 export function computedBaselineUsd(input: {
-  commits: { amount_minor: number; currency: Currency }[];
+  commits: { amount: number; currency: Currency }[];
   livingCapMinor: number;
   livingCcy: Currency;
   debtMonthly: { amount: number; currency: Currency }[];
   pu: Record<string, number>;
 }): number {
   let sum = 0;
-  for (const c of input.commits) sum += convert(c.amount_minor / 100, c.currency, 'USD', { perUsd: input.pu });
+  for (const c of input.commits) sum += convert(c.amount, c.currency, 'USD', { perUsd: input.pu });
   sum += convert(input.livingCapMinor / 100, input.livingCcy, 'USD', { perUsd: input.pu });
   for (const d of input.debtMonthly) sum += convert(d.amount, d.currency, 'USD', { perUsd: input.pu });
   return round2(sum);

@@ -140,6 +140,12 @@ export interface ParsedCommitment {
   amount: number;
   currency?: string | undefined;
   dueDay?: number | undefined;
+  /** Каденс (миграция 0016); без полей — monthly. */
+  frequency?: 'monthly' | 'interval_days' | 'yearly' | undefined;
+  intervalDays?: number | undefined;
+  /** 'YYYY-MM-DD' — первый платёж interval_days. */
+  anchorOn?: string | undefined;
+  dueMonth?: number | undefined;
 }
 
 /** "Аренда 700 usd 1" — имя, сумма, [валюта], [день 1–31]. */
