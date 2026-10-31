@@ -124,10 +124,11 @@ const TEMPO_INFO: Record<TempoKind, string> = {
   thermo: 'Бак — бюджет месяца; уровень — потрачено. Риска «сейчас» — где должен быть уровень по доле месяца; пунктирная — итог при текущем темпе. Уровень правее риски «сейчас» — перебираете. В «деталях» ползунок «Что если» двигает риску прогноза.',
   gauge: 'Стрелка — темп трат к идеалу: «план» — точно по графику, левее — экономнее, правее — перебор. Зоны температуры: серая — холодно, зелёная — в графике, янтарь и красный — перегрев. Ползунок «Что если» в деталях двигает стрелку.',
   heat: 'Каждая ячейка — день месяца в цвете «трата/идеал на день»: бледная — мало, зелёная — по норме, янтарь и красный — перебор. Пустые — дни впереди. Видно, какие дни перегрели месяц.',
+  race: 'Две шкалы наперегонки: «дни месяца» — сколько времени прошло, «бюджет» — сколько потрачено. Бюджет бежит впереди дней — перебираете. Пунктирная риска — итог при текущем темпе; штриховка до неё — ползунок «Что если» в деталях.',
 };
 
 /** Вариант hero-графика темпа (выбор пока открыт — ?demo=home&chart=…). */
-export type TempoKind = 'line' | 'thermo' | 'gauge' | 'heat';
+export type TempoKind = 'line' | 'thermo' | 'gauge' | 'heat' | 'race';
 
 /** Общие данные для всех вариантов графика темпа. */
 interface TempoProps {
@@ -324,6 +325,72 @@ function GaugeChart({ effRate }: TempoProps) {
         {pct > 0 ? `+${pct}%` : pct < 0 ? `−${-pct}%` : 'по плану'}
       </text>
     </svg>
+  );
+}
+
+/**
+ * «Гонка»: две шкалы на общей оси — «дни месяца» vs «бюджет».
+ * Бюджет впереди дней — тратите быстрее плана. Пунктирная риска — итог
+ * прогноза; при «Что если» к нему штриховка от текущего уровня.
+ */
+function RaceChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: TempoProps) {
+  const dayShare = dim > 0 ? today / dim : 0;
+  const spentShare = cap > 0 ? spent / cap : 0;
+  const projShare = cap > 0 && proj > 0 ? proj / cap : 0;
+  const scale = Math.max(1, spentShare, projShare) * 1.04;
+  const pct = (s: number) => `${(Math.min(s / scale, 1) * 100).toFixed(2)}%`;
+  const over = scale > 1.06;
+  return (
+    <div class="mt-4 space-y-4">
+      <div>
+        <div class="mb-1 flex justify-between text-[11px] text-zinc-500">
+          <span>дни месяца</span>
+          <span>
+            {today}/{dim}
+          </span>
+        </div>
+        <div class="relative h-3.5 rounded-full bg-zinc-800/80">
+          <div
+            class="absolute inset-y-0 left-0 rounded-full"
+            style={{ width: pct(dayShare), background: 'linear-gradient(90deg,#71717a,#a1a1aa)' }}
+          />
+          {over && <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: pct(1) }} />}
+        </div>
+      </div>
+      <div>
+        <div class="mb-1 flex justify-between text-[11px] text-zinc-500">
+          <span>бюджет</span>
+          <span>{Math.round(spentShare * 100)}%</span>
+        </div>
+        <div class="relative h-3.5 rounded-full bg-zinc-800/80">
+          <div
+            class="absolute inset-y-0 left-0 rounded-full"
+            style={{
+              width: pct(spentShare),
+              background: `linear-gradient(90deg, ${paceFill(rate, 0.3)}, ${paceColor(rate)})`,
+            }}
+          />
+          {/* «Что если»: штриховка от текущего уровня до прогнозной риски */}
+          {proj > 0 && scenario && (
+            <div
+              class="absolute inset-y-0 rounded-r-full"
+              style={{
+                left: pct(spentShare),
+                width: `max(0px, calc(${pct(projShare)} - ${pct(spentShare)}))`,
+                background: `repeating-linear-gradient(45deg, ${paceFill(effRate, 0.55)} 0 3px, transparent 3px 7px)`,
+              }}
+            />
+          )}
+          {proj > 0 && (
+            <div
+              class="absolute -inset-y-1 w-0 -translate-x-1/2 border-r-2 border-dashed"
+              style={{ left: pct(projShare), borderColor: paceColor(effRate) }}
+            />
+          )}
+          {over && <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: pct(1) }} />}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -578,6 +645,8 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                 <GaugeChart {...t} />
               ) : tempoKind === 'heat' ? (
                 <HeatChart {...t} />
+              ) : tempoKind === 'race' ? (
+                <RaceChart {...t} />
               ) : (
                 <TempoChart {...t} />
               );

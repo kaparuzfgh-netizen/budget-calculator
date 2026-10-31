@@ -27,10 +27,10 @@ const PACE = ((): keyof typeof PACE_LABELS => {
 })();
 const WEEK = tempoWeek(PACE);
 
-const CHART_LABELS = { line: 'линия', thermo: 'термометр', gauge: 'шкала', heat: 'карта' } as const;
+const CHART_LABELS = { line: 'линия', thermo: 'термометр', gauge: 'шкала', heat: 'карта', race: 'гонка' } as const;
 const CHART = ((): TempoKind => {
   const p = new URLSearchParams(location.search).get('chart');
-  return p === 'thermo' || p === 'gauge' || p === 'heat' ? p : 'line';
+  return p === 'thermo' || p === 'gauge' || p === 'heat' || p === 'race' ? p : 'line';
 })();
 
 // ── stub Api: GET — фикстуры; мутации — правка фикстур в памяти ──
