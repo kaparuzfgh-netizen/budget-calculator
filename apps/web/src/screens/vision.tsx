@@ -291,9 +291,9 @@ function ReviewSheet({
           </div>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto px-5">
-          <ul class="space-y-2 pb-2">
+          <ul class="divide-y divide-white/5 pb-2">
             {rows.map((r, i) => (
-              <li key={i} class={`rounded-xl border border-white/10 bg-zinc-950/60 p-2.5${r.on ? '' : ' opacity-50'}`}>
+              <li key={i} class={`py-2.5 first:pt-0${r.on ? '' : ' opacity-50'}`}>
                 <div class="flex items-center gap-2">
                   <input
                     type="checkbox"
