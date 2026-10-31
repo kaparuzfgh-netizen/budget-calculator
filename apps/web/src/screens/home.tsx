@@ -93,9 +93,9 @@ function smoothPath(px: number[], py: number[]): string {
   return d;
 }
 
-/** «Температура» темпа: burn_rate → цвет. Холодно (мало тратим) — почти
- * белый; в графике — изумруд; теплее — янтарь; перегрев — красный. */
-function paceColor(rate: number): string {
+/** «Температура» темпа: rate (× к идеалу) → RGB. Холодно (мало тратим) —
+ * почти белый; в графике — изумруд; теплее — янтарь; перегрев — красный. */
+function paceRGB(rate: number): [number, number, number] {
   const stops: [number, [number, number, number]][] = [
     [0, [244, 244, 245]],
     [0.6, [52, 211, 153]],
@@ -104,16 +104,43 @@ function paceColor(rate: number): string {
     [1.45, [248, 113, 113]],
     [1.9, [220, 38, 38]],
   ];
-  if (rate <= stops[0]![0]) return `rgb(${stops[0]![1].join(',')})`;
+  if (rate <= stops[0]![0]) return stops[0]![1];
   for (let i = 1; i < stops.length; i++) {
     const [r1, c1] = stops[i - 1]!;
     const [r2, c2] = stops[i]!;
     if (rate <= r2) {
       const k = (rate - r1) / (r2 - r1);
-      return `rgb(${c1.map((v, j) => Math.round(v + (c2[j]! - v) * k)).join(',')})`;
+      return c1.map((v, j) => Math.round(v + (c2[j]! - v) * k)) as [number, number, number];
     }
   }
-  return `rgb(${stops[stops.length - 1]![1].join(',')})`;
+  return stops[stops.length - 1]![1];
+}
+const paceColor = (rate: number): string => `rgb(${paceRGB(rate).join(',')})`;
+const paceFill = (rate: number, a: number): string => `rgba(${paceRGB(rate).join(',')},${a})`;
+
+/** Пояснения ⓘ к каждому варианту графика темпа. */
+const TEMPO_INFO: Record<TempoKind, string> = {
+  line: 'Линия — накопленные траты по дням месяца; пунктир — ровный график бюджета; полая точка — итог при текущем темпе. Цвет — температура: белый — тратите мало, зелёный — в графике, красный — перегрев. В «деталях» ползунок «Что если» крутит прогноз.',
+  thermo: 'Бак — бюджет месяца; уровень — потрачено. Риска «сейчас» — где должен быть уровень по доле месяца; пунктирная — итог при текущем темпе. Уровень правее риски «сейчас» — перебираете. В «деталях» ползунок «Что если» двигает риску прогноза.',
+  gauge: 'Стрелка — темп трат к идеалу: «план» — точно по графику, левее — экономнее, правее — перебор. Зоны температуры: серая — холодно, зелёная — в графике, янтарь и красный — перегрев. Ползунок «Что если» в деталях двигает стрелку.',
+  heat: 'Каждая ячейка — день месяца в цвете «трата/идеал на день»: бледная — мало, зелёная — по норме, янтарь и красный — перебор. Пустые — дни впереди. Видно, какие дни перегрели месяц.',
+};
+
+/** Вариант hero-графика темпа (выбор пока открыт — ?demo=home&chart=…). */
+export type TempoKind = 'line' | 'thermo' | 'gauge' | 'heat';
+
+/** Общие данные для всех вариантов графика темпа. */
+interface TempoProps {
+  daily: readonly number[];
+  today: number;
+  dim: number;
+  cap: number;
+  spent: number;
+  proj: number;
+  rate: number;
+  effRate: number;
+  scenario: boolean;
+  cur: string;
 }
 
 /**
@@ -122,26 +149,9 @@ function paceColor(rate: number): string {
  * вертикаль «сейчас»; полая точка — прогноз итога при текущем темпе.
  * Цвет — «температура»: холодно → зелёный → янтарь → красный.
  */
-function TempoChart({
-  daily,
-  today,
-  dim,
-  cap,
-  proj,
-  color,
-  projColor,
-  scenario,
-}: {
-  daily: readonly number[];
-  today: number;
-  dim: number;
-  cap: number;
-  proj: number;
-  color: string;
-  /** цвет будущего участка; scenario — сплошная линия + залитый клин (ползунок «Что если»). */
-  projColor: string;
-  scenario: boolean;
-}) {
+function TempoChart({ daily, today, dim, cap, proj, rate, effRate, scenario }: TempoProps) {
+  const color = paceColor(rate);
+  const projColor = paceColor(effRate);
   const W = 320;
   const H = 140;
   const padL = 4;
@@ -164,7 +174,8 @@ function TempoChart({
   const projY = y(Math.min(proj, yMax * 0.97));
   const gridCls = '#3f3f46';
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" class="mt-1 block h-36 w-full" aria-hidden>
+    <>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" class="mt-1 block h-36 w-full" aria-hidden>
       <defs>
         <linearGradient id="tempoFill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.45" />
@@ -210,7 +221,143 @@ function TempoChart({
       <circle cx={x(today)} cy={y(cumToday)} r="6" fill={color} opacity="0.2" />
       <circle cx={x(today)} cy={y(cumToday)} r="3.2" fill={color} stroke="#18181b" strokeWidth="1" />
       {proj > 0 && <circle cx={x(dim)} cy={projY} r="4" fill="#18181b" stroke={projColor} strokeWidth="1.6" />}
+      </svg>
+      <div class="flex items-center justify-between text-[10px] text-zinc-600">
+        <span>1</span>
+        <span>день {today}</span>
+        <span>{dim}</span>
+      </div>
+    </>
+  );
+}
+
+/**
+ * «Термометр»: бак бюджета — уровень = потрачено; риска «сейчас» —
+ * где должен быть уровень по доле месяца; пунктирная риска — итог прогноза.
+ * Уровень правее риски «сейчас» — тратите быстрее плана.
+ */
+function ThermoChart({ today, dim, cap, spent, proj, rate, effRate, scenario, cur }: TempoProps) {
+  const scale = Math.max(1.05, spent / cap, proj / cap) * 1.04;
+  const pct = (v: number) => `${(Math.min(v / cap / scale, 1) * 100).toFixed(2)}%`;
+  const nowPct = `${(((today / dim) / scale) * 100).toFixed(2)}%`;
+  return (
+    <div class="mt-4">
+      <div class="relative h-14 rounded-xl bg-zinc-800/70">
+        {/* уровень = потрачено */}
+        <div
+          class="absolute inset-y-0 left-0 rounded-xl"
+          style={{
+            width: pct(spent),
+            background: `linear-gradient(90deg, ${paceFill(rate, 0.15)}, ${paceColor(rate)})`,
+          }}
+        />
+        <div class="pointer-events-none absolute inset-x-0 top-0 h-3 rounded-t-xl bg-white/5" />
+        {/* прогноз-риска: пунктирная вертикаль итога */}
+        {proj > 0 && (
+          <div
+            class="absolute inset-y-0 w-0 -translate-x-1/2 border-r-2 border-dashed"
+            style={{ left: pct(proj), borderColor: paceColor(effRate), opacity: scenario ? 1 : 0.8 }}
+          />
+        )}
+        {/* риска «сейчас»: идеальный уровень на эту долю месяца */}
+        <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-zinc-200" style={{ left: nowPct }} />
+        {/* край 100% бюджета — виден, когда шкала растянута перебором */}
+        {scale > 1.09 && (
+          <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: pct(cap) }} />
+        )}
+      </div>
+      <div class="relative mt-1 h-4 text-[10px] text-zinc-500">
+        <span class="absolute -translate-x-1/2" style={{ left: nowPct }}>
+          сейчас
+        </span>
+        <span class="absolute -translate-x-1/2" style={{ left: pct(cap) }}>
+          {fmtMinor(cap, cur)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * «Шкала» (grafana-gauge): полукруг, стрелка = темп к идеалу
+ * (×1 — точно по графику). Зоны температуры: холодно → норма → жарко.
+ */
+function GaugeChart({ effRate }: TempoProps) {
+  const R = 104;
+  const cx = 160;
+  const cy = 128;
+  const max = 2;
+  const a = (r: number) => Math.PI * (1 - Math.min(r, max) / max);
+  const pt = (r: number, rad = R) => [cx + rad * Math.cos(a(r)), cy - rad * Math.sin(a(r))] as const;
+  const arc = (r0: number, r1: number, c: string) => {
+    const [x0, y0] = pt(r0);
+    const [x1, y1] = pt(r1);
+    return (
+      <path key={r0} d={`M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1}`} stroke={c} strokeWidth="15" fill="none" />
+    );
+  };
+  const needle = paceColor(effRate);
+  const [nx, ny] = pt(effRate, R - 28);
+  const pct = Math.round((effRate - 1) * 100);
+  return (
+    <svg viewBox="0 0 320 152" class="mt-2 block h-32 w-full" aria-hidden>
+      {arc(0, 0.6, '#52525b')}
+      {arc(0.6, 1, '#34d399')}
+      {arc(1, 1.3, '#fbbf24')}
+      {arc(1.3, 2, '#f87171')}
+      {[0, 1, 2].map((r) => {
+        const [tx, ty] = pt(r, R - 12);
+        const [lx, ly] = pt(r, R + 16);
+        const [ox, oy] = pt(r);
+        return (
+          <g key={r}>
+            <line x1={ox} y1={oy} x2={tx} y2={ty} stroke="#a1a1aa" strokeWidth="2" />
+            <text x={lx} y={ly + 4} textAnchor="middle" fontSize="11" fill="#71717a">
+              {r === 0 ? '0' : r === 1 ? 'план' : '×2'}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={needle} strokeWidth="4" strokeLinecap="round" />
+      <circle cx={cx} cy={cy} r="7" fill="#18181b" stroke={needle} strokeWidth="2.5" />
+      <text x={cx} y={cy - 36} textAnchor="middle" fontSize="24" fontWeight="600" fill={needle}>
+        {pct > 0 ? `+${pct}%` : pct < 0 ? `−${-pct}%` : 'по плану'}
+      </text>
     </svg>
+  );
+}
+
+/**
+ * «Карта месяца»: ячейка = день в цвете «трата / идеал на день».
+ * Бледная — мало, зелёная — по норме, красная — перебор; пустые — впереди.
+ */
+function HeatChart({ daily, today, dim, cap, effRate, scenario }: TempoProps) {
+  const ideal = cap / dim;
+  return (
+    <div class="mt-3">
+      <div class="grid grid-cols-7 gap-1">
+        {Array.from({ length: dim }, (_, i) => {
+          const day = i + 1;
+          const future = day > today;
+          const r = ideal > 0 ? (daily[i] ?? 0) / ideal : 0;
+          return (
+            <div
+              key={day}
+              class="aspect-square rounded-[4px]"
+              style={{
+                background: future ? (scenario ? paceFill(effRate, 0.14) : 'rgba(255,255,255,0.04)') : paceColor(r),
+                boxShadow: day === today ? 'inset 0 0 0 1.5px #e4e4e7' : undefined,
+              }}
+            />
+          );
+        })}
+      </div>
+      <div class="mt-1 flex justify-between text-[10px] text-zinc-600">
+        <span>холоднее</span>
+        <span>сегодня · {today}</span>
+        <span>горячее</span>
+      </div>
+    </div>
   );
 }
 
@@ -290,7 +437,7 @@ function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: Upcoming
   );
 }
 
-export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: string | null }) {
+export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { name: string | null; tempo?: TempoKind }) {
   const ov = useData(() => api.get<Overview>('/api/tma/overview'), onFatal, []);
   const wk = useData(() => api.get<WeekStatus>('/api/tma/week'), onFatal, []);
   const up = useData(() => api.get<Upcoming>('/api/tma/upcoming'), onFatal, []);
@@ -321,7 +468,6 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   // статус бюджета — единый источник (в «Тратах» только журнал)
   const weekShare = w.week_budget_minor > 0 ? w.week_spent_minor / w.week_budget_minor : 0;
   const spentShare = w.month_cap_minor > 0 ? w.month_spent_minor / w.month_cap_minor : 0;
-  const paceHex = paceColor(w.burn_rate);
   // прогноз итога: факт до сегодня + «эффективный» дневной расход × остаток
   // дней; «Что если» подменяет дневной расход ползунком. С 3-го дня — раньше шум.
   const curDailyMinor = w.month_day > 0 ? w.month_spent_minor / w.month_day : 0;
@@ -332,9 +478,11 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
       : 0;
   // температура будущего участка: дневная норма сценария vs идеал (cap/дней)
   const scenario = whatIfMinor !== null;
-  const projColor = paceColor(
-    w.month_cap_minor > 0 ? (effDailyMinor * w.month_days) / w.month_cap_minor : 0,
-  );
+  const scenarioRatio =
+    w.month_cap_minor > 0 ? (effDailyMinor * w.month_days) / w.month_cap_minor : 0;
+  const projColor = paceColor(scenarioRatio);
+  const effRate = scenario ? scenarioRatio : w.burn_rate;
+  const tempoKind: TempoKind = tempo ?? 'line';
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
@@ -407,33 +555,33 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
           <div class={rowCls}>
             <span class={mutedCls}>
               Темп месяца
-              <Info title="Темп месяца">
-                Линия — накопленные траты по дням месяца; пунктир — ровный
-                график бюджета; полая точка — итог при текущем темпе. Цвет —
-                температура: почти белый — тратите мало, зелёный — в графике,
-                янтарь и красный — перегрев. В «деталях» ползунок «Что если»
-                крутит прогноз.
-              </Info>
+              <Info title="Темп месяца">{TEMPO_INFO[tempoKind]}</Info>
             </span>
           </div>
           {w.month_cap_minor > 0 ? (
-            <>
-              <TempoChart
-                daily={w.month_daily_minor}
-                today={w.month_day}
-                dim={w.month_days}
-                cap={w.month_cap_minor}
-                proj={projMinor}
-                color={paceHex}
-                projColor={projColor}
-                scenario={scenario}
-              />
-              <div class="flex items-center justify-between text-[10px] text-zinc-600">
-                <span>1</span>
-                <span>день {w.month_day}</span>
-                <span>{w.month_days}</span>
-              </div>
-            </>
+            (() => {
+              const t: TempoProps = {
+                daily: w.month_daily_minor,
+                today: w.month_day,
+                dim: w.month_days,
+                cap: w.month_cap_minor,
+                spent: w.month_spent_minor,
+                proj: projMinor,
+                rate: w.burn_rate,
+                effRate,
+                scenario,
+                cur: c,
+              };
+              return tempoKind === 'thermo' ? (
+                <ThermoChart {...t} />
+              ) : tempoKind === 'gauge' ? (
+                <GaugeChart {...t} />
+              ) : tempoKind === 'heat' ? (
+                <HeatChart {...t} />
+              ) : (
+                <TempoChart {...t} />
+              );
+            })()
           ) : (
             <p class={`${mutedCls} mt-2`}>
               Бюджет месяца не задан — потрачено {fmtMinor(w.month_spent_minor, c)}

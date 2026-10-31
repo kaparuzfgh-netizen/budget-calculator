@@ -12,20 +12,26 @@ import type { Api, Commitment } from '../api';
 import type { Nav } from '../app';
 import type { ScreenProps } from '../app';
 import { flashCls, mutedCls } from '../ui';
-import { HomeScreen } from '../screens/home';
+import { HomeScreen, type TempoKind } from '../screens/home';
 import { WeekScreen } from '../screens/week';
 import { IncomeScreen } from '../screens/income';
 import { ProfileScreen } from '../screens/profile';
 import { CategoriesScreen } from '../screens/categories';
 import { CATEGORIES, COMMITMENTS, EXPENSES, INCOME, OVERVIEW, PROFILE, UPCOMING, tempoWeek } from './mock';
 
-// сценарий темпа: ?demo=home&pace=low|ok|over
+// сценарий темпа: ?demo=home&pace=low|ok|over; вариант графика: &chart=line|thermo|gauge|heat
 const PACE_LABELS = { low: 'мало', ok: 'средне', over: 'перебор' } as const;
 const PACE = ((): keyof typeof PACE_LABELS => {
   const p = new URLSearchParams(location.search).get('pace');
   return p === 'low' || p === 'over' ? p : 'ok';
 })();
 const WEEK = tempoWeek(PACE);
+
+const CHART_LABELS = { line: 'линия', thermo: 'термометр', gauge: 'шкала', heat: 'карта' } as const;
+const CHART = ((): TempoKind => {
+  const p = new URLSearchParams(location.search).get('chart');
+  return p === 'thermo' || p === 'gauge' || p === 'heat' ? p : 'line';
+})();
 
 // ── stub Api: GET — фикстуры; мутации — правка фикстур в памяти ──
 
@@ -265,7 +271,7 @@ function DemoApp({ name }: { name: string }) {
 
   const screen =
     name === 'home' ? (
-      <HomeScreen {...props} name="Демо" />
+      <HomeScreen {...props} name="Демо" tempo={CHART} />
     ) : name === 'week' ? (
       <WeekScreen {...props} />
     ) : name === 'income' ? (
@@ -296,18 +302,32 @@ function DemoApp({ name }: { name: string }) {
         demo · {name} — данные из demo/mock.ts
       </p>
       {name === 'home' && (
-        <p class="mb-4 flex items-center gap-3 text-[11px] text-zinc-500">
-          темп месяца:
-          {(Object.keys(PACE_LABELS) as (keyof typeof PACE_LABELS)[]).map((p) => (
-            <a
-              key={p}
-              href={`?demo=home&pace=${p}`}
-              class={p === PACE ? 'font-medium text-sky-400' : 'underline'}
-            >
-              {PACE_LABELS[p]}
-            </a>
-          ))}
-        </p>
+        <div class="mb-4 space-y-1 text-[11px] text-zinc-500">
+          <p class="flex items-center gap-3">
+            темп:
+            {(Object.keys(PACE_LABELS) as (keyof typeof PACE_LABELS)[]).map((p) => (
+              <a
+                key={p}
+                href={`?demo=home&pace=${p}${CHART === 'line' ? '' : `&chart=${CHART}`}`}
+                class={p === PACE ? 'font-medium text-sky-400' : 'underline'}
+              >
+                {PACE_LABELS[p]}
+              </a>
+            ))}
+          </p>
+          <p class="flex items-center gap-3">
+            график:
+            {(Object.keys(CHART_LABELS) as (keyof typeof CHART_LABELS)[]).map((k) => (
+              <a
+                key={k}
+                href={`?demo=home&pace=${PACE}${k === 'line' ? '' : `&chart=${k}`}`}
+                class={k === CHART ? 'font-medium text-sky-400' : 'underline'}
+              >
+                {CHART_LABELS[k]}
+              </a>
+            ))}
+          </p>
+        </div>
       )}
       {flash !== null && (
         <div class={flashCls}>
