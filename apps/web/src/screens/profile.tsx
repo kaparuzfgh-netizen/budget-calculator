@@ -20,6 +20,7 @@ import {
   CalendarClock,
   Camera,
   CircleCheck,
+  Clock,
   Database,
   Globe,
   History,
@@ -44,6 +45,7 @@ import type {
   Profile,
 } from '../api';
 import type { Nav, ScreenProps } from '../app';
+import type { SelectOption } from '../ui';
 import {
   amountError,
   currencyError,
@@ -86,7 +88,79 @@ import {
   useFatalOn,
 } from '../ui';
 
-const TZ_PRESETS = ['Europe/Moscow', 'Asia/Bishkek', 'Europe/Berlin', 'UTC'] as const;
+/**
+ * Часовой пояс: полный список IANA (Intl.supportedValuesOf) с поиском.
+ * Первой закреплена текущая зона («Текущая: X»), затем избранные, дальше —
+ * весь список. Если API нет (старый WebView) — статичный fallback ~50 зон.
+ * Русские имена городов ищутся через hint (SelectOption) — «москва» →
+ * Europe/Moscow и т.п. Храним значение = IANA-строку (проверяет сервер).
+ */
+const TZ_FAVORITES = ['Europe/Moscow', 'Asia/Bishkek', 'Europe/Minsk', 'Asia/Almaty', 'UTC'] as const;
+/** Алиасы городов → IANA: ищутся по подстроке (см. SelectOption.hint). */
+const TZ_ALIASES: Record<string, string> = {
+  'Europe/Moscow': 'москва питер санкт-петербург',
+  'Europe/Samara': 'самара',
+  'Asia/Bishkek': 'бишкек',
+  'Europe/Minsk': 'минск',
+  'Asia/Almaty': 'алматы',
+  'Europe/Kyiv': 'киев',
+  'Europe/Kiev': 'киев',
+  'Europe/Berlin': 'берлин',
+  'Europe/London': 'лондон',
+  'America/New_York': 'нью-йорк',
+  'Asia/Dubai': 'дубай',
+  'Europe/Istanbul': 'стамбул',
+};
+/** Статичный список ~50 ходовых зон — fallback без Intl.supportedValuesOf. */
+const TZ_FALLBACK: readonly string[] = [
+  'UTC',
+  'Europe/London', 'Europe/Dublin', 'Europe/Lisbon',
+  'Europe/Berlin', 'Europe/Paris', 'Europe/Madrid', 'Europe/Rome',
+  'Europe/Amsterdam', 'Europe/Vienna', 'Europe/Zurich',
+  'Europe/Warsaw', 'Europe/Prague', 'Europe/Stockholm', 'Europe/Helsinki',
+  'Europe/Athens', 'Europe/Bucharest', 'Europe/Istanbul', 'Europe/Kyiv',
+  'Europe/Minsk', 'Europe/Moscow', 'Europe/Samara',
+  'Asia/Yekaterinburg', 'Asia/Novosibirsk', 'Asia/Krasnoyarsk',
+  'Asia/Irkutsk', 'Asia/Vladivostok', 'Asia/Kamchatka',
+  'Asia/Tbilisi', 'Asia/Yerevan', 'Asia/Baku', 'Asia/Tashkent',
+  'Asia/Almaty', 'Asia/Bishkek', 'Asia/Dubai', 'Asia/Karachi',
+  'Asia/Kolkata', 'Asia/Bangkok', 'Asia/Shanghai', 'Asia/Singapore',
+  'Asia/Tokyo', 'Asia/Seoul',
+  'Australia/Sydney', 'Pacific/Auckland',
+  'America/Anchorage', 'America/Los_Angeles', 'America/Chicago',
+  'America/New_York', 'America/Mexico_City', 'America/Sao_Paulo',
+  'Africa/Cairo', 'Africa/Johannesburg',
+];
+
+/** Все IANA-зоны из рантайма; без supportedValuesOf — TZ_FALLBACK. */
+function allTimezones(): string[] {
+  try {
+    const fn = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+    const list = fn?.call(Intl, 'timeZone');
+    if (list?.length) return list;
+  } catch {
+    // старый WebView — ниже вернём fallback
+  }
+  return [...TZ_FALLBACK];
+}
+
+/** Опции селекта: «Текущая: X», избранные, полный список (без дублей). */
+function tzOptions(current: string): SelectOption[] {
+  const all = allTimezones();
+  const opt = (z: string, label = z): SelectOption => ({
+    value: z,
+    label,
+    ...(TZ_ALIASES[z] ? { hint: TZ_ALIASES[z] } : {}),
+  });
+  const head = new Set<string>([current]);
+  const favs = TZ_FAVORITES.filter((z) => z !== current && all.includes(z));
+  for (const z of favs) head.add(z);
+  return [
+    opt(current, `Текущая: ${current}`),
+    ...favs.map((z) => opt(z)),
+    ...all.filter((z) => !head.has(z)).map((z) => opt(z)),
+  ];
+}
 
 // ── каденс платежа (миграции 0016+0017) ──
 
@@ -467,7 +541,7 @@ function Switch({
   onToggle,
 }: {
   icon: ComponentChildren;
-  label: string;
+  label: ComponentChildren;
   hint?: string | undefined;
   checked: boolean;
   busy: boolean;
@@ -500,13 +574,41 @@ function Switch({
 const REMINDERS: {
   key: 'reminders_weekly' | 'reminders_payments' | 'fx_alerts_enabled' | 'vision_enabled';
   icon: typeof Bell;
-  label: string;
+  label: ComponentChildren;
   hint: string;
 }[] = [
   { key: 'reminders_weekly', icon: CalendarClock, label: 'Еженедельный итог', hint: 'вс 20:00 — траты недели' },
   { key: 'reminders_payments', icon: Receipt, label: 'Платежи и сроки', hint: 'за 2 дня до срока, 10:00' },
   { key: 'fx_alerts_enabled', icon: TrendingUp, label: 'Алерты по курсам', hint: 'выгодные моменты для обмена' },
-  { key: 'vision_enabled', icon: Camera, label: 'Скриншоты банка', hint: 'распознавание — фото уходит в Google AI' },
+  {
+    key: 'vision_enabled',
+    icon: Camera,
+    label: (
+      <>
+        Распознавание скриншотов
+        <Info title="Распознавание скриншотов">
+          <p>
+            Включите — и боту можно прислать скриншот банковского приложения:
+            он распознает траты и предложит записать.
+          </p>
+          <p>
+            Фото уходит в Google AI (резерв — Groq), хранится только результат.
+            Лимит — 20 фото в день.
+          </p>
+        </Info>
+      </>
+    ),
+    hint: 'бот читает фото банка и предлагает записать траты',
+  },
+];
+
+/** «Время напоминаний»: «По умолчанию» → null (легаси) + часы 0–23. */
+const REM_HOUR_OPTIONS: SelectOption[] = [
+  { value: '', label: 'По умолчанию', hint: '10:00 · вс 20:00' },
+  ...Array.from({ length: 24 }, (_, h) => ({
+    value: String(h),
+    label: `${String(h).padStart(2, '0')}:00`,
+  })),
 ];
 
 function ProfileForms({
@@ -535,11 +637,9 @@ function ProfileForms({
   const [capErr, setCapErr] = useState<string | null>(null);
   const [capBusy, setCapBusy] = useState(false);
 
-  // таймзона
+  // таймзона — полный список IANA с поиском (в т.ч. по-русски через hint)
   const cur = p.timezone ?? 'UTC';
-  const preset = (TZ_PRESETS as readonly string[]).includes(cur);
-  const [tzSel, setTzSel] = useState<string>(preset ? cur : '__custom');
-  const [tzCustom, setTzCustom] = useState(preset ? '' : cur);
+  const [tz, setTz] = useState(cur);
   const [tzErr, setTzErr] = useState<string | null>(null);
   const [tzBusy, setTzBusy] = useState(false);
 
@@ -604,7 +704,6 @@ function ProfileForms({
 
   const saveTz = async (ev: Event) => {
     ev.preventDefault();
-    const tz = tzSel === '__custom' ? tzCustom : tzSel;
     const tErr = timezoneError(tz);
     if (tErr) {
       setTzErr(tErr);
@@ -629,6 +728,21 @@ function ProfileForms({
     try {
       await api.patch('/api/tma/profile', { [key]: value });
       nav.flash('Напоминания обновлены');
+      reload();
+    } catch (e) {
+      setRemErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
+    } finally {
+      setRemBusy(false);
+    }
+  };
+
+  // «Время напоминаний»: '' → null (легаси 10:00/вс 20:00), иначе час 0–23
+  const saveRemHour = async (v: string) => {
+    setRemBusy(true);
+    setRemErr(null);
+    try {
+      await api.patch('/api/tma/profile', { reminder_hour: v === '' ? null : Number(v) });
+      nav.flash('Время напоминаний сохранено');
       reload();
     } catch (e) {
       setRemErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
@@ -793,26 +907,22 @@ function ProfileForms({
       </h2>
       <div class={`${cardCls} mt-2`}>
         <form onSubmit={saveTz}>
-          <Field label="Таймзона (IANA)">
-            <Select
-              value={tzSel}
-              options={[
-                ...TZ_PRESETS.map((tz) => ({ value: tz, label: tz })),
-                { value: '__custom', label: 'Другая…' },
-              ]}
-              onChange={setTzSel}
-            />
+          <Field
+            label={
+              <>
+                Таймзона
+                <Info title="Часовой пояс">
+                  <p>
+                    Полный список IANA — начните печатать в поиске: Europe/Berlin,
+                    Asia/Almaty… Или по-русски: «москва», «бишкек», «киев».
+                  </p>
+                  <p>По этому поясу бот считает «сегодня» и время напоминаний.</p>
+                </Info>
+              </>
+            }
+          >
+            <Select value={tz} options={tzOptions(cur)} onChange={setTz} searchable />
           </Field>
-          {tzSel === '__custom' && (
-            <Field label="Своя таймзона">
-              <input
-                class={inputCls}
-                placeholder="например, Asia/Almaty"
-                value={tzCustom}
-                onInput={(e) => setTzCustom((e.target as HTMLInputElement).value)}
-              />
-            </Field>
-          )}
           <FormError msg={tzErr} />
           <button type="submit" class={primaryBtnCls} disabled={tzBusy}>
             Сохранить пояс
@@ -830,13 +940,48 @@ function ProfileForms({
               <Switch
                 icon={<r.icon size={17} strokeWidth={1.5} class="flex-none text-zinc-400" />}
                 label={r.label}
-                hint={r.hint}
+                hint={
+                  r.key === 'reminders_weekly' && p.reminder_hour != null
+                    ? `вс ${String(p.reminder_hour).padStart(2, '0')}:00 — траты недели`
+                    : r.key === 'reminders_payments' && p.reminder_hour != null
+                      ? `за 2 дня до срока, с ${String(p.reminder_hour).padStart(2, '0')}:00`
+                      : r.hint
+                }
                 checked={!!p[r.key]}
                 busy={remBusy}
                 onToggle={() => void toggleReminder(r.key, !p[r.key])}
               />
             </li>
           ))}
+          <li class="flex items-center justify-between gap-3 px-4 py-3">
+            <span class="flex items-center gap-2.5 text-[15px] text-zinc-100">
+              <Clock size={17} strokeWidth={1.5} class="flex-none text-zinc-400" />
+              <span>
+                Время напоминаний
+                <Info title="Время напоминаний">
+                  <p>Одна настройка для обоих: и платежей, и итога недели.</p>
+                  <p>
+                    Час — начало окна: напоминание срабатывает в первый час
+                    после заданного времени (крон тикает раз в час).
+                  </p>
+                  <p>По умолчанию: платежи — с 10:00, итог недели — вс с 20:00.</p>
+                </Info>
+                <span class="mt-0.5 block text-xs text-zinc-400">
+                  {p.reminder_hour == null
+                    ? 'платежи с 10:00 · итог — вс с 20:00'
+                    : `оба — с ${String(p.reminder_hour).padStart(2, '0')}:00`}
+                </span>
+              </span>
+            </span>
+            <span class="w-[7.5rem] flex-none">
+              <Select
+                value={p.reminder_hour == null ? '' : String(p.reminder_hour)}
+                options={REM_HOUR_OPTIONS}
+                onChange={(v) => void saveRemHour(v)}
+                disabled={remBusy}
+              />
+            </span>
+          </li>
         </ul>
         {remErr && <p class="px-4 pb-3 text-sm text-red-400">{remErr}</p>}
       </div>

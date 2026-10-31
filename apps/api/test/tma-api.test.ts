@@ -493,6 +493,36 @@ describe('базовый доход: explicit/computed/none, напоминан�
     expect(g2.baseline_income_minor).toBe(6120000);
   });
 
+  it('profile.reminder_hour: GET→null, PATCH 0–23 round-trip, сброс в null, границы → 400', async () => {
+    const A = await user(900050);
+    const g1 = (await (await api('/api/tma/profile', { token: A.token })).json()) as { reminder_hour: number | null };
+    expect(g1.reminder_hour).toBeNull(); // миграция 0018: NULL — легаси 10:00/вс 20:00
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminder_hour: 18 } })).status).toBe(200);
+    const g2 = (await (await api('/api/tma/profile', { token: A.token })).json()) as { reminder_hour: number | null };
+    expect(g2.reminder_hour).toBe(18);
+    expect((await scoped(env.DB, A.uid).getProfile())!.reminder_hour).toBe(18);
+    // крайние валидные значения и сброс в null
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminder_hour: 0 } })).status).toBe(200);
+    expect((await scoped(env.DB, A.uid).getProfile())!.reminder_hour).toBe(0);
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminder_hour: 23 } })).status).toBe(200);
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminder_hour: null } })).status).toBe(200);
+    const g3 = (await (await api('/api/tma/profile', { token: A.token })).json()) as { reminder_hour: number | null };
+    expect(g3.reminder_hour).toBeNull();
+    // вне диапазона / не int / не число → 400
+    for (const badHour of [24, -1, 9.5, '18', true])
+      expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminder_hour: badHour } })).status, JSON.stringify(badHour)).toBe(400);
+  });
+
+  it('profile.timezone: произвольная IANA принимается (не только пресеты); мусор → 400', async () => {
+    const A = await user(900051);
+    for (const tz of ['Pacific/Auckland', 'America/Argentina/Buenos_Aires', 'Asia/Kamchatka', 'Europe/Kyiv']) {
+      expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { timezone: tz } })).status, tz).toBe(200);
+      expect((await scoped(env.DB, A.uid).getProfile())!.timezone).toBe(tz);
+    }
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { timezone: 'Moscow' } })).status).toBe(400);
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { timezone: 'UTC+3' } })).status).toBe(400);
+  });
+
   it('profile GET: ни дохода, ни обязательств → baseline_source none', async () => {
     const { uid, token } = await user(900041);
     await scoped(env.DB, uid).patchProfile({ income_minor: 0, living_cap_minor: 0 });

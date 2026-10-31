@@ -523,11 +523,11 @@ export function renderPf(
         step: 'pf:reminders',
         text:
           '🔔 <b>Напоминания</b>\n' +
-          `Еженедельный итог (вс 20:00): ${p.reminders_weekly ? '✅ вкл' : '⏸ выкл'}\n` +
-          `Платежи и сроки (за 2 дня, 10:00): ${p.reminders_payments ? '✅ вкл' : '⏸ выкл'}\n` +
+          `Еженедельный итог (вс ${String(p.reminder_hour ?? 20).padStart(2, '0')}:00): ${p.reminders_weekly ? '✅ вкл' : '⏸ выкл'}\n` +
+          `Платежи и сроки (за 2 дня, ${String(p.reminder_hour ?? 10).padStart(2, '0')}:00): ${p.reminders_payments ? '✅ вкл' : '⏸ выкл'}\n` +
           `💱 Алерты по курсам: ${p.fx_alerts_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
-          `📷 Скриншоты банка: ${p.vision_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
-          '<i>Распознавание скриншотов банка — фото уходит в Google AI.</i>',
+          `📷 Распознавание скриншотов: ${p.vision_enabled ? '✅ вкл' : '⏸ выкл'}\n` +
+          '<i>Бот читает фото банка и предлагает записать траты — фото уходит в Google AI.</i>',
         markup: kb(
           [
             [btn(p.reminders_weekly ? '⏸ Выкл недельные' : '✅ Вкл недельные', 'pf:rem:weekly')],

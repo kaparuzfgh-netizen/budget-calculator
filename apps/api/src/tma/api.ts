@@ -188,6 +188,8 @@ const profilePatchSchema = z.object({
   reminders_payments: z.boolean().optional(),
   fx_alerts_enabled: z.boolean().optional(),
   vision_enabled: z.boolean().optional(),
+  /** Свой час начала окна напоминаний 0–23; null — легаси (платежи 10:00, итог вс 20:00). */
+  reminder_hour: z.number().int().min(0).max(23).nullable().optional(),
 });
 
 export function registerTmaApi(
@@ -655,6 +657,7 @@ export function registerTmaApi(
       timezone: p.timezone,
       reminders_weekly: p.reminders_weekly,
       reminders_payments: p.reminders_payments,
+      reminder_hour: p.reminder_hour,
       fx_alerts_enabled: p.fx_alerts_enabled,
       vision_enabled: p.vision_enabled,
     });
@@ -681,6 +684,7 @@ export function registerTmaApi(
     if (b.timezone !== undefined) patch.timezone = b.timezone;
     if (b.reminders_weekly !== undefined) patch.reminders_weekly = b.reminders_weekly ? 1 : 0;
     if (b.reminders_payments !== undefined) patch.reminders_payments = b.reminders_payments ? 1 : 0;
+    if (b.reminder_hour !== undefined) patch.reminder_hour = b.reminder_hour;
     if (b.fx_alerts_enabled !== undefined) patch.fx_alerts_enabled = b.fx_alerts_enabled ? 1 : 0;
     if (b.vision_enabled !== undefined) patch.vision_enabled = b.vision_enabled ? 1 : 0;
     if (!Object.keys(patch).length) return c.json(bad('нет полей для изменения').body, 400);

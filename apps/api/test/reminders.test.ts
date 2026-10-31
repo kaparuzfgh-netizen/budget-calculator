@@ -569,6 +569,64 @@ describe('runReminders — каденсы платежей (миграция 001
   });
 });
 
+describe('runReminders — reminder_hour (миграция 0018)', () => {
+  it('платежное окно сдвигается на свой час; NULL — легаси 10:00; час 23 — кламп к полуночи', async () => {
+    // свой час 18: в легаси-окно молча, в свой час — напоминание за 2 дня до 31-го
+    const uid = await user(700120, 'UTC', {
+      commits: [{ name: 'Аренда', minor: 100, ccy: 'USD', due: 31 }],
+    });
+    await scoped(env.DB, uid).patchProfile({ reminder_hour: 18 });
+    await run(new Date(Date.UTC(2026, 9, 29, 10, 0)));
+    await run(new Date(Date.UTC(2026, 9, 29, 17, 0)));
+    expect(sent).toHaveLength(0);
+    await run(new Date(Date.UTC(2026, 9, 29, 18, 0)));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain('Аренда');
+    // NULL (колонки нет в профиле) — легаси: due 1 нояб → напоминание 30 окт в 10:00
+    const uid2 = await user(700121, 'UTC', {
+      commits: [{ name: 'Связь', minor: 100, ccy: 'USD', due: 1 }],
+    });
+    // заведён после октябрьского срока 01.10 — автопроводки в тесте не ждём
+    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-05 00:00:00' WHERE user_id = ?").bind(uid2).run();
+    await run(new Date(Date.UTC(2026, 9, 30, 9, 0)));
+    expect(sent).toHaveLength(1);
+    await run(new Date(Date.UTC(2026, 9, 30, 10, 0)));
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.text).toContain('Связь');
+    // час 23 → окно [23, 24): шлёт только последний тик суток
+    const uid3 = await user(700122, 'UTC', {
+      commits: [{ name: 'Ночь', minor: 100, ccy: 'USD', due: 1 }],
+    });
+    await env.DB.prepare("UPDATE commitments SET created_at = '2026-10-05 00:00:00' WHERE user_id = ?").bind(uid3).run();
+    await scoped(env.DB, uid3).patchProfile({ reminder_hour: 23 });
+    await run(new Date(Date.UTC(2026, 9, 30, 22, 0)));
+    expect(sent).toHaveLength(2);
+    await run(new Date(Date.UTC(2026, 9, 30, 23, 0)));
+    expect(sent).toHaveLength(3);
+    expect(sent[2]!.text).toContain('Ночь');
+  });
+
+  it('итог недели — в свой час; NULL — вс 20:00 (легаси)', async () => {
+    const uid = await user(700130, 'UTC', { pay: 0 });
+    await scoped(env.DB, uid).patchProfile({ reminder_hour: 8 });
+    await run(new Date(Date.UTC(2026, 9, 25, 7, 0))); // вс 07:00 — до своего часа
+    expect(sent).toHaveLength(0);
+    await run(new Date(Date.UTC(2026, 9, 25, 8, 0))); // вс 08:00 — свой час
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain('Итоги недели');
+    // NULL-юзер в тот же день: 08:00 молча (дедуп своего юзера), вс 20:00 шлёт
+    await user(700131, 'UTC', { pay: 0 });
+    await run(new Date(Date.UTC(2026, 9, 25, 8, 0)));
+    expect(sent).toHaveLength(1);
+    await run(new Date(Date.UTC(2026, 9, 25, 20, 0)));
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.text).toContain('Итоги недели');
+    // свой час не сдвинул «день»: понедельник 08:00 — уже не воскресенье
+    await run(new Date(Date.UTC(2026, 9, 26, 8, 0)));
+    expect(sent).toHaveLength(2);
+  });
+});
+
 describe('P2-5: хозчистка на каждом тике крона', () => {
   it('старые processed_updates (>7д) и reminder_log (>400д) чистятся; свежие и kb_removed живут', async () => {
     const uid = await user(700100, 'UTC', { weekly: 0, pay: 0 });

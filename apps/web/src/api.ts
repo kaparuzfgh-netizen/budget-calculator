@@ -133,6 +133,8 @@ export interface Profile {
   timezone?: string;
   reminders_weekly?: number;
   reminders_payments?: number;
+  /** Свой час начала окна напоминаний 0–23; null/отсутствует — легаси 10:00/вс 20:00. */
+  reminder_hour?: number | null;
   fx_alerts_enabled?: number;
   vision_enabled?: number;
 }

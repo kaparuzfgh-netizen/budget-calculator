@@ -34,6 +34,8 @@ export interface ProfileRow {
   onboarded_at: string | null;
   reminders_weekly: number;
   reminders_payments: number;
+  /** Свой час начала окна напоминаний 0–23 (миграция 0018); NULL — легаси 10:00/вс 20:00. */
+  reminder_hour: number | null;
   /** Согласие на отправку скриншотов во внешний vision-провайдер (миграция 0012). */
   vision_enabled: number;
   /** Валютные алерты (миграция 0013): окно ≥85 / ≤15 перцентиля, 1/нед на пару. */
@@ -224,7 +226,7 @@ export function scoped(db: Env['DB'], userId: number) {
     async upsertProfile(
       p: Omit<
         ProfileRow,
-        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency'
+        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency' | 'reminder_hour'
       > & {
         reminders_weekly?: number;
         reminders_payments?: number;
@@ -712,6 +714,7 @@ export function scoped(db: Env['DB'], userId: number) {
       timezone?: string;
       reminders_weekly?: number;
       reminders_payments?: number;
+      reminder_hour?: number | null;
       vision_enabled?: number;
       fx_alerts_enabled?: number;
     }) {
@@ -727,6 +730,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'timezone',
         'reminders_weekly',
         'reminders_payments',
+        'reminder_hour',
         'vision_enabled',
         'fx_alerts_enabled',
       ] as const;

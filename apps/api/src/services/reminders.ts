@@ -20,6 +20,8 @@
  *      поэтому при не-403 ошибке отправки claim'ы и события остаются
  *      (дублировать данные нельзя), а день считается failed.
  *   d) loan: 10:00–21:59 local → займы со сроком «сегодня» и «через 3 дня»
+ * Час начала окон (a) и (b/d/e — общее окно дня) настраивается профилем:
+ * reminder_hour (миграция 0018); NULL — легаси-константы WEEKLY_HOUR/PAY_HOUR.
  * Идемпотентность: reminder_log claim (INSERT OR IGNORE) — шлём только если
  * changes=1; 403 (бот заблокирован) → отключаем флаги; прочие ошибки
  * отправки (b/d) → снимаем claim — следующий часовой прогон в окне повторит.
@@ -96,6 +98,7 @@ export function minus2days(y: number, m: number, d: number): { y: number; m: num
 const WEEKLY_HOUR = 20; // окно еженедельного итога: вс 20:00–23:59
 const PAY_HOUR = 10; // окно платежей: 10:00–21:59
 const PAY_HOUR_END = 22;
+const PAY_WINDOW = PAY_HOUR_END - PAY_HOUR; // длина окна ретрая (12ч) — сохраняется и при своём часе
 const HOME_ROW_MK = { inline_keyboard: [[{ text: '🏠 Меню', callback_data: 'nv:home' }]] };
 const WEEKLY_MK: { inline_keyboard: InlineButton[][] } = {
   inline_keyboard: [
@@ -170,9 +173,15 @@ export async function runReminders(
       if (telegramId === null) continue;
       const lp = localParts(p.timezone, now);
       const tz = p.timezone;
+      // свой час начала окон (0018): NULL → легаси-константы. Конец окна
+      // платежей сдвигается вместе с началом (та же 12ч длина, кламп к
+      // полуночи — reminder_hour=23 даёт окно 23:00–23:59).
+      const weeklyHour = p.reminder_hour ?? WEEKLY_HOUR;
+      const payStart = p.reminder_hour ?? PAY_HOUR;
+      const payEnd = Math.min(payStart + PAY_WINDOW, 24);
 
       // ── еженедельный опрос: воскресенье 20:00 локально ──
-      if (p.reminders_weekly === 1 && lp.dow === 0 && lp.hour >= WEEKLY_HOUR) {
+      if (p.reminders_weekly === 1 && lp.dow === 0 && lp.hour >= weeklyHour) {
         const claim = await repo.claimReminder('weekly', lp.iso);
         if (claim.meta.changes === 1) {
           try {
@@ -191,7 +200,7 @@ export async function runReminders(
       }
 
       // ── платежи и сроки: окно 10:00–21:59 локально ──
-      if (p.reminders_payments === 1 && lp.hour >= PAY_HOUR && lp.hour < PAY_HOUR_END) {
+      if (p.reminders_payments === 1 && lp.hour >= payStart && lp.hour < payEnd) {
         /** claim → send → 403 гасит флаги / прочее → release+ретрай (общий цикл трёх уведомлений). */
         const sendClaimed = async (kind: string, text: string, mk: { inline_keyboard: InlineButton[][] }) => {
           const claim = await repo.claimReminder(kind, lp.iso);
@@ -358,7 +367,7 @@ export async function runReminders(
       // (e) fx-алерты: то же окно 10:00–21:59, что и у платежей. Анализ считается
       // один раз на пользователя (история на пару); кулдаун — ISO-неделя на
       // пару+тип внутри checkFxAlerts (claim/release как у sendClaimed).
-      if (p.fx_alerts_enabled === 1 && lp.hour >= PAY_HOUR && lp.hour < PAY_HOUR_END) {
+      if (p.fx_alerts_enabled === 1 && lp.hour >= payStart && lp.hour < payEnd) {
         try {
           const fxSent = await runFxAlerts(repo, p, provider, async (text, mk) => {
             await tgU.sendMessage(telegramId, text, mk ? { replyMarkup: mk } : {});
