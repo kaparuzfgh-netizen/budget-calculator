@@ -4,11 +4,41 @@
  * повседневные с прогресс-барами, доход и сетка разделов.
  */
 import { useState } from 'preact/hooks';
+import {
+  ArrowLeftRight,
+  Banknote,
+  CalendarDays,
+  ChartColumn,
+  ChartPie,
+  CircleCheck,
+  Handshake,
+  Landmark,
+  Plus,
+  Receipt,
+  Tags,
+  User,
+  Wallet,
+} from 'lucide-preact';
 import { ApiError } from '../api';
 import type { Overview, Upcoming, UpcomingItem, WeekStatus } from '../api';
 import type { ScreenProps } from '../app';
 import { fmtDay, fmtMinor, fmtPct } from '../fmt';
-import { ErrorView, errorView, Info, Loading, useData } from '../ui';
+import {
+  cardCls,
+  confirmNeutralCls,
+  ErrorView,
+  errorView,
+  headCls,
+  Info,
+  listCardCls,
+  Loading,
+  mutedCls,
+  rowCls,
+  smBtnCls,
+  smGhostBtnCls,
+  smPrimaryBtnCls,
+  useData,
+} from '../ui';
 
 const INCOME_SOURCE: Record<Overview['income_month_source'], string> = {
   actual: 'факт по записям',
@@ -24,8 +54,8 @@ const MONTHS = [
 function Bar({ pct }: { pct: number }) {
   const w = Math.max(0, Math.min(100, Math.round(pct)));
   return (
-    <div class="bar">
-      <i class={pct > 100 ? 'over' : ''} style={{ width: `${w}%` }} />
+    <div class="mb-2 mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
+      <i class={`block h-full rounded-full ${pct > 100 ? 'bg-red-400' : 'bg-sky-500'}`} style={{ width: `${w}%` }} />
     </div>
   );
 }
@@ -55,36 +85,45 @@ function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: Upcoming
     }
   };
   return (
-    <li class="upay">
-      <div class="row">
-        <span>
-          {item.kind === 'commitment' ? '🧾' : '🏦'} {item.name}
-          {item.overdue ? <span class="overdue"> · просрочено</span> : ''}
+    <li class="px-4 py-3">
+      <div class={rowCls}>
+        <span class="flex items-center gap-1.5 text-[15px] text-zinc-100">
+          {item.kind === 'commitment' ? (
+            <Receipt size={15} strokeWidth={1.5} class="text-zinc-500" />
+          ) : (
+            <Landmark size={15} strokeWidth={1.5} class="text-zinc-500" />
+          )}
+          {item.name}
+          {item.overdue ? <span class="text-[13px] text-red-400"> · просрочено</span> : ''}
         </span>
-        <span class="muted">до {fmtDay(item.due_on)}</span>
+        <span class="text-[13px] text-zinc-500">до {fmtDay(item.due_on)}</span>
       </div>
-      <div class="row">
-        <span class={item.paid ? 'muted2' : ''}>{fmtMinor(item.amount_minor, item.currency)}</span>
+      <div class={`${rowCls} mt-1`}>
+        <span class={item.paid ? 'text-zinc-500 line-through' : 'text-zinc-100'}>
+          {fmtMinor(item.amount_minor, item.currency)}
+        </span>
         {item.paid ? (
-          <span class="muted">✅ оплачено</span>
+          <span class="flex items-center gap-1 text-xs font-medium text-emerald-400">
+            <CircleCheck size={14} strokeWidth={1.5} /> оплачено
+          </span>
         ) : (
-          <button type="button" class="btn sm" disabled={busy} onClick={() => setConfirm(true)}>
+          <button type="button" class={smBtnCls} disabled={busy} onClick={() => setConfirm(true)}>
             Оплатить
           </button>
         )}
       </div>
       {confirm && !item.paid && (
-        <div class="confirm">
-          <p>Оплатить {fmtMinor(item.amount_minor, item.currency)}?</p>
-          <div class="inline">
-            <button type="button" class="btn" disabled={busy} onClick={() => void pay()}>
+        <div class={confirmNeutralCls}>
+          <p class="text-sm">Оплатить {fmtMinor(item.amount_minor, item.currency)}?</p>
+          <div class="mt-2 flex gap-2">
+            <button type="button" class={smPrimaryBtnCls} disabled={busy} onClick={() => void pay()}>
               Да
             </button>
-            <button type="button" class="btn ghost" disabled={busy} onClick={() => setConfirm(false)}>
+            <button type="button" class={smGhostBtnCls} disabled={busy} onClick={() => setConfirm(false)}>
               Отмена
             </button>
           </div>
-          {err && <p class="err">{err}</p>}
+          {err && <p class="mt-2 text-sm text-red-400">{err}</p>}
         </div>
       )}
     </li>
@@ -122,34 +161,45 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
+  const quickCls =
+    'flex flex-col items-center gap-1.5 rounded-2xl border border-white/10 bg-zinc-900/80 py-3.5 text-[13px] text-zinc-100 shadow-lg shadow-black/30 transition hover:bg-zinc-800/80';
+  const tileCls =
+    'flex items-center gap-2.5 rounded-2xl border border-white/10 bg-zinc-900/80 px-4 py-3.5 text-[15px] text-zinc-100 shadow-lg shadow-black/30 transition hover:bg-zinc-800/80';
+  const iconCls = 'text-sky-400';
+
   return (
     <>
-      <div class="hrow">
-        <h1>Обзор{name ? ` · ${name}` : ''}</h1>
-        <button type="button" class="avatar" onClick={() => nav.push({ id: 'profile' })} title="Профиль">
-          {name?.trim().charAt(0).toUpperCase() ?? '👤'}
+      <div class="mb-5 flex items-center justify-between">
+        <h1 class="text-xl font-semibold tracking-tight">Обзор{name ? ` · ${name}` : ''}</h1>
+        <button
+          type="button"
+          class="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-zinc-800 text-base font-semibold text-zinc-100 transition hover:bg-zinc-700"
+          onClick={() => nav.push({ id: 'profile' })}
+          title="Профиль"
+        >
+          {name?.trim().charAt(0).toUpperCase() ?? <User size={20} strokeWidth={1.5} />}
         </button>
       </div>
 
-      <div class="quick">
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'spent-add' })}>
-          ➕ Трата
+      <div class="mb-6 grid grid-cols-3 gap-2.5">
+        <button type="button" class={quickCls} onClick={() => nav.push({ id: 'spent-add' })}>
+          <Plus size={18} strokeWidth={1.5} class={iconCls} /> Трата
         </button>
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'income' })}>
-          💵 Доход
+        <button type="button" class={quickCls} onClick={() => nav.push({ id: 'income' })}>
+          <Banknote size={18} strokeWidth={1.5} class={iconCls} /> Доход
         </button>
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'report' })}>
-          📈 Отчёты
+        <button type="button" class={quickCls} onClick={() => nav.push({ id: 'report' })}>
+          <ChartColumn size={18} strokeWidth={1.5} class={iconCls} /> Отчёты
         </button>
       </div>
 
       {u.items.length > 0 && (
         <>
-          <h2>
-            К оплате в {monthWord}
+          <h2 class={headCls}>
+            <CalendarDays size={16} strokeWidth={1.5} /> К оплате в {monthWord}
             <Info title="К оплате">
               <p>
-                Регулярные платежи (🧾) и кредиты (🏦) этого месяца. «Оплатить»
+                Регулярные платежи и кредиты этого месяца. «Оплатить»
                 записывает оплату в журнал — сумму можно поправить.
               </p>
               <p>
@@ -158,40 +208,44 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
               </p>
             </Info>
           </h2>
-          <div class="card">
-            <ul class="plain">
+          <div class={`${listCardCls} mt-2`}>
+            <ul class="divide-y divide-white/5">
               {u.items.map((x) => (
                 <PayRow key={`${x.kind}:${x.id}`} api={api} item={x} onPaid={() => { nav.flash(`Оплачено: ${x.name}`); up.reload(); ov.reload(); }} />
               ))}
             </ul>
-            <p class="muted">Оплачено {paidN} из {u.items.length}</p>
+            <p class="border-t border-white/5 px-4 py-2.5 text-[13px] text-zinc-500">
+              Оплачено {paidN} из {u.items.length}
+            </p>
           </div>
         </>
       )}
 
-      <h2>Бюджет</h2>
-      <div class="card">
-        <p class="muted">повседневных израсходовано</p>
-        <div class="row">
+      <h2 class={`${headCls} mt-6`}>
+        <Wallet size={16} strokeWidth={1.5} /> Бюджет
+      </h2>
+      <div class={`${cardCls} mt-2`}>
+        <p class={mutedCls}>повседневных израсходовано</p>
+        <div class={`${rowCls} mt-2`}>
           <span>Неделя</span>
           <span>
             <b>{fmtMinor(o.spent_week_minor, c)}</b> из {fmtMinor(o.weekly_budget_minor, c)}
           </span>
         </div>
         <Bar pct={weekPct} />
-        <div class="row">
-          <span class="muted">Остаток недели</span>
-          <span class={o.week_remaining_minor < 0 ? 'err' : ''}>{fmtMinor(o.week_remaining_minor, c)}</span>
+        <div class={rowCls}>
+          <span class={mutedCls}>Остаток недели</span>
+          <span class={o.week_remaining_minor < 0 ? 'text-red-400' : ''}>{fmtMinor(o.week_remaining_minor, c)}</span>
         </div>
-        <div class="row">
+        <div class={`${rowCls} mt-2`}>
           <span>Месяц</span>
           <span>
             <b>{fmtMinor(o.spent_month_minor, c)}</b> из {fmtMinor(o.month_cap_minor, c)}
           </span>
         </div>
         <Bar pct={monthPct} />
-        <div class="row">
-          <span class="muted">
+        <div class={rowCls}>
+          <span class={mutedCls}>
             Burn rate
             <Info title="Burn rate">
               <p>
@@ -200,15 +254,15 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
               </p>
             </Info>
           </span>
-          <span class={w.burn_rate > 1 ? 'warn' : ''}>
+          <span class={w.burn_rate > 1 ? 'text-amber-400' : ''}>
             {fmtPct(w.burn_rate)}
             {w.burn_rate > 1 ? ' — тратим быстрее плана' : ''}
           </span>
         </div>
       </div>
 
-      <h2>
-        Доход за месяц
+      <h2 class={`${headCls} mt-6`}>
+        <Banknote size={16} strokeWidth={1.5} /> Доход за месяц
         <Info title="Откуда берётся доход">
           <p>
             Сначала — сумма ваших записей дохода за месяц. Если записей нет —
@@ -217,34 +271,38 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
           </p>
         </Info>
       </h2>
-      <div class="card">
-        <div class="big">{fmtMinor(o.income_month_minor, o.income_month_currency)}</div>
-        <div class="muted">
+      <div class={`${cardCls} mt-2`}>
+        <div class="text-2xl font-semibold">{fmtMinor(o.income_month_minor, o.income_month_currency)}</div>
+        <div class={`${mutedCls} mt-0.5`}>
           {INCOME_SOURCE[o.income_month_source]}
           {o.income_entries_count ? ` · записей: ${o.income_entries_count}` : ''}
         </div>
       </div>
 
-      {o.fx_note ? <p class="warn">{o.fx_note}</p> : <p class="muted">Курсы на {o.fx_as_of || '—'}</p>}
+      {o.fx_note ? (
+        <p class="mt-3 text-[13px] text-amber-400">{o.fx_note}</p>
+      ) : (
+        <p class="mt-3 text-[13px] text-zinc-500">Курсы на {o.fx_as_of || '—'}</p>
+      )}
 
-      <div class="menu">
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'plan' })}>
-          📊 План
+      <div class="mt-5 grid grid-cols-2 gap-2.5">
+        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'plan' })}>
+          <ChartPie size={18} strokeWidth={1.5} class={iconCls} /> План
         </button>
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'week' })}>
-          📅 Неделя
+        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'week' })}>
+          <CalendarDays size={18} strokeWidth={1.5} class={iconCls} /> Неделя
         </button>
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'debts' })}>
-          🏦 Кредиты
+        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'debts' })}>
+          <Landmark size={18} strokeWidth={1.5} class={iconCls} /> Кредиты
         </button>
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'loans' })}>
-          🤝 Долги
+        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'loans' })}>
+          <Handshake size={18} strokeWidth={1.5} class={iconCls} /> Долги
         </button>
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'fx' })}>
-          💱 Курсы
+        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'fx' })}>
+          <ArrowLeftRight size={18} strokeWidth={1.5} class={iconCls} /> Курсы
         </button>
-        <button type="button" class="btn" onClick={() => nav.push({ id: 'categories' })}>
-          🏷 Категории
+        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'categories' })}>
+          <Tags size={18} strokeWidth={1.5} class={iconCls} /> Категории
         </button>
       </div>
     </>

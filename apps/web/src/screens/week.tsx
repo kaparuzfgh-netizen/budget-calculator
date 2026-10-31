@@ -11,11 +11,46 @@
  * формы (useMemo []): повторный submit по сети-ретраю не дублирует запись.
  */
 import { useMemo, useState } from 'preact/hooks';
+import {
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
+  Plus,
+  Sparkles,
+  Trash2,
+} from 'lucide-preact';
 import { ApiError } from '../api';
 import type { Api, CategoriesList, ExpensesList, Profile, WeekStatus } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, fmtPct, noteError, parseAmount, todayIso } from '../fmt';
-import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
+import {
+  cardCls,
+  confirmCls,
+  dangerBtnCls,
+  ErrorView,
+  errorView,
+  Field,
+  FormError,
+  h1Cls,
+  headCls,
+  inputCls,
+  liCls,
+  listCardCls,
+  Loading,
+  mutedCls,
+  primaryBtnCls,
+  rowCls,
+  smBtnCls,
+  smDangerFillBtnCls,
+  smGhostBtnCls,
+  useData,
+} from '../ui';
+
+const chipCls =
+  'inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-zinc-900 px-3.5 py-2 text-[13px] text-zinc-300 transition hover:border-white/20';
+const chipOnCls =
+  'inline-flex items-center gap-1.5 rounded-full border border-sky-500/60 bg-sky-500/15 px-3.5 py-2 text-[13px] text-sky-300';
 
 // ── Неделя ──
 
@@ -45,56 +80,61 @@ export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
 
   return (
     <>
-      <h1>📅 Неделя</h1>
-      <div class="card">
-        <div class="row">
+      <h1 class={h1Cls}>
+        <CalendarDays size={20} strokeWidth={1.5} class="text-sky-400" /> Неделя
+      </h1>
+      <div class={cardCls}>
+        <div class={rowCls}>
           <span>Потрачено</span>
           <b>
             {fmtMinor(w.week_spent_minor, c)} из {fmtMinor(w.week_budget_minor, c)}
           </b>
         </div>
-        <div class="row">
-          <span class="muted">Остаток недели</span>
-          <span class={w.week_over ? 'err' : ''}>
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>Остаток недели</span>
+          <span class={w.week_over ? 'text-red-400' : ''}>
             {fmtMinor(w.week_remaining_minor, c)}
             {w.week_over ? ' — перебор' : ''}
           </span>
         </div>
-        <div class="row">
-          <span class="muted">Burn rate</span>
-          <span class={w.burn_rate > 1 ? 'warn' : ''}>{fmtPct(w.burn_rate)}</span>
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>Burn rate</span>
+          <span class={w.burn_rate > 1 ? 'text-amber-400' : ''}>{fmtPct(w.burn_rate)}</span>
         </div>
-        <div class="row">
-          <span class="muted">Можно в день</span>
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>Можно в день</span>
           <span>
             {fmtMinor(w.daily_allowance_minor, c)} · {w.days_left} дн. до конца месяца
           </span>
         </div>
       </div>
 
-      <h2>Месяц</h2>
-      <div class="card">
-        <div class="row">
+      <h2 class={`${headCls} mt-6`}>Месяц</h2>
+      <div class={`${cardCls} mt-2`}>
+        <div class={rowCls}>
           <span>Потрачено</span>
           <b>
             {fmtMinor(w.month_spent_minor, c)} из {fmtMinor(w.month_cap_minor, c)}
           </b>
         </div>
       </div>
-      <p class="muted">Курсы на {w.fx_as_of || '—'}</p>
+      <p class={`${mutedCls} mt-2`}>Курсы на {w.fx_as_of || '—'}</p>
 
-      <div class="row spread">
-        <h2>Траты недели</h2>
-        <button type="button" class="btn sm" onClick={() => nav.push({ id: 'spent-add' })}>
-          ➕ Трата
+      <div class="mt-6 flex items-center justify-between">
+        <h2 class={headCls}>Траты недели</h2>
+        <button type="button" class={smBtnCls} onClick={() => nav.push({ id: 'spent-add' })}>
+          <Plus size={14} strokeWidth={1.5} /> Трата
         </button>
       </div>
-      <div class="card">
+      <div class={`${listCardCls} mt-2`}>
         {ex.data.expenses.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {ex.data.expenses.map((e) => (
-              <li class="clickable" onClick={() => nav.push({ id: 'expense', expenseId: e.id })}>
-                <div class="row">
+              <li
+                class={`${liCls} cursor-pointer transition hover:bg-white/5`}
+                onClick={() => nav.push({ id: 'expense', expenseId: e.id })}
+              >
+                <div class={rowCls}>
                   <span>
                     {fmtDay(e.spent_on)}
                     {e.category_id ? ` ${catEmoji.get(e.category_id) ?? ''}` : ''}
@@ -106,7 +146,7 @@ export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Трат за неделю нет.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Трат за неделю нет.</p>
         )}
       </div>
     </>
@@ -209,12 +249,13 @@ function ExpenseCard({
 
   return (
     <>
-      <h1>Трата · {fmtDay(item.spent_on)}</h1>
-      <div class="card">
+      <h1 class={h1Cls}>Трата · {fmtDay(item.spent_on)}</h1>
+      <div class={cardCls}>
         <form onSubmit={save}>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Сумма">
               <input
+                class={inputCls}
                 inputMode="decimal"
                 value={amount}
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)}
@@ -222,6 +263,7 @@ function ExpenseCard({
             </Field>
             <Field label="Валюта">
               <input
+                class={inputCls}
                 maxLength={5}
                 value={ccy}
                 onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
@@ -230,6 +272,7 @@ function ExpenseCard({
           </div>
           <Field label="Дата">
             <input
+              class={inputCls}
               type="date"
               max={todayIso()}
               min="2000-01-01"
@@ -239,6 +282,7 @@ function ExpenseCard({
           </Field>
           <Field label="Заметка">
             <input
+              class={inputCls}
               maxLength={200}
               placeholder="необязательно"
               value={note}
@@ -249,24 +293,24 @@ function ExpenseCard({
             <CategoryChips api={api} value={catId} onChange={setCatId} allowNone />
           </Field>
           <FormError msg={err} />
-          <button type="submit" class="btn" disabled={busy}>
+          <button type="submit" class={primaryBtnCls} disabled={busy}>
             Сохранить
           </button>
         </form>
       </div>
 
       {confirmDel ? (
-        <div class="confirm">
-          <p>
+        <div class={`${confirmCls} mt-3`}>
+          <p class="text-sm">
             Удалить трату {fmtMinor(item.amount_minor, item.currency)}? Действие необратимо.
           </p>
-          <div class="inline">
-            <button type="button" class="btn danger" disabled={busy} onClick={() => void del()}>
+          <div class="mt-2 flex gap-2">
+            <button type="button" class={smDangerFillBtnCls} disabled={busy} onClick={() => void del()}>
               Да, удалить
             </button>
             <button
               type="button"
-              class="btn ghost"
+              class={smGhostBtnCls}
               disabled={busy}
               onClick={() => setConfirmDel(false)}
             >
@@ -277,11 +321,11 @@ function ExpenseCard({
       ) : (
         <button
           type="button"
-          class="btn danger"
+          class={`${dangerBtnCls} mt-3`}
           disabled={busy}
           onClick={() => setConfirmDel(true)}
         >
-          🗑 Удалить трату
+          <Trash2 size={16} strokeWidth={1.5} /> Удалить трату
         </button>
       )}
     </>
@@ -306,18 +350,26 @@ function CategoryChips({
   const q = useData(() => api.get<CategoriesList>('/api/tma/categories'), onFatal, []);
   if (q.loading || q.error || !q.data) return null;
   return (
-    <div class="chips">
+    <div class="flex flex-wrap gap-2">
       <button
         type="button"
-        class={`chip${value === null ? ' on' : ''}`}
+        class={value === null ? chipOnCls : chipCls}
         onClick={() => onChange(null)}
       >
-        {allowNone ? '❔ Без категории' : '✨ Авто'}
+        {allowNone ? (
+          <>
+            <CircleHelp size={14} strokeWidth={1.5} /> Без категории
+          </>
+        ) : (
+          <>
+            <Sparkles size={14} strokeWidth={1.5} /> Авто
+          </>
+        )}
       </button>
       {q.data.categories.map((x) => (
         <button
           type="button"
-          class={`chip${value === x.id ? ' on' : ''}`}
+          class={value === x.id ? chipOnCls : chipCls}
           onClick={() => onChange(x.id)}
         >
           {x.emoji} {x.name}
@@ -381,12 +433,15 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
 
   return (
     <>
-      <h1>➕ Трата</h1>
-      <div class="card">
+      <h1 class={h1Cls}>
+        <Plus size={20} strokeWidth={1.5} class="text-sky-400" /> Трата
+      </h1>
+      <div class={cardCls}>
         <form onSubmit={submit}>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Сумма">
               <input
+                class={inputCls}
                 inputMode="decimal"
                 placeholder="например, 320"
                 value={amount}
@@ -396,6 +451,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
             </Field>
             <Field label={`Валюта (по умолч. ${defCcy})`}>
               <input
+                class={inputCls}
                 maxLength={5}
                 placeholder={defCcy}
                 value={ccy}
@@ -405,6 +461,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
           </div>
           <Field label="Заметка">
             <input
+              class={inputCls}
               maxLength={200}
               placeholder="необязательно"
               value={note}
@@ -414,12 +471,25 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
           <Field label="Категория">
             <CategoryChips api={api} onFatal={onFatal} value={catId} onChange={setCatId} />
           </Field>
-          <button type="button" class="more" onClick={() => setMore(!more)}>
-            {more ? 'Ещё ▾' : 'Ещё ▸'}
+          <button
+            type="button"
+            class="mb-3 flex items-center gap-1 text-[13px] text-sky-400 transition hover:text-sky-300"
+            onClick={() => setMore(!more)}
+          >
+            {more ? (
+              <>
+                Ещё <ChevronDown size={14} strokeWidth={1.5} />
+              </>
+            ) : (
+              <>
+                Ещё <ChevronRight size={14} strokeWidth={1.5} />
+              </>
+            )}
           </button>
           {more && (
             <Field label="Дата">
               <input
+                class={inputCls}
                 type="date"
                 max={todayIso()}
                 min="2000-01-01"
@@ -429,7 +499,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
             </Field>
           )}
           <FormError msg={err} />
-          <button type="submit" class="btn" disabled={busy}>
+          <button type="submit" class={primaryBtnCls} disabled={busy}>
             {busy ? 'Записываю…' : 'Записать'}
           </button>
         </form>

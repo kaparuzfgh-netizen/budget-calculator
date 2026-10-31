@@ -1,26 +1,52 @@
 /**
- * fx.tsx — «💱 Курсы» в Mini App (шаг 8).
+ * fx.tsx — «Курсы» в Mini App (шаг 8).
  *
  * FxScreen: GET /api/tma/fx — карточки пар (сигнал/перцентиль/RSI/прогноз)
  *   + журнал обменов (раскрытие строки → правка сумм/даты/заметки, удаление).
  * Форма записи — POST /api/tma/exchanges (client_id против дублей, P2-3).
  */
 import { useState } from 'preact/hooks';
+import {
+  ArrowLeftRight,
+  NotebookText,
+  Pencil,
+  Plus,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
+} from 'lucide-preact';
 import { ApiError } from '../api';
 import type { Api, ExchangeItem, FxActionItem, FxScreenData } from '../api';
 import type { ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, parseAmount } from '../fmt';
-import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
+import {
+  cardCls,
+  ErrorView,
+  errorView,
+  evEditCls,
+  Field,
+  FormError,
+  headCls,
+  inputCls,
+  listCardCls,
+  Loading,
+  mutedCls,
+  primaryBtnCls,
+  rowCls,
+  smBtnCls,
+  smDangerBtnCls,
+  useData,
+} from '../ui';
 
 const apiErr = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 const todayIso = () => new Date().toISOString().slice(0, 10);
 /** Курс для списка/карточки — digits как в боте (>20 → 2 знака, иначе 4). */
 const fmtRate = (v: number): string => (v > 20 ? v.toFixed(2) : v.toFixed(4)).replace(/\.?0+$/, '');
 const SIGNAL_CLASS: Record<FxActionItem['signal'], string> = {
-  convert: 'ok',
+  convert: 'text-emerald-400',
   split: '',
-  wait: 'warn',
-  hold: 'err',
+  wait: 'text-amber-400',
+  hold: 'text-red-400',
 };
 
 export function FxScreen({ api, nav, onFatal }: ScreenProps) {
@@ -43,30 +69,34 @@ export function FxScreen({ api, nav, onFatal }: ScreenProps) {
 
   return (
     <>
-      <div class="row spread">
-        <h1>💱 Курсы</h1>
-        <button type="button" class="btn sm" onClick={() => setShowAdd(!showAdd)}>
-          ➕ Записать
+      <div class="mb-5 flex items-center justify-between">
+        <h1 class="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <ArrowLeftRight size={20} strokeWidth={1.5} class="text-sky-400" /> Курсы
+        </h1>
+        <button type="button" class={smBtnCls} onClick={() => setShowAdd(!showAdd)}>
+          <Plus size={14} strokeWidth={1.5} /> Записать
         </button>
       </div>
 
       {showAdd && <ExchangeAddForm api={api} done={done} />}
 
-      <h2>Анализ · {d.analysis.generated_at}</h2>
+      <h2 class={`${headCls} mt-6`}>Анализ · {d.analysis.generated_at}</h2>
       {d.analysis.ok ? (
         d.analysis.actions.map((a) => <PairCard key={a.key} a={a} />)
       ) : (
-        <div class="card">
-          <p class="muted">{d.analysis.note ?? 'Нет данных по валютным парам.'}</p>
+        <div class={`${cardCls} mt-2`}>
+          <p class={mutedCls}>{d.analysis.note ?? 'Нет данных по валютным парам.'}</p>
         </div>
       )}
-      {d.analysis.skipped.length > 0 && <p class="muted">Нет данных: {d.analysis.skipped.join(', ')}</p>}
-      <p class="muted">{d.analysis.disclaimer}</p>
+      {d.analysis.skipped.length > 0 && <p class={`${mutedCls} mt-2`}>Нет данных: {d.analysis.skipped.join(', ')}</p>}
+      <p class={`${mutedCls} mt-2`}>{d.analysis.disclaimer}</p>
 
-      <h2>📒 Журнал обменов</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>
+        <NotebookText size={16} strokeWidth={1.5} /> Журнал обменов
+      </h2>
+      <div class={`${listCardCls} mt-2`}>
         {d.exchanges.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {d.exchanges.map((x) => (
               <ExchangeRow
                 key={x.id}
@@ -79,7 +109,7 @@ export function FxScreen({ api, nav, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Пока пусто — запишите первый обмен.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Пока пусто — запишите первый обмен.</p>
         )}
       </div>
     </>
@@ -87,34 +117,38 @@ export function FxScreen({ api, nav, onFatal }: ScreenProps) {
 }
 
 function PairCard({ a }: { a: FxActionItem }) {
-  const arrow = a.change30d_pct >= 0 ? '▲' : '▼';
   return (
-    <div class="card">
-      <div class="row">
-        <span>
+    <div class={`${cardCls} mt-2`}>
+      <div class={rowCls}>
+        <span class="text-[15px] text-zinc-100">
           {a.emoji} {a.label}
         </span>
-        <span class="big">{fmtRate(a.current)}</span>
+        <span class="text-2xl font-semibold">{fmtRate(a.current)}</span>
       </div>
-      <div class="row muted">
-        <span>
-          {arrow} {a.change30d_pct >= 0 ? '+' : ''}
+      <div class={`${rowCls} mt-1`}>
+        <span class={`${mutedCls} flex items-center gap-1`}>
+          {a.change30d_pct >= 0 ? (
+            <TrendingUp size={13} strokeWidth={1.5} class="text-emerald-400" />
+          ) : (
+            <TrendingDown size={13} strokeWidth={1.5} class="text-red-400" />
+          )}
+          {a.change30d_pct >= 0 ? '+' : ''}
           {a.change30d_pct.toFixed(1)}% за 30д · {a.percentile}-й перцентиль
         </span>
-        <span>RSI {a.rsi14}</span>
+        <span class={mutedCls}>RSI {a.rsi14}</span>
       </div>
-      <div class="row">
-        <span class={SIGNAL_CLASS[a.signal]}>{a.signal_text}</span>
+      <div class={`${rowCls} mt-2`}>
+        <span class={`font-medium ${SIGNAL_CLASS[a.signal]}`}>{a.signal_text}</span>
       </div>
-      <div class="row muted">
-        <span>Прогноз 30д</span>
-        <span>
+      <div class={`${rowCls} mt-2`}>
+        <span class={mutedCls}>Прогноз 30д</span>
+        <span class={mutedCls}>
           {fmtRate(a.forecast30d.low)} – {fmtRate(a.forecast30d.high)}
         </span>
       </div>
-      <div class="row muted">
-        <span>{a.purpose}</span>
-        <span>
+      <div class={`${rowCls} mt-1`}>
+        <span class={mutedCls}>{a.purpose}</span>
+        <span class={mutedCls}>
           {fmtRate(a.min)} – {fmtRate(a.max)}
         </span>
       </div>
@@ -182,52 +216,52 @@ function ExchangeRow({
   };
 
   return (
-    <li>
-      <div class={`row clickable${open ? ' on' : ''}`} onClick={onToggle}>
+    <li class="px-4 py-3">
+      <div class={`${rowCls} cursor-pointer`} onClick={onToggle}>
         <span>
           {fmtDay(x.spent_on)} · {fmtMinor(x.amount_from_minor, x.from_ccy)} → {fmtMinor(x.amount_to_minor, x.to_ccy)}
         </span>
-        <span class="muted">
+        <span class={mutedCls}>
           {fmtRate(x.rate)}
           {diff ? ` (${diff})` : ''}
         </span>
       </div>
       {open && (
-        <div class="ev-edit">
-          {x.note && <p class="muted">Заметка: {x.note}</p>}
-          {x.market_rate !== null && <p class="muted">Рынок на дату записи: {fmtRate(x.market_rate)}</p>}
+        <div class={evEditCls}>
+          {x.note && <p class={`${mutedCls} mb-2`}>Заметка: {x.note}</p>}
+          {x.market_rate !== null && <p class={`${mutedCls} mb-2`}>Рынок на дату записи: {fmtRate(x.market_rate)}</p>}
           <form onSubmit={(e) => void save(e)}>
-            <div class="inline">
+            <div class="flex gap-3">
               <Field label={`Сумма (${x.from_ccy})`}>
-                <input inputMode="decimal" value={af} onInput={(e) => setAf((e.target as HTMLInputElement).value)} />
+                <input class={inputCls} inputMode="decimal" value={af} onInput={(e) => setAf((e.target as HTMLInputElement).value)} />
               </Field>
               <Field label={`Сумма (${x.to_ccy})`}>
-                <input inputMode="decimal" value={at} onInput={(e) => setAt((e.target as HTMLInputElement).value)} />
+                <input class={inputCls} inputMode="decimal" value={at} onInput={(e) => setAt((e.target as HTMLInputElement).value)} />
               </Field>
               <Field label="Дата">
-                <input type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
+                <input class={inputCls} type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
               </Field>
             </div>
             <Field label="Заметка">
-              <input maxLength={200} value={note} onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
+              <input class={inputCls} maxLength={200} value={note} onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
             </Field>
             <FormError msg={err} />
-            <div class="inline">
-              <button type="submit" class="btn sm" disabled={busy}>
-                ✏️ Сохранить
+            <div class="flex gap-2">
+              <button type="submit" class={`${smBtnCls} flex-1 justify-center`} disabled={busy}>
+                <Pencil size={13} strokeWidth={1.5} /> Сохранить
               </button>
               {confirmDel ? (
                 <>
-                  <button type="button" class="btn sm danger" disabled={busy} onClick={() => void del()}>
+                  <button type="button" class={`${smDangerBtnCls} flex-1 justify-center`} disabled={busy} onClick={() => void del()}>
                     Точно удалить?
                   </button>
-                  <button type="button" class="btn sm ghost" onClick={() => setConfirmDel(false)}>
+                  <button type="button" class={smBtnCls} onClick={() => setConfirmDel(false)}>
                     Нет
                   </button>
                 </>
               ) : (
-                <button type="button" class="btn sm danger" disabled={busy} onClick={() => setConfirmDel(true)}>
-                  🗑
+                <button type="button" class={smDangerBtnCls} disabled={busy} onClick={() => setConfirmDel(true)}>
+                  <Trash2 size={13} strokeWidth={1.5} />
                 </button>
               )}
             </div>
@@ -278,36 +312,36 @@ function ExchangeAddForm({ api, done }: { api: Api; done: (m: string) => void })
   };
 
   return (
-    <div class="card">
+    <div class={`${cardCls} mt-2`}>
       <form onSubmit={(e) => void submit(e)}>
-        <div class="inline">
+        <div class="flex gap-3">
           <Field label="Из чего">
-            <input maxLength={5} placeholder="EUR" value={from} autoFocus
+            <input class={inputCls} maxLength={5} placeholder="EUR" value={from} autoFocus
               onInput={(e) => setFrom((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="Во что">
-            <input maxLength={5} placeholder="RUB" value={to}
+            <input class={inputCls} maxLength={5} placeholder="RUB" value={to}
               onInput={(e) => setTo((e.target as HTMLInputElement).value)} />
           </Field>
         </div>
-        <div class="inline">
+        <div class="flex gap-3">
           <Field label="Отдал">
-            <input inputMode="decimal" placeholder="500" value={af}
+            <input class={inputCls} inputMode="decimal" placeholder="500" value={af}
               onInput={(e) => setAf((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="Получил">
-            <input inputMode="decimal" placeholder="48200" value={at}
+            <input class={inputCls} inputMode="decimal" placeholder="48200" value={at}
               onInput={(e) => setAt((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="Дата">
-            <input type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
+            <input class={inputCls} type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
           </Field>
         </div>
         <Field label="Заметка (необязательно)">
-          <input maxLength={200} value={note} onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
+          <input class={inputCls} maxLength={200} value={note} onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
         </Field>
         <FormError msg={err} />
-        <button type="submit" class="btn" disabled={busy}>
+        <button type="submit" class={primaryBtnCls} disabled={busy}>
           {busy ? 'Сохраняю…' : 'Записать обмен'}
         </button>
       </form>

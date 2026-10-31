@@ -13,6 +13,27 @@
  */
 import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
+import {
+  Banknote,
+  Bell,
+  Bot,
+  CalendarClock,
+  Camera,
+  CircleCheck,
+  Database,
+  Globe,
+  History,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Receipt,
+  Settings,
+  Trash2,
+  TrendingUp,
+  Upload,
+  Wallet,
+} from 'lucide-preact';
 import { ApiError } from '../api';
 import type { Api, CommitmentPayment, CommitmentPaymentsList, CommitmentsList, Profile } from '../api';
 import type { Nav, ScreenProps } from '../app';
@@ -27,7 +48,34 @@ import {
   timezoneError,
   todayIso,
 } from '../fmt';
-import { ErrorView, errorView, Field, FormError, Info, Loading, useData, useFatalOn } from '../ui';
+import {
+  cardCls,
+  confirmCls,
+  dangerBtnCls,
+  ErrorView,
+  errorView,
+  evEditCls,
+  Field,
+  FormError,
+  ghostBtnCls,
+  h1Cls,
+  headCls,
+  Info,
+  inputCls,
+  liCls,
+  listCardCls,
+  Loading,
+  mutedCls,
+  primaryBtnCls,
+  rowCls,
+  secondaryBtnCls,
+  smBtnCls,
+  smDangerBtnCls,
+  smDangerFillBtnCls,
+  smGhostBtnCls,
+  useData,
+  useFatalOn,
+} from '../ui';
 
 const TZ_PRESETS = ['Europe/Moscow', 'Asia/Bishkek', 'Europe/Berlin', 'UTC'] as const;
 
@@ -58,39 +106,39 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
 
   const payments = (
     <>
-      <div class="row spread">
-        <h2>
-          🧾 Регулярные платежи
+      <div class="mt-6 flex items-center justify-between">
+        <h2 class={headCls}>
+          <CalendarClock size={16} strokeWidth={1.5} /> Регулярные платежи
           <Info title="Регулярные платежи">
             <p>
               Аренда, связь, подписки, ЖКХ — то, что списывается каждый месяц.
             </p>
             <p>
               В день срока бот отметит оплату сам и напомнит за 2 дня. Кредиты —
-              отдельный раздел 🏦, здесь их добавлять не нужно.
+              отдельный раздел, здесь их добавлять не нужно.
             </p>
           </Info>
         </h2>
         <button
           type="button"
-          class="btn sm"
+          class={smBtnCls}
           onClick={() => nav.push({ id: 'commitment-add' })}
         >
-          ➕ Добавить
+          <Plus size={14} strokeWidth={1.5} /> Добавить
         </button>
       </div>
-      <div class="card">
+      <div class={`${listCardCls} mt-2`}>
         {com.data.commitments.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {com.data.commitments.map((x) => (
               <li
-                class={`clickable${x.active ? '' : ' off'}`}
+                class={`${liCls} cursor-pointer transition hover:bg-white/5${x.active ? '' : ' opacity-50'}`}
                 onClick={() => nav.push({ id: 'commitment', commitmentId: x.id })}
               >
-                <div class="row">
-                  <span>
+                <div class={rowCls}>
+                  <span class="flex items-center gap-1.5">
                     {x.name}
-                    {x.active ? '' : ' · ⏸'}
+                    {x.active ? '' : <Pause size={13} strokeWidth={1.5} class="text-zinc-500" />}
                   </span>
                   <span>
                     {fmtMinor(x.amount_minor, x.currency)}
@@ -101,7 +149,7 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Регулярных платежей нет — добавьте первый.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Регулярных платежей нет — добавьте первый.</p>
         )}
       </div>
     </>
@@ -109,7 +157,9 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
 
   return (
     <>
-      <h1>⚙️ Профиль</h1>
+      <h1 class={h1Cls}>
+        <Settings size={20} strokeWidth={1.5} class="text-sky-400" /> Профиль
+      </h1>
       <ProfileForms
         key={profileKey(p)}
         api={api}
@@ -138,12 +188,14 @@ function profileKey(p: Profile): string {
 
 /** Переключатель-«тогл» в стиле iOS: PATCH по change, без submit-кнопки. */
 function Switch({
+  icon,
   label,
   hint,
   checked,
   busy,
   onToggle,
 }: {
+  icon: ComponentChildren;
   label: string;
   hint?: string | undefined;
   checked: boolean;
@@ -151,29 +203,39 @@ function Switch({
   onToggle: () => void;
 }) {
   return (
-    <div class="row spread switch-row">
-      <span>
-        {label}
-        {hint ? <span class="muted switch-hint">{hint}</span> : null}
+    <div class="flex items-center justify-between gap-3 px-4 py-3">
+      <span class="flex items-center gap-2.5 text-[15px] text-zinc-100">
+        {icon}
+        <span>
+          {label}
+          {hint ? <span class="mt-0.5 block text-xs text-zinc-400">{hint}</span> : null}
+        </span>
       </span>
-      <label class="switch">
+      <span class="relative inline-flex h-[27px] w-[46px] flex-none cursor-pointer items-center">
         <input
           type="checkbox"
+          class="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-default"
           checked={checked}
           disabled={busy}
           onChange={() => onToggle()}
         />
-        <i />
-      </label>
+        <span class="absolute inset-0 rounded-full bg-white/15 transition peer-checked:bg-sky-500 peer-disabled:opacity-50" />
+        <span class="absolute left-[3px] top-[3px] h-[21px] w-[21px] rounded-full bg-white transition peer-checked:translate-x-[19px]" />
+      </span>
     </div>
   );
 }
 
-const REMINDERS: { key: 'reminders_weekly' | 'reminders_payments' | 'fx_alerts_enabled' | 'vision_enabled'; label: string; hint: string }[] = [
-  { key: 'reminders_weekly', label: 'Еженедельный итог', hint: 'вс 20:00 — траты недели' },
-  { key: 'reminders_payments', label: 'Платежи и сроки', hint: 'за 2 дня до срока, 10:00' },
-  { key: 'fx_alerts_enabled', label: '💱 Алерты по курсам', hint: 'выгодные моменты для обмена' },
-  { key: 'vision_enabled', label: '📷 Скриншоты банка', hint: 'распознавание — фото уходит в Google AI' },
+const REMINDERS: {
+  key: 'reminders_weekly' | 'reminders_payments' | 'fx_alerts_enabled' | 'vision_enabled';
+  icon: typeof Bell;
+  label: string;
+  hint: string;
+}[] = [
+  { key: 'reminders_weekly', icon: CalendarClock, label: 'Еженедельный итог', hint: 'вс 20:00 — траты недели' },
+  { key: 'reminders_payments', icon: Receipt, label: 'Платежи и сроки', hint: 'за 2 дня до срока, 10:00' },
+  { key: 'fx_alerts_enabled', icon: TrendingUp, label: 'Алерты по курсам', hint: 'выгодные моменты для обмена' },
+  { key: 'vision_enabled', icon: Camera, label: 'Скриншоты банка', hint: 'распознавание — фото уходит в Google AI' },
 ];
 
 function ProfileForms({
@@ -327,10 +389,12 @@ function ProfileForms({
 
   return (
     <>
-      <h2>💸 Бюджет</h2>
-      <div class="card">
+      <h2 class={headCls}>
+        <Wallet size={16} strokeWidth={1.5} /> Бюджет
+      </h2>
+      <div class={`${cardCls} mt-2`}>
         <form onSubmit={saveCap}>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field
               label={
                 <>
@@ -349,6 +413,7 @@ function ProfileForms({
               }
             >
               <input
+                class={inputCls}
                 inputMode="decimal"
                 value={cap}
                 onInput={(e) => setCap((e.target as HTMLInputElement).value)}
@@ -356,6 +421,7 @@ function ProfileForms({
             </Field>
             <Field label="Валюта">
               <input
+                class={inputCls}
                 maxLength={5}
                 value={capCcy}
                 onInput={(e) => setCapCcy((e.target as HTMLInputElement).value)}
@@ -377,17 +443,18 @@ function ProfileForms({
             }
           >
             <input
+              class={inputCls}
               maxLength={5}
               placeholder={capCcy}
               value={expCcy}
               onInput={(e) => setExpCcy((e.target as HTMLInputElement).value)}
             />
           </Field>
-          <p class="muted">
+          <p class={`${mutedCls} mb-3`}>
             Недельный бюджет: {fmtMinor(p.weekly_budget_minor ?? 0, p.living_currency ?? 'USD')}
           </p>
           <FormError msg={capErr} />
-          <button type="submit" class="btn" disabled={capBusy}>
+          <button type="submit" class={primaryBtnCls} disabled={capBusy}>
             Сохранить
           </button>
         </form>
@@ -395,8 +462,10 @@ function ProfileForms({
 
       {payments}
 
-      <h2>💵 Доход</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>
+        <Banknote size={16} strokeWidth={1.5} /> Доход
+      </h2>
+      <div class={`${cardCls} mt-2`}>
         <form onSubmit={saveIncome}>
           <Field
             label={
@@ -412,6 +481,7 @@ function ProfileForms({
             }
           >
             <input
+              class={inputCls}
               maxLength={5}
               value={incCcy}
               onInput={(e) => setIncCcy((e.target as HTMLInputElement).value)}
@@ -438,6 +508,7 @@ function ProfileForms({
             }
           >
             <input
+              class={inputCls}
               inputMode="decimal"
               placeholder="например, 6200"
               value={inc}
@@ -445,22 +516,25 @@ function ProfileForms({
             />
           </Field>
           {p.baseline_source === 'computed' && (p.typical_income_minor ?? 0) === 0 ? (
-            <p class="muted">
+            <p class={`${mutedCls} mb-3`}>
               Сейчас вычисляется: ≈ {fmtMinor(p.baseline_income_minor ?? 0, p.income_currency ?? 'USD')}
             </p>
           ) : null}
           <FormError msg={incErr} />
-          <button type="submit" class="btn" disabled={incBusy}>
+          <button type="submit" class={primaryBtnCls} disabled={incBusy}>
             Сохранить
           </button>
         </form>
       </div>
 
-      <h2>🌍 Часовой пояс</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>
+        <Globe size={16} strokeWidth={1.5} /> Часовой пояс
+      </h2>
+      <div class={`${cardCls} mt-2`}>
         <form onSubmit={saveTz}>
           <Field label="Таймзона (IANA)">
             <select
+              class={inputCls}
               value={tzSel}
               onChange={(e) => setTzSel((e.target as HTMLSelectElement).value)}
             >
@@ -473,6 +547,7 @@ function ProfileForms({
           {tzSel === '__custom' && (
             <Field label="Своя таймзона">
               <input
+                class={inputCls}
                 placeholder="например, Asia/Almaty"
                 value={tzCustom}
                 onInput={(e) => setTzCustom((e.target as HTMLInputElement).value)}
@@ -480,35 +555,43 @@ function ProfileForms({
             </Field>
           )}
           <FormError msg={tzErr} />
-          <button type="submit" class="btn" disabled={tzBusy}>
+          <button type="submit" class={primaryBtnCls} disabled={tzBusy}>
             Сохранить пояс
           </button>
         </form>
       </div>
 
-      <h2>🔔 Напоминания</h2>
-      <div class="card">
-        {REMINDERS.map((r) => (
-          <Switch
-            key={r.key}
-            label={r.label}
-            hint={r.hint}
-            checked={!!p[r.key]}
-            busy={remBusy}
-            onToggle={() => void toggleReminder(r.key, !p[r.key])}
-          />
-        ))}
-        <FormError msg={remErr} />
+      <h2 class={`${headCls} mt-6`}>
+        <Bell size={16} strokeWidth={1.5} /> Напоминания
+      </h2>
+      <div class={`${listCardCls} mt-2`}>
+        <ul class="divide-y divide-white/5">
+          {REMINDERS.map((r) => (
+            <li key={r.key}>
+              <Switch
+                icon={<r.icon size={17} strokeWidth={1.5} class="flex-none text-zinc-400" />}
+                label={r.label}
+                hint={r.hint}
+                checked={!!p[r.key]}
+                busy={remBusy}
+                onToggle={() => void toggleReminder(r.key, !p[r.key])}
+              />
+            </li>
+          ))}
+        </ul>
+        {remErr && <p class="px-4 pb-3 text-sm text-red-400">{remErr}</p>}
       </div>
 
-      <h2>🗄 Данные</h2>
-      <div class="card">
-        <p class="muted">Экспорт — JSON со всеми вашими данными (профиль, платежи, траты, доход).</p>
-        <button type="button" class="btn" disabled={expBusy} onClick={() => void doExport()}>
-          {expBusy ? 'Готовлю файл…' : '📤 Экспорт данных (JSON)'}
+      <h2 class={`${headCls} mt-6`}>
+        <Database size={16} strokeWidth={1.5} /> Данные
+      </h2>
+      <div class={`${cardCls} mt-2`}>
+        <p class={`${mutedCls} mb-3`}>Экспорт — JSON со всеми вашими данными (профиль, платежи, траты, доход).</p>
+        <button type="button" class={secondaryBtnCls} disabled={expBusy} onClick={() => void doExport()}>
+          <Upload size={16} strokeWidth={1.5} /> {expBusy ? 'Готовлю файл…' : 'Экспорт данных (JSON)'}
         </button>
         <FormError msg={expErr} />
-        <p class="muted">
+        <p class={`${mutedCls} mt-3`}>
           Удаление данных — через бота: /profile → 🗄 Мои данные → 🗑 Удалить всё.
           <Info title="Почему удаление — в боте">
             <p>
@@ -651,15 +734,20 @@ function CommitmentCard({
 
   return (
     <>
-      <h1>
+      <h1 class={h1Cls}>
         {item.name}
-        {item.active ? '' : ' · ⏸ выключен'}
+        {item.active ? '' : (
+          <span class="flex items-center gap-1 text-sm font-normal text-zinc-500">
+            <Pause size={14} strokeWidth={1.5} /> выключен
+          </span>
+        )}
       </h1>
-      <div class="card">
+      <div class={cardCls}>
         <form onSubmit={save}>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Сумма">
               <input
+                class={inputCls}
                 inputMode="decimal"
                 value={amount}
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)}
@@ -667,6 +755,7 @@ function CommitmentCard({
             </Field>
             <Field label="День месяца (1–31, пусто — без дня)">
               <input
+                class={inputCls}
                 inputMode="numeric"
                 maxLength={2}
                 placeholder="—"
@@ -675,33 +764,50 @@ function CommitmentCard({
               />
             </Field>
           </div>
-          <p class="muted">Валюта: {item.currency}</p>
-          <p class="muted">
+          <p class={`${mutedCls} mb-2`}>Валюта: {item.currency}</p>
+          <p class={`${mutedCls} mb-2 flex items-center gap-1`}>
             Этот месяц:{' '}
-            {item.paid_this_month ? `✅ оплачен ${item.last_paid_on ? fmtDay(item.last_paid_on) : ''}` : 'не оплачен'}
+            {item.paid_this_month ? (
+              <>
+                <CircleCheck size={14} strokeWidth={1.5} class="text-emerald-400" />
+                <span class="text-emerald-400">оплачен{item.last_paid_on ? ` ${fmtDay(item.last_paid_on)}` : ''}</span>
+              </>
+            ) : (
+              'не оплачен'
+            )}
           </p>
-          <p class="muted">В день срока бот отметит оплату сам, напомнит за 2 дня.</p>
+          <p class={`${mutedCls} mb-3`}>В день срока бот отметит оплату сам, напомнит за 2 дня.</p>
           <FormError msg={err} />
-          <button type="submit" class="btn" disabled={busy}>
+          <button type="submit" class={primaryBtnCls} disabled={busy}>
             Сохранить
           </button>
         </form>
       </div>
 
       {!item.paid_this_month && (
-        <button type="button" class="btn" disabled={busy} onClick={() => void markPaid()}>
-          ✅ Отметить оплаченным
+        <button type="button" class={`${secondaryBtnCls} mt-3`} disabled={busy} onClick={() => void markPaid()}>
+          <CircleCheck size={16} strokeWidth={1.5} /> Отметить оплаченным
         </button>
       )}
 
-      <button type="button" class="btn ghost" disabled={busy} onClick={() => void toggle()}>
-        {item.active ? '⏸ Выключить платёж' : '▶ Включить платёж'}
+      <button type="button" class={`${ghostBtnCls} mt-1`} disabled={busy} onClick={() => void toggle()}>
+        {item.active ? (
+          <>
+            <Pause size={16} strokeWidth={1.5} /> Выключить платёж
+          </>
+        ) : (
+          <>
+            <Play size={16} strokeWidth={1.5} /> Включить платёж
+          </>
+        )}
       </button>
 
-      <h2>📜 Журнал оплат</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>
+        <History size={16} strokeWidth={1.5} /> Журнал оплат
+      </h2>
+      <div class={`${listCardCls} mt-2`}>
         {payments.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {[...payments].reverse().map((e) => (
               <PaymentRow
                 key={e.id}
@@ -718,20 +824,20 @@ function CommitmentCard({
             ))}
           </ul>
         ) : (
-          <p class="muted">Оплат пока не было.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Оплат пока не было.</p>
         )}
       </div>
 
       {confirmDel ? (
-        <div class="confirm">
-          <p>Удалить платёж «{item.name}»? Действие необратимо.</p>
-          <div class="inline">
-            <button type="button" class="btn danger" disabled={busy} onClick={() => void del()}>
+        <div class={`${confirmCls} mt-3`}>
+          <p class="text-sm">Удалить платёж «{item.name}»? Действие необратимо.</p>
+          <div class="mt-2 flex gap-2">
+            <button type="button" class={smDangerFillBtnCls} disabled={busy} onClick={() => void del()}>
               Да, удалить
             </button>
             <button
               type="button"
-              class="btn ghost"
+              class={smGhostBtnCls}
               disabled={busy}
               onClick={() => setConfirmDel(false)}
             >
@@ -742,11 +848,11 @@ function CommitmentCard({
       ) : (
         <button
           type="button"
-          class="btn danger"
+          class={`${dangerBtnCls} mt-3`}
           disabled={busy}
           onClick={() => setConfirmDel(true)}
         >
-          🗑 Удалить платёж
+          <Trash2 size={16} strokeWidth={1.5} /> Удалить платёж
         </button>
       )}
     </>
@@ -801,38 +907,43 @@ function PaymentRow({
   };
 
   return (
-    <li>
-      <div class={`row clickable${open ? ' on' : ''}`} onClick={onToggle}>
-        <span>💸 Оплата{ev.source === 'auto' ? ' 🤖' : ''}</span>
-        <span>
+    <li class="px-4 py-3">
+      <div class={`${rowCls} cursor-pointer`} onClick={onToggle}>
+        <span class="flex items-center gap-1.5">
+          <Banknote size={15} strokeWidth={1.5} class="text-zinc-500" /> Оплата
+          {ev.source === 'auto' ? <Bot size={14} strokeWidth={1.5} class="text-zinc-500" /> : ''}
+        </span>
+        <span class={open ? 'text-sky-300' : ''}>
           {fmtDay(ev.paid_on)} · {fmtMinor(ev.amount_minor, ev.currency)}
         </span>
       </div>
       {open && (
-        <div class="ev-edit">
+        <div class={evEditCls}>
           <form onSubmit={(e) => void save(e)}>
-            <div class="inline">
+            <div class="flex gap-3">
               <Field label="Сумма">
-                <input inputMode="decimal" value={amount}
+                <input class={inputCls} inputMode="decimal" value={amount}
                   onInput={(e) => setAmount((e.target as HTMLInputElement).value)} />
               </Field>
               <Field label="Дата">
-                <input type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
+                <input class={inputCls} type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
               </Field>
             </div>
             <FormError msg={err} />
-            <div class="inline">
-              <button type="submit" class="btn sm" disabled={busy}>✏️ Сохранить</button>
+            <div class="flex gap-2">
+              <button type="submit" class={`${smBtnCls} flex-1 justify-center`} disabled={busy}>
+                <Pencil size={13} strokeWidth={1.5} /> Сохранить
+              </button>
               {confirmDel ? (
                 <>
-                  <button type="button" class="btn sm danger" disabled={busy} onClick={() => void del()}>
+                  <button type="button" class={`${smDangerBtnCls} flex-1 justify-center`} disabled={busy} onClick={() => void del()}>
                     Точно удалить?
                   </button>
-                  <button type="button" class="btn sm ghost" onClick={() => setConfirmDel(false)}>Нет</button>
+                  <button type="button" class={smBtnCls} onClick={() => setConfirmDel(false)}>Нет</button>
                 </>
               ) : (
-                <button type="button" class="btn sm danger" disabled={busy} onClick={() => setConfirmDel(true)}>
-                  🗑
+                <button type="button" class={smDangerBtnCls} disabled={busy} onClick={() => setConfirmDel(true)}>
+                  <Trash2 size={13} strokeWidth={1.5} />
                 </button>
               )}
             </div>
@@ -891,11 +1002,14 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
 
   return (
     <>
-      <h1>➕ Платёж</h1>
-      <div class="card">
+      <h1 class={h1Cls}>
+        <Plus size={20} strokeWidth={1.5} class="text-sky-400" /> Платёж
+      </h1>
+      <div class={cardCls}>
         <form onSubmit={submit}>
           <Field label="Название">
             <input
+              class={inputCls}
               maxLength={60}
               placeholder="например, Интернет"
               value={name}
@@ -903,9 +1017,10 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
               autoFocus
             />
           </Field>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Сумма">
               <input
+                class={inputCls}
                 inputMode="decimal"
                 placeholder="600"
                 value={amount}
@@ -914,6 +1029,7 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
             </Field>
             <Field label={`Валюта (по умолч. ${defCcy})`}>
               <input
+                class={inputCls}
                 maxLength={5}
                 placeholder={defCcy}
                 value={ccy}
@@ -922,6 +1038,7 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
             </Field>
             <Field label="День (1–31)">
               <input
+                class={inputCls}
                 inputMode="numeric"
                 maxLength={2}
                 placeholder="—"
@@ -931,7 +1048,7 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
             </Field>
           </div>
           <FormError msg={err} />
-          <button type="submit" class="btn" disabled={busy}>
+          <button type="submit" class={primaryBtnCls} disabled={busy}>
             {busy ? 'Сохраняю…' : 'Добавить платёж'}
           </button>
         </form>

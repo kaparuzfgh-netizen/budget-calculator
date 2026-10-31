@@ -2,10 +2,12 @@
  * main.tsx — точка входа Mini App (веха G: экраны на Preact).
  *
  * Флоу: Telegram.WebApp.initData → POST /api/tma/auth → JWT в памяти
- * (не в localStorage) → <App/> со стеком экранов. Тема — из themeParams.
+ * (не в localStorage) → <App/> со стеком экранов. Тема — фиксированная
+ * тёмная (slate-950), хром вебвью подгоняется в applyTheme.
  * Сохранены экраны: «откройте через бота», «нет доступа» (401/403),
  * сетевая ошибка + кнопка «Повторить».
  */
+import './index.css';
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import { ApiError, createApi } from './api';
@@ -98,7 +100,13 @@ function Root() {
 }
 
 // ── вход ──
-if (!wa) {
+// ?demo=<экран> — визуальный предпросмотр РЕАЛЬНЫХ экранов в обычном
+// браузере: мок-данные (demo/mock.ts), без Telegram и auth;
+// code-split — в прод-бандл не попадает. Список экранов — в demo/tw.tsx.
+const demo = new URLSearchParams(location.search).get('demo');
+if (demo !== null) {
+  void import('./demo/tw').then((m) => m.mountDemo(demo, rootEl));
+} else if (!wa) {
   render(
     <ErrorView
       title="Не из Telegram"

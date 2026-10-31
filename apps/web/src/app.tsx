@@ -8,8 +8,9 @@
  * flash — одноразовое сообщение после успешной мутации.
  */
 import { useEffect, useState } from 'preact/hooks';
+import { Check } from 'lucide-preact';
 import type { Api } from './api';
-import { TopBar } from './ui';
+import { flashCls, TopBar } from './ui';
 import { HomeScreen } from './screens/home';
 import { PlanScreen } from './screens/plan';
 import { ExpenseScreen, SpentAddScreen, WeekScreen } from './screens/week';
@@ -150,10 +151,14 @@ export function App({ api, name, onFatal }: { api: Api; name: string | null; onF
   }
 
   return (
-    <>
+    <div class="mx-auto max-w-md px-4 pb-10 pt-5">
       {stack.length > 1 && <TopBar onBack={nav.back} onHome={nav.home} />}
-      {flash !== null && <div class="flash">{flash}</div>}
+      {flash !== null && (
+        <div class={flashCls}>
+          <Check size={16} strokeWidth={1.5} /> {flash}
+        </div>
+      )}
       {screen}
-    </>
+    </div>
   );
 }

@@ -5,10 +5,27 @@
  * GET /api/tma/plan?income=&currency= (источник «задано вручную»).
  */
 import { useState } from 'preact/hooks';
+import { Banknote, CalendarClock, ChartPie, ClipboardList, Pencil } from 'lucide-preact';
 import type { IncomeSource, PlanData } from '../api';
 import type { ScreenProps } from '../app';
 import { amountError, currencyError, fmtMinor, parseAmount } from '../fmt';
-import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
+import {
+  cardCls,
+  ErrorView,
+  errorView,
+  Field,
+  FormError,
+  h1Cls,
+  headCls,
+  inputCls,
+  listCardCls,
+  Loading,
+  mutedCls,
+  rowCls,
+  smGhostBtnCls,
+  smPrimaryBtnCls,
+  useData,
+} from '../ui';
 
 const INCOME_SOURCE: Record<IncomeSource, string> = {
   actual: 'факт по записям',
@@ -62,24 +79,30 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
 
   return (
     <>
-      <h1>📊 План · {p.month}</h1>
+      <h1 class={h1Cls}>
+        <ChartPie size={20} strokeWidth={1.5} class="text-sky-400" /> План · {p.month}
+      </h1>
 
-      <h2>Доход</h2>
-      <div class="card">
-        <div class="big">{fmtMinor(p.income_minor, p.income_currency)}</div>
-        <div class="muted">
+      <h2 class={headCls}>
+        <Banknote size={16} strokeWidth={1.5} /> Доход
+      </h2>
+      <div class={`${cardCls} mt-2`}>
+        <div class="text-2xl font-semibold">{fmtMinor(p.income_minor, p.income_currency)}</div>
+        <div class={`${mutedCls} mt-0.5`}>
           {INCOME_SOURCE[p.income_source]}
           {p.income_entries_count ? ` · записей: ${p.income_entries_count}` : ''}
         </div>
       </div>
 
-      <h2>Регулярные платежи</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>
+        <CalendarClock size={16} strokeWidth={1.5} /> Регулярные платежи
+      </h2>
+      <div class={`${listCardCls} mt-2`}>
         {p.commitments.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {p.commitments.map((x) => (
-              <li>
-                <div class="row">
+              <li class="px-4 py-3">
+                <div class={rowCls}>
                   <span>{x.name}</span>
                   <span>
                     {fmtMinor(x.amount_minor, x.currency)}
@@ -90,41 +113,46 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Нет регулярных платежей.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Нет регулярных платежей.</p>
         )}
-        <div class="row">
+        <div class={`${rowCls} border-t border-white/5 px-4 py-3`}>
           <span>Итого</span>
           <b>{fmtMinor(p.mandatory_usd_minor, usd)}</b>
         </div>
       </div>
 
-      <h2>Итог</h2>
-      <div class="card">
-        <div class="row">
+      <h2 class={`${headCls} mt-6`}>
+        <ClipboardList size={16} strokeWidth={1.5} /> Итог
+      </h2>
+      <div class={`${cardCls} mt-2`}>
+        <div class={rowCls}>
           <span>Бюджет</span>
           <b>{fmtMinor(p.living_usd_minor, usd)}</b>
         </div>
-        <div class="row">
+        <div class={`${rowCls} mt-2`}>
           <span>Свободный остаток</span>
-          <b class={p.surplus_usd_minor < 0 ? 'err' : ''}>{fmtMinor(p.surplus_usd_minor, usd)}</b>
+          <b class={p.surplus_usd_minor < 0 ? 'text-red-400' : ''}>{fmtMinor(p.surplus_usd_minor, usd)}</b>
         </div>
         {p.bonus && (
-          <div class="row">
-            <span class="muted">Бонус (препей/DCA)</span>
+          <div class={`${rowCls} mt-2`}>
+            <span class={mutedCls}>Бонус (препей/DCA)</span>
             <span>
               {fmtMinor(p.bonus.prepay_usd_minor, usd)} / {fmtMinor(p.bonus.dca_usd_minor, usd)}
             </span>
           </div>
         )}
       </div>
-      <p class="muted">Итоги в базовой валюте USD · курсы на {p.fx_as_of || '—'}</p>
+      <p class={`${mutedCls} mt-2`}>Итоги в базовой валюте USD · курсы на {p.fx_as_of || '—'}</p>
 
-      <h2>Доход вручную</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>
+        <Pencil size={16} strokeWidth={1.5} /> Доход вручную
+      </h2>
+      <div class={`${cardCls} mt-2`}>
         <form onSubmit={submit}>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Сумма">
               <input
+                class={inputCls}
                 inputMode="decimal"
                 placeholder="например, 7500"
                 value={amount}
@@ -133,6 +161,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
             </Field>
             <Field label="Валюта">
               <input
+                class={inputCls}
                 maxLength={5}
                 placeholder={p.income_currency}
                 value={ccy}
@@ -141,14 +170,14 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
             </Field>
           </div>
           <FormError msg={err} />
-          <div class="inline">
-            <button type="submit" class="btn" disabled={busy}>
+          <div class="flex gap-2">
+            <button type="submit" class={smPrimaryBtnCls} disabled={busy}>
               Пересчитать
             </button>
             {ovr && (
               <button
                 type="button"
-                class="btn ghost"
+                class={smGhostBtnCls}
                 onClick={() => {
                   setOvr(null);
                   setAmount('');
@@ -164,4 +193,3 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
     </>
   );
 }
-

@@ -5,11 +5,31 @@
  * подтверждения; после мутаций список перезагружается (reload).
  */
 import { useState } from 'preact/hooks';
+import { Banknote, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-preact';
 import { ApiError } from '../api';
 import type { IncomeList } from '../api';
 import type { ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, noteError, parseAmount, todayIso } from '../fmt';
-import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
+import {
+  cardCls,
+  confirmCls,
+  ErrorView,
+  errorView,
+  Field,
+  FormError,
+  h1Cls,
+  headCls,
+  inputCls,
+  listCardCls,
+  Loading,
+  mutedCls,
+  primaryBtnCls,
+  rowBtnCls,
+  rowCls,
+  smDangerFillBtnCls,
+  smGhostBtnCls,
+  useData,
+} from '../ui';
 
 export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
   const q = useData(() => api.get<IncomeList>('/api/tma/income'), onFatal, []);
@@ -42,19 +62,21 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
 
   return (
     <>
-      <h1>💵 Доход · {d.month}</h1>
-      <div class="card">
-        <div class="big">{fmtMinor(d.total_minor, d.currency)}</div>
-        <div class="muted">итог месяца в валюте профиля</div>
+      <h1 class={h1Cls}>
+        <Banknote size={20} strokeWidth={1.5} class="text-sky-400" /> Доход · {d.month}
+      </h1>
+      <div class={cardCls}>
+        <div class="text-2xl font-semibold">{fmtMinor(d.total_minor, d.currency)}</div>
+        <div class={`${mutedCls} mt-0.5`}>итог месяца в валюте профиля</div>
       </div>
 
-      <h2>Записи месяца</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>Записи месяца</h2>
+      <div class={`${listCardCls} mt-2`}>
         {d.entries.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {d.entries.map((e) => (
-              <li>
-                <div class="row">
+              <li class="px-4 py-3">
+                <div class={rowCls}>
                   <span>
                     {e.received_on ? `${fmtDay(e.received_on)} · ` : ''}
                     {fmtMinor(e.amount_minor, e.currency)}
@@ -63,21 +85,21 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
                   {confirmId === e.id ? null : (
                     <button
                       type="button"
-                      class="rowbtn"
+                      class={`${rowBtnCls} hover:text-red-400`}
                       disabled={busyId !== null}
                       onClick={() => setConfirmId(e.id)}
                     >
-                      🗑
+                      <Trash2 size={15} strokeWidth={1.5} />
                     </button>
                   )}
                 </div>
                 {confirmId === e.id && (
-                  <div class="confirm">
-                    <p>Удалить запись {fmtMinor(e.amount_minor, e.currency)}?</p>
-                    <div class="inline">
+                  <div class={confirmCls}>
+                    <p class="text-sm">Удалить запись {fmtMinor(e.amount_minor, e.currency)}?</p>
+                    <div class="mt-2 flex gap-2">
                       <button
                         type="button"
-                        class="btn danger sm"
+                        class={smDangerFillBtnCls}
                         disabled={busyId !== null}
                         onClick={() => void del(e.id)}
                       >
@@ -85,7 +107,7 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
                       </button>
                       <button
                         type="button"
-                        class="btn ghost sm"
+                        class={smGhostBtnCls}
                         disabled={busyId !== null}
                         onClick={() => setConfirmId(null)}
                       >
@@ -98,9 +120,9 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
             ))}
           </ul>
         ) : (
-          <p class="muted">Записей за месяц нет — итог считается по базовому доходу.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Записей за месяц нет — итог считается по базовому доходу.</p>
         )}
-        <FormError msg={err} />
+        {err && <p class="px-4 pb-3 text-sm text-red-400">{err}</p>}
       </div>
 
       {form.open ? (
@@ -117,10 +139,10 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
       ) : (
         <button
           type="button"
-          class="btn"
+          class={`${primaryBtnCls} mt-4`}
           onClick={() => setForm({ open: true, clientId: crypto.randomUUID() })}
         >
-          ➕ Добавить доход
+          <Plus size={16} strokeWidth={1.5} /> Добавить доход
         </button>
       )}
     </>
@@ -174,11 +196,12 @@ function IncomeAddForm({
   };
 
   return (
-    <div class="card">
+    <div class={`${cardCls} mt-4`}>
       <form onSubmit={submit}>
-        <div class="inline">
+        <div class="flex gap-3">
           <Field label="Сумма">
             <input
+              class={inputCls}
               inputMode="decimal"
               placeholder="например, 7500"
               value={amount}
@@ -188,6 +211,7 @@ function IncomeAddForm({
           </Field>
           <Field label={`Валюта (по умолч. ${defaultCcy})`}>
             <input
+              class={inputCls}
               maxLength={5}
               placeholder={defaultCcy}
               value={ccy}
@@ -197,18 +221,32 @@ function IncomeAddForm({
         </div>
         <Field label="Заметка">
           <input
+            class={inputCls}
             maxLength={200}
             placeholder="необязательно"
             value={note}
             onInput={(e) => setNote((e.target as HTMLInputElement).value)}
           />
         </Field>
-        <button type="button" class="more" onClick={() => setMore(!more)}>
-          {more ? 'Ещё ▾' : 'Ещё ▸'}
+        <button
+          type="button"
+          class="mb-3 flex items-center gap-1 text-[13px] text-sky-400 transition hover:text-sky-300"
+          onClick={() => setMore(!more)}
+        >
+          {more ? (
+            <>
+              Ещё <ChevronDown size={14} strokeWidth={1.5} />
+            </>
+          ) : (
+            <>
+              Ещё <ChevronRight size={14} strokeWidth={1.5} />
+            </>
+          )}
         </button>
         {more && (
           <Field label="Дата получения">
             <input
+              class={inputCls}
               type="date"
               max={todayIso()}
               min="2000-01-01"
@@ -218,7 +256,7 @@ function IncomeAddForm({
           </Field>
         )}
         <FormError msg={err} />
-        <button type="submit" class="btn" disabled={busy}>
+        <button type="submit" class={primaryBtnCls} disabled={busy}>
           {busy ? 'Записываю…' : 'Записать доход'}
         </button>
       </form>

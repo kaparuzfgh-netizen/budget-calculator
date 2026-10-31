@@ -1,15 +1,28 @@
 /**
- * debts.tsx — «🏦 Кредиты» в Mini App (веха H3).
+ * debts.tsx — «Кредиты» в Mini App (веха H3).
  *
  * DebtsScreen: GET /api/tma/debts — список с replay-состоянием и итогом USD.
- * DebtScreen: GET /api/tma/debts/:id — карточка: операции (✅ Платёж,
- *   💸 ЧДП с превью обоих режимов, 🏦 Сверка, ✏️ Правки) раскрываются
+ * DebtScreen: GET /api/tma/debts/:id — карточка: операции (Платёж,
+ *   ЧДП с превью обоих режимов, Сверка, Правки) раскрываются
  *   инлайн-формами; журнал событий — правка (сумма/дата, у ЧДП режим)
  *   и удаление; удаление кредита с подтверждением.
  * DebtAddScreen: POST /api/tma/debts.
  * Идемпотентность мутаций — client_id на форму (retry не задвоит событие).
  */
 import { useState } from 'preact/hooks';
+import {
+  CircleCheck,
+  HandCoins,
+  History,
+  Hourglass,
+  Landmark,
+  Pencil,
+  Plus,
+  Shuffle,
+  Trash2,
+  TrendingDown,
+} from 'lucide-preact';
+import type { LucideIcon } from 'lucide-preact';
 import { ApiError } from '../api';
 import type {
   Api,
@@ -20,12 +33,36 @@ import type {
 } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, dayError, fmtDay, fmtMinor, nameError, parseAmount } from '../fmt';
-import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
+import {
+  cardCls,
+  confirmCls,
+  dangerBtnCls,
+  ErrorView,
+  errorView,
+  evEditCls,
+  Field,
+  FormError,
+  ghostBtnCls,
+  h1Cls,
+  headCls,
+  inputCls,
+  liCls,
+  listCardCls,
+  Loading,
+  mutedCls,
+  primaryBtnCls,
+  rowCls,
+  smBtnCls,
+  smDangerBtnCls,
+  smDangerFillBtnCls,
+  smGhostBtnCls,
+  useData,
+} from '../ui';
 
-const EVENT_KIND: Record<DebtEvent['kind'], string> = {
-  payment: '✅ Платёж',
-  prepay: '💸 ЧДП',
-  reconcile: '🏦 Сверка',
+const EVENT_KIND: Record<DebtEvent['kind'], { icon: LucideIcon; label: string }> = {
+  payment: { icon: CircleCheck, label: 'Платёж' },
+  prepay: { icon: HandCoins, label: 'ЧДП' },
+  reconcile: { icon: Landmark, label: 'Сверка' },
 };
 const MODE_LABEL: Record<string, string> = {
   reduce_payment: 'платёж↓',
@@ -36,6 +73,12 @@ const clientId = () => crypto.randomUUID();
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const apiErr = (e: unknown, fallback: string) =>
   e instanceof ApiError ? e.message : fallback;
+
+/** Кнопка-режим операции в карточке кредита/займа (grid .menu). */
+const actionTileCls =
+  'flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-zinc-900/80 py-3 text-[14px] font-medium text-zinc-100 transition hover:bg-zinc-800/80';
+const actionTileOnCls =
+  'flex items-center justify-center gap-1.5 rounded-xl border border-sky-500/60 bg-sky-500/15 py-3 text-[14px] font-medium text-sky-300';
 
 // ── список ──
 
@@ -50,38 +93,43 @@ export function DebtsScreen({ api, nav, onFatal }: ScreenProps) {
   const d = q.data;
   return (
     <>
-      <div class="row spread">
-        <h1>🏦 Кредиты</h1>
-        <button type="button" class="btn sm" onClick={() => nav.push({ id: 'debt-add' })}>
-          ➕ Добавить
+      <div class="mb-5 flex items-center justify-between">
+        <h1 class="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <Landmark size={20} strokeWidth={1.5} class="text-sky-400" /> Кредиты
+        </h1>
+        <button type="button" class={smBtnCls} onClick={() => nav.push({ id: 'debt-add' })}>
+          <Plus size={14} strokeWidth={1.5} /> Добавить
         </button>
       </div>
-      <div class="card">
+      <div class={listCardCls}>
         {d.debts.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {d.debts.map((x) => (
-              <li class="clickable" onClick={() => nav.push({ id: 'debt', debtId: x.id })}>
-                <div class="row">
-                  <span>{x.name}</span>
+              <li
+                class={`${liCls} cursor-pointer transition hover:bg-white/5`}
+                onClick={() => nav.push({ id: 'debt', debtId: x.id })}
+              >
+                <div class={rowCls}>
+                  <span class="text-[15px] text-zinc-100">{x.name}</span>
                   <span>{fmtMinor(x.balance_minor, x.currency)}</span>
                 </div>
-                <div class="row muted">
-                  <span>
+                <div class={`${rowCls} mt-1`}>
+                  <span class={mutedCls}>
                     {fmtMinor(x.payment_minor, x.currency)}
                     {x.frequency === 'biweekly' ? '/2 нед' : '/мес'}
                     {x.due_day ? ` · ${x.due_day} числа` : ''}
                   </span>
-                  <span>{x.months_left > 0 ? `~${Math.ceil(x.months_left)} мес` : 'закрыт'}</span>
+                  <span class={mutedCls}>{x.months_left > 0 ? `~${Math.ceil(x.months_left)} мес` : 'закрыт'}</span>
                 </div>
               </li>
             ))}
           </ul>
         ) : (
-          <p class="muted">Кредитов нет. Добавьте первый — остаток, ставка и платёж.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Кредитов нет. Добавьте первый — остаток, ставка и платёж.</p>
         )}
       </div>
       {d.total_usd_minor !== null && d.debts.length > 0 && (
-        <p class="muted">Итого долг: ≈ {fmtMinor(d.total_usd_minor, 'USD')}</p>
+        <p class={`${mutedCls} mt-2`}>Итого долг: ≈ {fmtMinor(d.total_usd_minor, 'USD')}</p>
       )}
     </>
   );
@@ -119,45 +167,45 @@ export function DebtScreen({ api, nav, onFatal, debtId }: ScreenProps & { debtId
 
   return (
     <>
-      <h1>{v.name}</h1>
-      <div class="card">
-        <div class="row">
+      <h1 class={h1Cls}>{v.name}</h1>
+      <div class={cardCls}>
+        <div class={rowCls}>
           <span>Остаток</span>
-          <span class="big">{fmtMinor(v.balance_minor, v.currency)}</span>
+          <span class="text-2xl font-semibold">{fmtMinor(v.balance_minor, v.currency)}</span>
         </div>
-        <div class="row">
+        <div class={`${rowCls} mt-2`}>
           <span>Платёж</span>
           <span>
             {fmtMinor(v.payment_minor, v.currency)}
             {v.frequency === 'biweekly' ? '/2 нед' : '/мес'} · ставка {v.rate}%
           </span>
         </div>
-        <div class="row muted">
-          <span>Платежей: {v.payments_made}</span>
-          <span>
+        <div class={`${rowCls} mt-2`}>
+          <span class={mutedCls}>Платежей: {v.payments_made}</span>
+          <span class={mutedCls}>
             {v.months_left > 0 ? `~${Math.ceil(v.months_left)} мес · до ${fmtDay(v.payoff_date)}` : 'погашен'}
           </span>
         </div>
         {v.due_day !== null && (
-          <div class="row muted">
-            <span>День платежа</span>
-            <span>{v.due_day} числа</span>
+          <div class={`${rowCls} mt-2`}>
+            <span class={mutedCls}>День платежа</span>
+            <span class={mutedCls}>{v.due_day} числа</span>
           </div>
         )}
       </div>
 
-      <div class="menu">
-        <button type="button" class={`btn${action === 'pay' ? ' on' : ''}`} onClick={() => toggle('pay')}>
-          ✅ Платёж
+      <div class="mt-4 grid grid-cols-2 gap-2.5">
+        <button type="button" class={action === 'pay' ? actionTileOnCls : actionTileCls} onClick={() => toggle('pay')}>
+          <CircleCheck size={16} strokeWidth={1.5} /> Платёж
         </button>
-        <button type="button" class={`btn${action === 'prepay' ? ' on' : ''}`} onClick={() => toggle('prepay')}>
-          💸 ЧДП
+        <button type="button" class={action === 'prepay' ? actionTileOnCls : actionTileCls} onClick={() => toggle('prepay')}>
+          <HandCoins size={16} strokeWidth={1.5} /> ЧДП
         </button>
-        <button type="button" class={`btn${action === 'reconcile' ? ' on' : ''}`} onClick={() => toggle('reconcile')}>
-          🏦 Сверка
+        <button type="button" class={action === 'reconcile' ? actionTileOnCls : actionTileCls} onClick={() => toggle('reconcile')}>
+          <Landmark size={16} strokeWidth={1.5} /> Сверка
         </button>
-        <button type="button" class={`btn${action === 'edit' ? ' on' : ''}`} onClick={() => toggle('edit')}>
-          ✏️ Изменить
+        <button type="button" class={action === 'edit' ? actionTileOnCls : actionTileCls} onClick={() => toggle('edit')}>
+          <Pencil size={16} strokeWidth={1.5} /> Изменить
         </button>
       </div>
 
@@ -166,10 +214,12 @@ export function DebtScreen({ api, nav, onFatal, debtId }: ScreenProps & { debtId
       {action === 'reconcile' && <ReconcileForm {...props} />}
       {action === 'edit' && <EditForm {...props} />}
 
-      <h2>📜 Журнал</h2>
-      <div class="card">
+      <h2 class={`${headCls} mt-6`}>
+        <History size={16} strokeWidth={1.5} /> Журнал
+      </h2>
+      <div class={`${listCardCls} mt-2`}>
         {v.events.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {[...v.events].reverse().map((e) => (
               <EventRow
                 key={e.id}
@@ -183,7 +233,7 @@ export function DebtScreen({ api, nav, onFatal, debtId }: ScreenProps & { debtId
             ))}
           </ul>
         ) : (
-          <p class="muted">Событий пока нет — платежи, ЧДП и сверки появятся здесь.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Событий пока нет — платежи, ЧДП и сверки появятся здесь.</p>
         )}
       </div>
 
@@ -231,21 +281,21 @@ function PayForm({ api, debt, done }: FormProps) {
   };
   const scheduled = debt.payment_minor / 100;
   return (
-    <div class="card">
+    <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => void submit(e)}>
-        <div class="inline">
+        <div class="flex gap-3">
           <Field label={`Сумма (по графику ${fmtMinor(debt.payment_minor, debt.currency)})`}>
-            <input inputMode="decimal" placeholder={String(scheduled)} value={f.amount}
+            <input class={inputCls} inputMode="decimal" placeholder={String(scheduled)} value={f.amount}
               onInput={(e) => f.setAmount((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="Дата">
-            <input type="date" value={f.on} onInput={(e) => f.setOn((e.target as HTMLInputElement).value)} />
+            <input class={inputCls} type="date" value={f.on} onInput={(e) => f.setOn((e.target as HTMLInputElement).value)} />
           </Field>
         </div>
         <FormError msg={f.err} />
-        <div class="inline">
-          <button type="submit" class="btn" disabled={f.busy}>Записать</button>
-          <button type="button" class="btn ghost" disabled={f.busy} onClick={(e) => void submit(e, scheduled)}>
+        <div class="flex gap-2">
+          <button type="submit" class={primaryBtnCls} disabled={f.busy}>Записать</button>
+          <button type="button" class={ghostBtnCls} disabled={f.busy} onClick={(e) => void submit(e, scheduled)}>
             По графику
           </button>
         </div>
@@ -292,49 +342,53 @@ function PrepayForm({ api, debt, done }: FormProps) {
   };
 
   return (
-    <div class="card">
+    <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => void showPreview(e)}>
-        <div class="inline">
+        <div class="flex gap-3">
           <Field label="Сумма ЧДП">
-            <input inputMode="decimal" value={f.amount}
+            <input class={inputCls} inputMode="decimal" value={f.amount}
               onInput={(e) => f.setAmount((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="Дата">
-            <input type="date" value={f.on} onInput={(e) => f.setOn((e.target as HTMLInputElement).value)} />
+            <input class={inputCls} type="date" value={f.on} onInput={(e) => f.setOn((e.target as HTMLInputElement).value)} />
           </Field>
         </div>
         <FormError msg={f.err} />
-        <button type="submit" class="btn ghost" disabled={f.busy}>
+        <button type="submit" class={ghostBtnCls} disabled={f.busy}>
           Посчитать
         </button>
       </form>
       {preview && (
-        <div class="preview">
-          <div class="row">
+        <div class="mt-3 border-t border-white/10 pt-3">
+          <div class={rowCls}>
             <span>Остаток</span>
             <span>
               {fmtMinor(preview.balance_before_minor, debt.currency)} →{' '}
               {fmtMinor(preview.balance_after_minor, debt.currency)}
             </span>
           </div>
-          <div class="row">
-            <span>📉 Платёж↓</span>
+          <div class={`${rowCls} mt-2`}>
+            <span class="flex items-center gap-1.5">
+              <TrendingDown size={15} strokeWidth={1.5} class="text-zinc-400" /> Платёж↓
+            </span>
             <span>
               {fmtMinor(preview.payment_before_minor, debt.currency)} →{' '}
               {fmtMinor(preview.payment_after_minor, debt.currency)}
             </span>
           </div>
-          <div class="row">
-            <span>⏳ Срок↓</span>
+          <div class={`${rowCls} mt-2`}>
+            <span class="flex items-center gap-1.5">
+              <Hourglass size={15} strokeWidth={1.5} class="text-zinc-400" /> Срок↓
+            </span>
             <span>−{preview.months_saved} мес при том же платеже</span>
           </div>
-          <p class="muted">Что уменьшаем?</p>
-          <div class="inline">
-            <button type="button" class="btn" disabled={f.busy} onClick={() => void record('reduce_payment')}>
-              📉 Платёж (−{fmtMinor(preview.payment_saved_minor, debt.currency)})
+          <p class={`${mutedCls} mb-2 mt-3`}>Что уменьшаем?</p>
+          <div class="flex gap-2">
+            <button type="button" class={primaryBtnCls} disabled={f.busy} onClick={() => void record('reduce_payment')}>
+              <TrendingDown size={16} strokeWidth={1.5} /> Платёж (−{fmtMinor(preview.payment_saved_minor, debt.currency)})
             </button>
-            <button type="button" class="btn" disabled={f.busy} onClick={() => void record('reduce_term')}>
-              ⏳ Срок (−{preview.months_saved} мес)
+            <button type="button" class={primaryBtnCls} disabled={f.busy} onClick={() => void record('reduce_term')}>
+              <Hourglass size={16} strokeWidth={1.5} /> Срок (−{preview.months_saved} мес)
             </button>
           </div>
         </div>
@@ -363,19 +417,19 @@ function ReconcileForm({ api, debt, done }: FormProps) {
     return undefined;
   };
   return (
-    <div class="card">
+    <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => void submit(e)}>
-        <div class="inline">
+        <div class="flex gap-3">
           <Field label={`Факт. остаток по выписке (сейчас ${fmtMinor(debt.balance_minor, debt.currency)})`}>
-            <input inputMode="decimal" placeholder={String(debt.balance_minor / 100)} value={f.amount}
+            <input class={inputCls} inputMode="decimal" placeholder={String(debt.balance_minor / 100)} value={f.amount}
               onInput={(e) => f.setAmount((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="Дата">
-            <input type="date" value={f.on} onInput={(e) => f.setOn((e.target as HTMLInputElement).value)} />
+            <input class={inputCls} type="date" value={f.on} onInput={(e) => f.setOn((e.target as HTMLInputElement).value)} />
           </Field>
         </div>
         <FormError msg={f.err} />
-        <button type="submit" class="btn" disabled={f.busy}>Записать сверку</button>
+        <button type="submit" class={primaryBtnCls} disabled={f.busy}>Записать сверку</button>
       </form>
     </div>
   );
@@ -416,25 +470,25 @@ function EditForm({ api, debt, done }: FormProps) {
   };
 
   return (
-    <div class="card">
+    <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => void submit(e)}>
         <Field label="Название">
-          <input maxLength={60} value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+          <input class={inputCls} maxLength={60} value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
         </Field>
-        <div class="inline">
+        <div class="flex gap-3">
           <Field label="Ставка, % годовых">
-            <input inputMode="decimal" value={rate} onInput={(e) => setRate((e.target as HTMLInputElement).value)} />
+            <input class={inputCls} inputMode="decimal" value={rate} onInput={(e) => setRate((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="Платёж за период">
-            <input inputMode="decimal" value={payment} onInput={(e) => setPayment((e.target as HTMLInputElement).value)} />
+            <input class={inputCls} inputMode="decimal" value={payment} onInput={(e) => setPayment((e.target as HTMLInputElement).value)} />
           </Field>
           <Field label="День (пусто — без дня)">
-            <input inputMode="numeric" maxLength={2} placeholder="—" value={day}
+            <input class={inputCls} inputMode="numeric" maxLength={2} placeholder="—" value={day}
               onInput={(e) => setDay((e.target as HTMLInputElement).value)} />
           </Field>
         </div>
         <FormError msg={err} />
-        <button type="submit" class="btn" disabled={busy}>Сохранить</button>
+        <button type="submit" class={primaryBtnCls} disabled={busy}>Сохранить</button>
       </form>
     </div>
   );
@@ -457,6 +511,7 @@ function EventRow({
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+  const Kind = EVENT_KIND[ev.kind];
 
   const save = async (e: Event) => {
     e.preventDefault();
@@ -502,46 +557,48 @@ function EventRow({
   };
 
   return (
-    <li>
-      <div class={`row clickable${open ? ' on' : ''}`} onClick={onToggle}>
-        <span>
-          {EVENT_KIND[ev.kind]}
-          {ev.kind === 'prepay' && ev.mode ? ` (${MODE_LABEL[ev.mode]})` : ''}
+    <li class="px-4 py-3">
+      <div class={`${rowCls} cursor-pointer`} onClick={onToggle}>
+        <span class="flex items-center gap-1.5">
+          <Kind.icon size={15} strokeWidth={1.5} class="text-zinc-500" /> {Kind.label}
+          {ev.kind === 'prepay' && ev.mode ? <span class={mutedCls}> ({MODE_LABEL[ev.mode]})</span> : ''}
         </span>
-        <span>
+        <span class={open ? 'text-sky-300' : ''}>
           {fmtDay(ev.event_on)} · {fmtMinor(ev.amount_minor, currency)}
         </span>
       </div>
       {open && (
-        <div class="ev-edit">
+        <div class={evEditCls}>
           <form onSubmit={(e) => void save(e)}>
-            <div class="inline">
+            <div class="flex gap-3">
               <Field label="Сумма">
-                <input inputMode="decimal" value={amount}
+                <input class={inputCls} inputMode="decimal" value={amount}
                   onInput={(e) => setAmount((e.target as HTMLInputElement).value)} />
               </Field>
               <Field label="Дата">
-                <input type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
+                <input class={inputCls} type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
               </Field>
             </div>
             <FormError msg={err} />
-            <div class="inline">
-              <button type="submit" class="btn sm" disabled={busy}>✏️ Сохранить</button>
+            <div class="flex gap-2">
+              <button type="submit" class={`${smBtnCls} flex-1 justify-center`} disabled={busy}>
+                <Pencil size={13} strokeWidth={1.5} /> Сохранить
+              </button>
               {ev.kind === 'prepay' && (
-                <button type="button" class="btn sm ghost" disabled={busy} onClick={() => void flipMode()}>
-                  🔀 Режим
+                <button type="button" class={`${smBtnCls} flex-1 justify-center`} disabled={busy} onClick={() => void flipMode()}>
+                  <Shuffle size={13} strokeWidth={1.5} /> Режим
                 </button>
               )}
               {confirmDel ? (
                 <>
-                  <button type="button" class="btn sm danger" disabled={busy} onClick={() => void del()}>
+                  <button type="button" class={`${smDangerBtnCls} flex-1 justify-center`} disabled={busy} onClick={() => void del()}>
                     Точно удалить?
                   </button>
-                  <button type="button" class="btn sm ghost" onClick={() => setConfirmDel(false)}>Нет</button>
+                  <button type="button" class={smBtnCls} onClick={() => setConfirmDel(false)}>Нет</button>
                 </>
               ) : (
-                <button type="button" class="btn sm danger" disabled={busy} onClick={() => setConfirmDel(true)}>
-                  🗑
+                <button type="button" class={smDangerBtnCls} disabled={busy} onClick={() => setConfirmDel(true)}>
+                  <Trash2 size={13} strokeWidth={1.5} />
                 </button>
               )}
             </div>
@@ -568,16 +625,18 @@ function DeleteDebt({ api, nav, debt }: { api: Api; nav: Nav; debt: DebtDetail }
     }
   };
   return confirm ? (
-    <div class="confirm">
-      <p>Удалить «{debt.name}» вместе с журналом? Действие необратимо.</p>
-      <div class="inline">
-        <button type="button" class="btn danger" disabled={busy} onClick={() => void del()}>Да, удалить</button>
-        <button type="button" class="btn ghost" onClick={() => setConfirm(false)}>Отмена</button>
+    <div class={`${confirmCls} mt-3`}>
+      <p class="text-sm">Удалить «{debt.name}» вместе с журналом? Действие необратимо.</p>
+      <div class="mt-2 flex gap-2">
+        <button type="button" class={smDangerFillBtnCls} disabled={busy} onClick={() => void del()}>Да, удалить</button>
+        <button type="button" class={smGhostBtnCls} onClick={() => setConfirm(false)}>Отмена</button>
       </div>
       <FormError msg={err} />
     </div>
   ) : (
-    <button type="button" class="btn danger" onClick={() => setConfirm(true)}>🗑 Удалить кредит</button>
+    <button type="button" class={`${dangerBtnCls} mt-3`} onClick={() => setConfirm(true)}>
+      <Trash2 size={16} strokeWidth={1.5} /> Удалить кредит
+    </button>
   );
 }
 
@@ -630,45 +689,47 @@ export function DebtAddScreen({ api, nav }: ScreenProps) {
 
   return (
     <>
-      <h1>➕ Кредит</h1>
-      <div class="card">
+      <h1 class={h1Cls}>
+        <Plus size={20} strokeWidth={1.5} class="text-sky-400" /> Кредит
+      </h1>
+      <div class={cardCls}>
         <form onSubmit={(e) => void submit(e)}>
           <Field label="Название">
-            <input maxLength={60} placeholder="например, Ипотека" value={name}
+            <input class={inputCls} maxLength={60} placeholder="например, Ипотека" value={name}
               onInput={(e) => setName((e.target as HTMLInputElement).value)} autoFocus />
           </Field>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Остаток долга">
-              <input inputMode="decimal" placeholder="999000" value={amount}
+              <input class={inputCls} inputMode="decimal" placeholder="999000" value={amount}
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)} />
             </Field>
             <Field label="Валюта (USD, RUB, KGS…)">
-              <input maxLength={5} placeholder="USD" value={ccy}
+              <input class={inputCls} maxLength={5} placeholder="USD" value={ccy}
                 onInput={(e) => setCcy((e.target as HTMLInputElement).value)} />
             </Field>
           </div>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Ставка, % годовых">
-              <input inputMode="decimal" placeholder="12.5" value={rate}
+              <input class={inputCls} inputMode="decimal" placeholder="12.5" value={rate}
                 onInput={(e) => setRate((e.target as HTMLInputElement).value)} />
             </Field>
             <Field label="Платёж за период">
-              <input inputMode="decimal" placeholder="11000" value={payment}
+              <input class={inputCls} inputMode="decimal" placeholder="11000" value={payment}
                 onInput={(e) => setPayment((e.target as HTMLInputElement).value)} />
             </Field>
             <Field label="Периодичность">
-              <select value={freq} onChange={(e) => setFreq((e.target as HTMLSelectElement).value as 'monthly' | 'biweekly')}>
+              <select class={inputCls} value={freq} onChange={(e) => setFreq((e.target as HTMLSelectElement).value as 'monthly' | 'biweekly')}>
                 <option value="monthly">ежемесячно</option>
                 <option value="biweekly">раз в 2 недели</option>
               </select>
             </Field>
           </div>
           <Field label="День платежа (1–31, пусто — без дня)">
-            <input inputMode="numeric" maxLength={2} placeholder="—" value={day}
+            <input class={inputCls} inputMode="numeric" maxLength={2} placeholder="—" value={day}
               onInput={(e) => setDay((e.target as HTMLInputElement).value)} />
           </Field>
           <FormError msg={err} />
-          <button type="submit" class="btn" disabled={busy}>
+          <button type="submit" class={primaryBtnCls} disabled={busy}>
             {busy ? 'Сохраняю…' : 'Добавить кредит'}
           </button>
         </form>

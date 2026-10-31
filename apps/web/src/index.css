@@ -1,0 +1,29 @@
+/* index.css — Tailwind v4 + базовые стили Mini App.
+   Фиксированная тёмная тема (slate-950/zinc), без Telegram themeParams —
+   дизайн-язык прототипа src/demo/tw.tsx перенесён на всё приложение. */
+@import "tailwindcss";
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    background: #020617; /* slate-950 */
+    color: #f4f4f5; /* zinc-100 */
+    font-family:
+      -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app {
+    min-height: 100vh;
+  }
+}
+
+/* Тонкий скроллбар для горизонтального чарта отчёта. */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(82 82 91 / 0.5) transparent;
+}

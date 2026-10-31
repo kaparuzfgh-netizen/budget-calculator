@@ -1,7 +1,8 @@
 /**
  * tg.ts — минимальные типы Telegram WebApp (отдельного пакета нет,
  * скрипт telegram-web-app.js грузится в index.html до бандла)
- * и применение тёмной темы из themeParams → CSS-переменные.
+ * и инициализация вебвью: фиксированная тёмная тема приложения
+ * (slate-950), header/фон Telegram под неё + ready()/expand().
  */
 
 export interface TelegramWebApp {
@@ -26,14 +27,16 @@ declare global {
   }
 }
 
-/** themeParams → --tg-theme-* (фолбэки уже заданы в index.html). */
+/** Фон приложения — slate-950 (#020617), как у дизайн-прототипа tw.tsx. */
+const APP_BG = '#020617';
+
+/**
+ * Хром Telegram под цвета приложения + ready/expand.
+ * themeParams в CSS-переменные больше не разводим — тема фиксированная.
+ */
 export function applyTheme(wa: TelegramWebApp): void {
-  const tp = wa.themeParams ?? {};
-  for (const [k, v] of Object.entries(tp)) {
-    if (v) document.documentElement.style.setProperty(`--tg-theme-${k.replace(/_/g, '-')}`, v);
-  }
-  wa.setHeaderColor?.(tp.bg_color ?? '#17212b');
-  wa.setBackgroundColor?.(tp.bg_color ?? '#17212b');
+  wa.setHeaderColor?.(APP_BG);
+  wa.setBackgroundColor?.(APP_BG);
   wa.ready();
   wa.expand();
 }

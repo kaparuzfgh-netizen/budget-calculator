@@ -4,10 +4,31 @@
  * (траты остаются без категории). Мутации → reload списка.
  */
 import { useState } from 'preact/hooks';
+import { Archive, ArchiveRestore, Check, Pencil, Tags, Trash2, X } from 'lucide-preact';
 import { ApiError } from '../api';
 import type { CategoriesList, Category } from '../api';
 import type { ScreenProps } from '../app';
-import { ErrorView, errorView, Field, FormError, Loading, useData } from '../ui';
+import {
+  cardCls,
+  confirmCls,
+  ErrorView,
+  errorView,
+  Field,
+  FormError,
+  h1Cls,
+  headCls,
+  inputCls,
+  listCardCls,
+  Loading,
+  mutedCls,
+  primaryBtnCls,
+  rowBtnCls,
+  rowCls,
+  smBtnCls,
+  smDangerFillBtnCls,
+  smGhostBtnCls,
+  useData,
+} from '../ui';
 
 function CatRow({
   api,
@@ -37,36 +58,48 @@ function CatRow({
     }
   };
   return (
-    <li class={cat.archived ? 'off' : ''}>
+    <li class={`px-4 py-3${cat.archived ? ' opacity-50' : ''}`}>
       {edit ? (
-        <div class="inline">
-          <input value={name} maxLength={32} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+        <div class="flex items-center gap-2">
+          <input
+            class="w-full min-w-0 flex-1 rounded-lg border border-white/10 bg-zinc-950 px-2.5 py-1.5 text-[15px] text-zinc-100 outline-none focus:ring-2 focus:ring-sky-500/60"
+            value={name}
+            maxLength={32}
+            onInput={(e) => setName((e.target as HTMLInputElement).value)}
+          />
           <button
             type="button"
-            class="btn sm"
+            class={smBtnCls}
             disabled={busy || !name.trim()}
             onClick={() =>
               void run(() => api.patch(`/api/tma/categories/${cat.id}`, { name: name.trim() }), 'Переименовано')
             }
           >
-            ✓
+            <Check size={14} strokeWidth={1.5} />
           </button>
-          <button type="button" class="btn sm" onClick={() => { setEdit(false); setName(cat.name); }}>
-            ✕
+          <button
+            type="button"
+            class={rowBtnCls}
+            onClick={() => {
+              setEdit(false);
+              setName(cat.name);
+            }}
+          >
+            <X size={15} strokeWidth={1.5} />
           </button>
         </div>
       ) : (
-        <div class="row">
+        <div class={rowCls}>
           <span>
             {cat.emoji} {cat.name}
           </span>
-          <span>
-            <button type="button" class="rowbtn" title="Переименовать" onClick={() => setEdit(true)}>
-              ✏️
+          <span class="flex items-center gap-0.5">
+            <button type="button" class={rowBtnCls} title="Переименовать" onClick={() => setEdit(true)}>
+              <Pencil size={15} strokeWidth={1.5} />
             </button>
             <button
               type="button"
-              class="rowbtn"
+              class={rowBtnCls}
               title={cat.archived ? 'Вернуть' : 'В архив'}
               disabled={busy}
               onClick={() =>
@@ -76,33 +109,39 @@ function CatRow({
                 )
               }
             >
-              {cat.archived ? '↩' : '📥'}
+              {cat.archived ? <ArchiveRestore size={15} strokeWidth={1.5} /> : <Archive size={15} strokeWidth={1.5} />}
             </button>
-            <button type="button" class="rowbtn" title="Удалить" disabled={busy} onClick={() => setDel(true)}>
-              🗑
+            <button
+              type="button"
+              class={`${rowBtnCls} hover:text-red-400`}
+              title="Удалить"
+              disabled={busy}
+              onClick={() => setDel(true)}
+            >
+              <Trash2 size={15} strokeWidth={1.5} />
             </button>
           </span>
         </div>
       )}
       {del && (
-        <div class="confirm">
-          <p>Удалить «{cat.name}»? Траты останутся без категории.</p>
-          <div class="inline">
+        <div class={confirmCls}>
+          <p class="text-sm">Удалить «{cat.name}»? Траты останутся без категории.</p>
+          <div class="mt-2 flex gap-2">
             <button
               type="button"
-              class="btn danger"
+              class={smDangerFillBtnCls}
               disabled={busy}
               onClick={() => void run(() => api.del(`/api/tma/categories/${cat.id}`), 'Удалено')}
             >
               Да, удалить
             </button>
-            <button type="button" class="btn ghost" onClick={() => setDel(false)}>
+            <button type="button" class={smGhostBtnCls} onClick={() => setDel(false)}>
               Отмена
             </button>
           </div>
         </div>
       )}
-      {err && <p class="err form-err">{err}</p>}
+      {err && <p class="mt-2 text-sm text-red-400">{err}</p>}
     </li>
   );
 }
@@ -146,40 +185,55 @@ export function CategoriesScreen({ api, nav, onFatal }: ScreenProps) {
 
   return (
     <>
-      <h1>🏷 Категории</h1>
-      <div class="card">
+      <h1 class={h1Cls}>
+        <Tags size={20} strokeWidth={1.5} class="text-sky-400" /> Категории
+      </h1>
+      <div class={cardCls}>
         <form onSubmit={add}>
-          <div class="inline">
+          <div class="flex gap-3">
             <Field label="Эмодзи">
-              <input value={emoji} maxLength={4} onInput={(e) => setEmoji((e.target as HTMLInputElement).value)} />
+              <input
+                class={inputCls}
+                value={emoji}
+                maxLength={4}
+                onInput={(e) => setEmoji((e.target as HTMLInputElement).value)}
+              />
             </Field>
             <Field label="Название">
-              <input value={name} maxLength={32} placeholder="например, Питомцы" onInput={(e) => setName((e.target as HTMLInputElement).value)} />
+              <input
+                class={inputCls}
+                value={name}
+                maxLength={32}
+                placeholder="например, Питомцы"
+                onInput={(e) => setName((e.target as HTMLInputElement).value)}
+              />
             </Field>
           </div>
           <FormError msg={err} />
-          <button type="submit" class="btn" disabled={busy}>
+          <button type="submit" class={primaryBtnCls} disabled={busy}>
             Добавить
           </button>
         </form>
       </div>
 
-      <div class="card">
+      <div class={`${listCardCls} mt-4`}>
         {active.length ? (
-          <ul class="plain">
+          <ul class="divide-y divide-white/5">
             {active.map((x) => (
               <CatRow key={x.id} api={api} cat={x} onDone={(m) => { nav.flash(m); q.reload(); }} onFlash={nav.flash} />
             ))}
           </ul>
         ) : (
-          <p class="muted">Нет активных категорий.</p>
+          <p class={`${mutedCls} px-4 py-3`}>Нет активных категорий.</p>
         )}
       </div>
       {archived.length > 0 && (
         <>
-          <h2>Архив</h2>
-          <div class="card">
-            <ul class="plain">
+          <h2 class={`${headCls} mt-6`}>
+            <Archive size={16} strokeWidth={1.5} /> Архив
+          </h2>
+          <div class={`${listCardCls} mt-2`}>
+            <ul class="divide-y divide-white/5">
               {archived.map((x) => (
                 <CatRow key={x.id} api={api} cat={x} onDone={(m) => { nav.flash(m); q.reload(); }} onFlash={nav.flash} />
               ))}
@@ -187,7 +241,7 @@ export function CategoriesScreen({ api, nav, onFatal }: ScreenProps) {
           </div>
         </>
       )}
-      <p class="muted">При записи траты категория определяется по заметке («Авто») или выбирается чипом.</p>
+      <p class={`${mutedCls} mt-3`}>При записи траты категория определяется по заметке («Авто») или выбирается чипом.</p>
     </>
   );
 }
