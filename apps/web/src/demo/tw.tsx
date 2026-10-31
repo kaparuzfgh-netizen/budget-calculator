@@ -17,7 +17,15 @@ import { WeekScreen } from '../screens/week';
 import { IncomeScreen } from '../screens/income';
 import { ProfileScreen } from '../screens/profile';
 import { CategoriesScreen } from '../screens/categories';
-import { CATEGORIES, COMMITMENTS, EXPENSES, INCOME, OVERVIEW, PROFILE, UPCOMING, WEEK } from './mock';
+import { CATEGORIES, COMMITMENTS, EXPENSES, INCOME, OVERVIEW, PROFILE, UPCOMING, tempoWeek } from './mock';
+
+// сценарий темпа: ?demo=home&pace=low|ok|over
+const PACE_LABELS = { low: 'мало', ok: 'средне', over: 'перебор' } as const;
+const PACE = ((): keyof typeof PACE_LABELS => {
+  const p = new URLSearchParams(location.search).get('pace');
+  return p === 'low' || p === 'over' ? p : 'ok';
+})();
+const WEEK = tempoWeek(PACE);
 
 // ── stub Api: GET — фикстуры; мутации — правка фикстур в памяти ──
 
@@ -287,6 +295,20 @@ function DemoApp({ name }: { name: string }) {
       <p class="mb-4 text-[11px] uppercase tracking-wider text-zinc-600">
         demo · {name} — данные из demo/mock.ts
       </p>
+      {name === 'home' && (
+        <p class="mb-4 flex items-center gap-3 text-[11px] text-zinc-500">
+          темп месяца:
+          {(Object.keys(PACE_LABELS) as (keyof typeof PACE_LABELS)[]).map((p) => (
+            <a
+              key={p}
+              href={`?demo=home&pace=${p}`}
+              class={p === PACE ? 'font-medium text-sky-400' : 'underline'}
+            >
+              {PACE_LABELS[p]}
+            </a>
+          ))}
+        </p>
+      )}
       {flash !== null && (
         <div class={flashCls}>
           <Check size={16} strokeWidth={1.5} /> {flash}

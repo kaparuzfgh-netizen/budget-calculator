@@ -163,3 +163,39 @@ export const CATEGORIES: CategoriesList = {
     { id: 5, name: 'Кот', emoji: '🐈', preset_key: null, archived: true, sort: 9 },
   ],
 };
+
+// ── сценарии темпа месяца для ?demo=home&pace=low|ok|over ──
+
+const DAILY_W = [1.1, 0.5, 1.4, 0.8, 0.3, 2.0, 1.0, 0.7, 1.2, 0.4, 1.3, 0.9, 0.5, 1.6, 0.2, 0.9, 0.7, 0.6];
+
+/** Дневные траты: первые `days` дней по весам, сумма = targetMinor. */
+function dailyMinor(targetMinor: number, days: number, dim: number): number[] {
+  const w = DAILY_W.slice(0, days);
+  const sum = w.reduce((a, b) => a + b, 0);
+  const out = new Array<number>(dim).fill(0);
+  w.forEach((x, i) => {
+    out[i] = Math.round((targetMinor * x) / sum);
+  });
+  return out;
+}
+
+/**
+ * WeekStatus под темп месяца: low — далеко под идеалом (rate ~0.34),
+ * ok — по графику (~0.86), over — перегрев (~1.38, прогноз выше бюджета).
+ * Бюджет недели/месяца и «сегодня» — как в базовой фикстуре WEEK.
+ */
+export function tempoWeek(pace: 'low' | 'ok' | 'over'): WeekStatus {
+  const spent = { low: 1200000, ok: 3000000, over: 4800000 }[pace];
+  const wSpent = { low: 180000, ok: 640000, over: 1820000 }[pace];
+  const { week_budget_minor: budget, month_cap_minor: cap, month_day, month_days, days_left } = WEEK;
+  return {
+    ...WEEK,
+    week_spent_minor: wSpent,
+    week_over: wSpent > budget,
+    week_remaining_minor: budget - wSpent,
+    month_spent_minor: spent,
+    month_daily_minor: dailyMinor(spent, month_day, month_days),
+    burn_rate: spent / cap / (month_day / month_days),
+    daily_allowance_minor: Math.max(0, Math.round((cap - spent) / days_left)),
+  };
+}
