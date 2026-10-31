@@ -93,11 +93,34 @@ function smoothPath(px: number[], py: number[]): string {
   return d;
 }
 
+/** «Температура» темпа: burn_rate → цвет. Холодно (мало тратим) — почти
+ * белый; в графике — изумруд; теплее — янтарь; перегрев — красный. */
+function paceColor(rate: number): string {
+  const stops: [number, [number, number, number]][] = [
+    [0, [244, 244, 245]],
+    [0.6, [52, 211, 153]],
+    [1.0, [52, 211, 153]],
+    [1.15, [251, 191, 36]],
+    [1.45, [248, 113, 113]],
+    [1.9, [220, 38, 38]],
+  ];
+  if (rate <= stops[0]![0]) return `rgb(${stops[0]![1].join(',')})`;
+  for (let i = 1; i < stops.length; i++) {
+    const [r1, c1] = stops[i - 1]!;
+    const [r2, c2] = stops[i]!;
+    if (rate <= r2) {
+      const k = (rate - r1) / (r2 - r1);
+      return `rgb(${c1.map((v, j) => Math.round(v + (c2[j]! - v) * k)).join(',')})`;
+    }
+  }
+  return `rgb(${stops[stops.length - 1]![1].join(',')})`;
+}
+
 /**
  * График темпа месяца (grafana-style): накопленные траты — плавная линия
  * со свечением и градиентной заливкой; ровный график бюджета — пунктир;
  * вертикаль «сейчас»; полая точка — прогноз итога при текущем темпе.
- * Цвет — «температура»: зелёный в графике, янтарь/красный при перегреве.
+ * Цвет — «температура»: холодно → зелёный → янтарь → красный.
  */
 function TempoChart({
   daily,
@@ -248,6 +271,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   const wk = useData(() => api.get<WeekStatus>('/api/tma/week'), onFatal, []);
   const up = useData(() => api.get<Upcoming>('/api/tma/upcoming'), onFatal, []);
   const [openB, setOpenB] = useState(false);
+  const [whatIfMinor, setWhatIfMinor] = useState<number | null>(null);
 
   if (ov.loading || wk.loading || up.loading) return <Loading />;
   const err = ov.error ?? wk.error ?? up.error;
@@ -273,10 +297,15 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   // статус бюджета — единый источник (в «Тратах» только журнал)
   const weekShare = w.week_budget_minor > 0 ? w.week_spent_minor / w.week_budget_minor : 0;
   const spentShare = w.month_cap_minor > 0 ? w.month_spent_minor / w.month_cap_minor : 0;
-  const paceHex =
-    w.burn_rate <= 1 ? '#34d399' : w.burn_rate <= 1.3 ? '#fbbf24' : '#f87171';
-  // прогноз итога месяца при текущем темпе; с 3-го дня — раньше шум
-  const projMinor = w.month_day >= 3 ? Math.round((w.month_spent_minor / w.month_day) * w.month_days) : 0;
+  const paceHex = paceColor(w.burn_rate);
+  // прогноз итога: факт до сегодня + «эффективный» дневной расход × остаток
+  // дней; «Что если» подменяет дневной расход ползунком. С 3-го дня — раньше шум.
+  const curDailyMinor = w.month_day > 0 ? w.month_spent_minor / w.month_day : 0;
+  const effDailyMinor = whatIfMinor ?? curDailyMinor;
+  const projMinor =
+    w.month_day >= 3
+      ? Math.round(w.month_spent_minor + effDailyMinor * (w.month_days - w.month_day))
+      : 0;
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
@@ -351,9 +380,10 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
               Темп месяца
               <Info title="Темп месяца">
                 Линия — накопленные траты по дням месяца; пунктир — ровный
-                график бюджета; полая точка — прогноз итога при текущем
-                темпе. Пока линия ниже пунктира — вы в графике; выше и
-                краснее — тратите быстрее плана.
+                график бюджета; полая точка — итог при текущем темпе. Цвет —
+                температура: почти белый — тратите мало, зелёный — в графике,
+                янтарь и красный — перегрев. В «деталях» ползунок «Что если»
+                крутит прогноз.
               </Info>
             </span>
           </div>
@@ -381,7 +411,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
           <div class={`${rowCls} mt-1`}>
             <span class={`${mutedCls} text-[12px]`}>
               {projMinor > 0
-                ? `прогноз ~${fmtMinor(projMinor, c)} из ${fmtMinor(w.month_cap_minor, c)}`
+                ? `${whatIfMinor !== null ? 'сценарий' : 'прогноз'} ~${fmtMinor(projMinor, c)} из ${fmtMinor(w.month_cap_minor, c)}`
                 : `день ${w.month_day} из ${w.month_days}`}
             </span>
             <span class={`${mutedCls} inline-flex items-center gap-0.5 text-[12px]`}>
@@ -436,6 +466,53 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
                 {fmtMinor(w.daily_allowance_minor, c)} · {w.days_left} дн. до конца месяца
               </span>
             </div>
+            {w.month_cap_minor > 0 && w.month_day >= 3 && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <div class="my-3 border-t border-white/5" />
+                <div class={rowCls}>
+                  <span class={mutedCls}>
+                    Что если
+                    <Info title="Что если">
+                      Сценарий: если до конца месяца тратить по этой норме в
+                      день — каким будет итог. Точка прогноза на графике
+                      двигается живьём.
+                    </Info>
+                  </span>
+                  <span>
+                    {fmtMinor(effDailyMinor, c)}/день
+                    {whatIfMinor !== null && (
+                      <span class={mutedCls}> · сейчас {fmtMinor(curDailyMinor, c)}</span>
+                    )}
+                  </span>
+                </div>
+                {(() => {
+                  const maxDaily = Math.max(100, Math.ceil((w.month_cap_minor / 100 / w.month_days) * 3 / 100) * 100);
+                  return (
+                    <input
+                      type="range"
+                      min={0}
+                      max={maxDaily}
+                      step={Math.max(10, Math.round(maxDaily / 60))}
+                      value={Math.min(Math.round(effDailyMinor / 100), maxDaily)}
+                      onInput={(e) => setWhatIfMinor(Number((e.target as HTMLInputElement).value) * 100)}
+                      class="mt-2 w-full"
+                      style={{ accentColor: paceHex }}
+                      aria-label="Дневная норма трат для сценария «Что если»"
+                    />
+                  );
+                })()}
+                <div class={`${rowCls} mt-1`}>
+                  <span class={`${mutedCls} text-[12px]`}>
+                    итог месяца ≈ {fmtMinor(projMinor, c)}
+                  </span>
+                  {whatIfMinor !== null && (
+                    <button type="button" class="text-[12px] text-sky-400" onClick={() => setWhatIfMinor(null)}>
+                      сбросить
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
