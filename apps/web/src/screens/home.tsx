@@ -129,6 +129,8 @@ function TempoChart({
   cap,
   proj,
   color,
+  projColor,
+  scenario,
 }: {
   daily: readonly number[];
   today: number;
@@ -136,6 +138,9 @@ function TempoChart({
   cap: number;
   proj: number;
   color: string;
+  /** цвет будущего участка; scenario — сплошная линия + залитый клин (ползунок «Что если»). */
+  projColor: string;
+  scenario: boolean;
 }) {
   const W = 320;
   const H = 140;
@@ -166,6 +171,10 @@ function TempoChart({
           <stop offset="60%" stopColor={color} stopOpacity="0.12" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
+        <linearGradient id="tempoProjFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={projColor} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={projColor} stopOpacity="0" />
+        </linearGradient>
       </defs>
       {/* сетка: половина и потолок бюджета + нулевая ось */}
       {cap > 0 && <line x1={padL} y1={y(cap / 2)} x2={W - padR} y2={y(cap / 2)} stroke={gridCls} strokeWidth="0.7" strokeDasharray="2 4" opacity="0.5" />}
@@ -179,13 +188,28 @@ function TempoChart({
       {/* свечение + сама линия факта */}
       <path d={line} fill="none" stroke={color} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" opacity="0.18" />
       <path d={line} fill="none" stroke={color} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
+      {proj > 0 && scenario && (
+        <path
+          d={`M${x(today).toFixed(1)},${y(cumToday).toFixed(1)} L${x(dim).toFixed(1)},${projY.toFixed(1)} L${x(dim).toFixed(1)},${yBase.toFixed(1)} L${x(today).toFixed(1)},${yBase.toFixed(1)} Z`}
+          fill="url(#tempoProjFill)"
+        />
+      )}
       {proj > 0 && (
-        <line x1={x(today)} y1={y(cumToday)} x2={x(dim)} y2={projY} stroke={color} strokeWidth="1.6" strokeDasharray="2.5 3" opacity="0.85" />
+        <line
+          x1={x(today)}
+          y1={y(cumToday)}
+          x2={x(dim)}
+          y2={projY}
+          stroke={projColor}
+          strokeWidth={scenario ? 2.4 : 1.6}
+          strokeDasharray={scenario ? undefined : '2.5 3'}
+          opacity={scenario ? 1 : 0.85}
+        />
       )}
       {/* точка «сегодня» с ореолом + кольцо прогноза */}
       <circle cx={x(today)} cy={y(cumToday)} r="6" fill={color} opacity="0.2" />
       <circle cx={x(today)} cy={y(cumToday)} r="3.2" fill={color} stroke="#18181b" strokeWidth="1" />
-      {proj > 0 && <circle cx={x(dim)} cy={projY} r="4" fill="#18181b" stroke={color} strokeWidth="1.6" />}
+      {proj > 0 && <circle cx={x(dim)} cy={projY} r="4" fill="#18181b" stroke={projColor} strokeWidth="1.6" />}
     </svg>
   );
 }
@@ -306,6 +330,11 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
     w.month_day >= 3
       ? Math.round(w.month_spent_minor + effDailyMinor * (w.month_days - w.month_day))
       : 0;
+  // температура будущего участка: дневная норма сценария vs идеал (cap/дней)
+  const scenario = whatIfMinor !== null;
+  const projColor = paceColor(
+    w.month_cap_minor > 0 ? (effDailyMinor * w.month_days) / w.month_cap_minor : 0,
+  );
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
@@ -396,6 +425,8 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
                 cap={w.month_cap_minor}
                 proj={projMinor}
                 color={paceHex}
+                projColor={projColor}
+                scenario={scenario}
               />
               <div class="flex items-center justify-between text-[10px] text-zinc-600">
                 <span>1</span>
@@ -409,9 +440,9 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
             </p>
           )}
           <div class={`${rowCls} mt-1`}>
-            <span class={`${mutedCls} text-[12px]`}>
+            <span class={`${mutedCls} text-[12px]`} style={scenario ? { color: projColor } : undefined}>
               {projMinor > 0
-                ? `${whatIfMinor !== null ? 'сценарий' : 'прогноз'} ~${fmtMinor(projMinor, c)} из ${fmtMinor(w.month_cap_minor, c)}`
+                ? `${scenario ? 'сценарий' : 'прогноз'} ~${fmtMinor(projMinor, c)} из ${fmtMinor(w.month_cap_minor, c)}`
                 : `день ${w.month_day} из ${w.month_days}`}
             </span>
             <span class={`${mutedCls} inline-flex items-center gap-0.5 text-[12px]`}>
@@ -496,7 +527,7 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
                       value={Math.min(Math.round(effDailyMinor / 100), maxDaily)}
                       onInput={(e) => setWhatIfMinor(Number((e.target as HTMLInputElement).value) * 100)}
                       class="mt-2 w-full"
-                      style={{ accentColor: paceHex }}
+                      style={{ accentColor: projColor }}
                       aria-label="Дневная норма трат для сценария «Что если»"
                     />
                   );
