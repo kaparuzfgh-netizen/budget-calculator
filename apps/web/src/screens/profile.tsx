@@ -1488,13 +1488,13 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)}
               />
             </Field>
-            <Field label={`Валюта (по умолч. ${defCcy})`}>
+            <Field label="Валюта">
               <CcySelect
                 value={ccy}
                 onChange={setCcy}
                 extra={[defCcy]}
                 allowEmpty
-                emptyLabel={`По умолч. ${defCcy}`}
+                emptyLabel={`${defCcy} · по умолч.`}
               />
             </Field>
           </div>

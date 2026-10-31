@@ -166,7 +166,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
                 onChange={setCcy}
                 extra={[p.income_currency]}
                 allowEmpty
-                emptyLabel={`По умолч. ${p.income_currency}`}
+                emptyLabel={`${p.income_currency} · по умолч.`}
               />
             </Field>
           </div>

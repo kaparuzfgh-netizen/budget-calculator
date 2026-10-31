@@ -5,7 +5,7 @@
  * подтверждения; после мутаций список перезагружается (reload).
  */
 import { useState } from 'preact/hooks';
-import { Banknote, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-preact';
+import { Banknote, Plus, Trash2 } from 'lucide-preact';
 import { ApiError } from '../api';
 import type { IncomeList } from '../api';
 import type { ScreenProps } from '../app';
@@ -164,8 +164,6 @@ function IncomeAddForm({
   const [amount, setAmount] = useState('');
   const [ccy, setCcy] = useState('');
   const [note, setNote] = useState('');
-  // «Ещё ▸»: состояние раскрытия живёт, пока смонтирован компонент
-  const [more, setMore] = useState(false);
   const [receivedOn, setReceivedOn] = useState(todayIso());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -186,7 +184,7 @@ function IncomeAddForm({
         amount: parseAmount(amount),
         ...(ccy.trim() ? { currency: ccy.trim().toUpperCase() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
-        ...(more && receivedOn ? { received_on: receivedOn } : {}),
+        ...(receivedOn ? { received_on: receivedOn } : {}),
         client_id: clientId,
       });
       onDone('Доход записан');
@@ -210,52 +208,39 @@ function IncomeAddForm({
               autoFocus
             />
           </Field>
-          <Field label={`Валюта (по умолч. ${defaultCcy})`}>
+          <Field label="Валюта">
             <CcySelect
               value={ccy}
               onChange={setCcy}
               extra={[defaultCcy]}
               allowEmpty
-              emptyLabel={`По умолч. ${defaultCcy}`}
+              emptyLabel={`${defaultCcy} · по умолч.`}
             />
           </Field>
         </div>
-        <Field label="Заметка">
-          <input
-            class={inputCls}
-            maxLength={200}
-            placeholder="необязательно"
-            value={note}
-            onInput={(e) => setNote((e.target as HTMLInputElement).value)}
-          />
-        </Field>
-        <button
-          type="button"
-          class="mb-3 flex items-center gap-1 text-[13px] text-sky-400 transition hover:text-sky-300"
-          onClick={() => setMore(!more)}
-        >
-          {more ? (
-            <>
-              Ещё <ChevronDown size={14} strokeWidth={1.5} />
-            </>
-          ) : (
-            <>
-              Ещё <ChevronRight size={14} strokeWidth={1.5} />
-            </>
-          )}
-        </button>
-        {more && (
-          <Field label="Дата получения">
+        <div class="flex gap-3">
+          <Field label="Заметка">
             <input
               class={inputCls}
-              type="date"
-              max={todayIso()}
-              min="2000-01-01"
-              value={receivedOn}
-              onInput={(e) => setReceivedOn((e.target as HTMLInputElement).value)}
+              maxLength={200}
+              placeholder="необязательно"
+              value={note}
+              onInput={(e) => setNote((e.target as HTMLInputElement).value)}
             />
           </Field>
-        )}
+          <div class="w-36 flex-none">
+            <Field label="Дата">
+              <input
+                class={inputCls}
+                type="date"
+                max={todayIso()}
+                min="2000-01-01"
+                value={receivedOn}
+                onInput={(e) => setReceivedOn((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+          </div>
+        </div>
         <FormError msg={err} />
         <button type="submit" class={primaryBtnCls} disabled={busy}>
           {busy ? 'Записываю…' : 'Записать доход'}
