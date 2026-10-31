@@ -16,7 +16,7 @@ export function fmtMoney(amount: number, currency: string): string {
   const [int, frac] = Math.abs(amount).toFixed(dec).split('.');
   const grouped = int!.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   const sign = amount < 0 ? '−' : '';
-  return `${sign}${grouped}${frac ? ',' + frac : ''} ${sym}`;
+  return `${sign}${grouped}${frac ? ',' + frac : ''} ${sym}`;
 }
 
 /** копия fmtPct из bot/format.ts. */

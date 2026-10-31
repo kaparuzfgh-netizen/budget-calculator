@@ -218,7 +218,7 @@ describe('команды бюджета', () => {
     await msg(OWNER + 1, '/plan');
     const t = last();
     expect(t).toContain('6 758');
-    expect(t).toContain('1 009,28 $'); // 700$ + 30000₽/97 ≈ 1009,28$
+    expect(t).toContain('1 009,28 $'); // 700$ + 30000₽/97 ≈ 1009,28$
     expect(t).toContain('Свободный профицит');
   });
 
@@ -356,8 +356,8 @@ describe('редьюсер и парсеры (юниты)', () => {
       dueDay: 1,
     });
     expect(parseCommitmentLine('Связь 500')).toMatchObject({ name: 'Связь', amount: 500 });
-    expect(fmtMoney(44282, 'RUB')).toBe('44 282 ₽');
-    expect(fmtMoney(1234.5, 'USD')).toBe('1 234,50 $');
+    expect(fmtMoney(44282, 'RUB')).toBe('44 282 ₽');
+    expect(fmtMoney(1234.5, 'USD')).toBe('1 234,50 $');
     // граница таймзоны: 23:30 UTC = следующий день в Бишкеке (+6)
     expect(todayInTz('Asia/Bishkek', new Date(Date.UTC(2026, 9, 20, 23, 30)))).toBe('2026-10-21');
     expect(todayInTz('UTC', new Date(Date.UTC(2026, 9, 20, 23, 30)))).toBe('2026-10-20');

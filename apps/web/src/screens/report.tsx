@@ -1,7 +1,9 @@
 /**
  * report.tsx — экран «Отчёты»: период/сдвиг, сводные плитки,
- * «куда ушли деньги» (стек-бар + норма), категории, динамика, топ трат.
- * Данные: GET /api/tma/report?period&offset&ccy (minor units, валюта — чипы).
+ * «распределение расходов» (стек-бар + норма), категории, интерактивная
+ * динамика (тап по столбику → детали), крупные траты (топ + выбросы
+ * по медиане категории). Валюта — свои чипы + «＋» с закреплением.
+ * Данные: GET /api/tma/report?period&offset&ccy (minor units).
  */
 import { useState } from 'preact/hooks';
 import {
@@ -9,6 +11,7 @@ import {
   ChartPie,
   ChevronLeft,
   ChevronRight,
+  Plus,
   Receipt,
   Tags,
   TrendingDown,
@@ -41,8 +44,26 @@ const PERIODS: { p: ReportPeriod; label: string }[] = [
   { p: 'year', label: 'Год' },
 ];
 const COLORS = { living: '#5288c1', commitments: '#e8a33d', credits: '#a06ad4', loans: '#d4708a' };
-/** Базовый набор чипов; профиль/кредиты добавляют свои, всего ≤ 7. */
-const CHIP_BASE = ['USD', 'EUR', 'RUB', 'KGS', 'KZT'];
+
+/** Валюты, закреплённые пользователем через «＋», — localStorage (≤5). */
+const CCY_KEY = 'report_ccys_v1';
+const loadCustomCcys = (): string[] => {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(CCY_KEY) ?? '[]');
+    return Array.isArray(v)
+      ? v.filter((x): x is string => typeof x === 'string' && /^[A-Z]{3,5}$/.test(x)).slice(0, 5)
+      : [];
+  } catch {
+    return [];
+  }
+};
+const saveCustomCcys = (xs: readonly string[]) => {
+  try {
+    localStorage.setItem(CCY_KEY, JSON.stringify(xs));
+  } catch {
+    /* private mode — закрепление просто не запоминается */
+  }
+};
 
 const chipCls =
   'rounded-full border border-white/10 bg-zinc-900 px-3.5 py-2 text-[13px] text-zinc-300 transition hover:border-white/20';
@@ -54,6 +75,10 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
   const [offset, setOffset] = useState(0);
   // null → валюта дохода из профиля (дефолт отчёта)
   const [ccy, setCcy] = useState<string | null>(null);
+  const [customCcys, setCustomCcys] = useState<string[]>(loadCustomCcys);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickVal, setPickVal] = useState('');
+  const [selB, setSelB] = useState<string | null>(null);
   const prof = useData(() => api.get<Profile>('/api/tma/profile'), onFatal, []);
   const debts = useData(() => api.get<DebtsList>('/api/tma/debts'), onFatal, []);
   const sel = ccy ?? prof.data?.income_currency ?? null;
@@ -65,18 +90,34 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
     onFatal,
     [period, offset, sel],
   );
+  // чипы = свои валюты (профиль + долги + закреплённые через «＋»), по центру
   const chipCcys = [
     ...new Set(
       [
-        ...CHIP_BASE,
         prof.data?.income_currency,
         prof.data?.living_currency,
         prof.data?.base_currency,
         prof.data?.expense_currency,
+        ...customCcys,
         ...(debts.data?.debts.map((d) => d.currency) ?? []),
       ].filter((x): x is string => !!x),
     ),
-  ].slice(0, 7);
+  ].slice(0, 9);
+  if (sel && !chipCcys.includes(sel)) chipCcys.unshift(sel);
+
+  /** Выбор в пикере «＋» → чип закрепляется в наборе и становится валютой отчёта. */
+  const addCcy = (v: string) => {
+    const code = v.trim().toUpperCase();
+    if (!/^[A-Z]{3,5}$/.test(code)) return;
+    setCcy(code);
+    if (!chipCcys.includes(code)) {
+      const next = [code, ...customCcys.filter((x) => x !== code)].slice(0, 5);
+      setCustomCcys(next);
+      saveCustomCcys(next);
+    }
+    setPickVal('');
+    setPickerOpen(false);
+  };
 
   const r = rep.data;
   const c = r?.currency ?? 'USD';
@@ -91,6 +132,8 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
   const delta = r && r.prev.spent_total > 0 ? Math.round((r.spent.total / r.prev.spent_total - 1) * 100) : null;
   const maxB = r ? Math.max(1, ...r.buckets.map((b) => b.living + b.other)) : 1;
   const maxRecv = r ? Math.max(1, ...r.buckets.map((b) => b.received)) : 1;
+  const avgB = r ? r.buckets.reduce((s, b) => s + b.living + b.other, 0) / Math.max(1, r.buckets.length) : 0;
+  const selBucket = r?.buckets.find((b) => b.key === selB) ?? null;
 
   return (
     <>
@@ -115,7 +158,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
           </button>
         ))}
       </div>
-      <div class="mb-3 flex flex-wrap items-center gap-2">
+      <div class="mb-3 flex flex-wrap items-center justify-center gap-2">
         {chipCcys.map((x) => (
           <button
             type="button"
@@ -125,11 +168,36 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
             {x}
           </button>
         ))}
-        {/* Остальные валюты — общий список + «Другое…» */}
-        <div class="w-24">
-          <CcySelect value={sel ?? ''} onChange={(v) => setCcy(v)} extra={chipCcys} />
-        </div>
+        <button
+          type="button"
+          class={`${chipCls} inline-flex items-center`}
+          aria-label="Другая валюта"
+          title="Добавить валюту в чипы"
+          onClick={() => setPickerOpen((o) => !o)}
+        >
+          <Plus size={13} strokeWidth={1.5} />
+        </button>
       </div>
+      {pickerOpen && (
+        <div class="mb-3 flex items-start justify-center gap-2">
+          <div class="w-44">
+            <CcySelect
+              value={pickVal}
+              onChange={setPickVal}
+              extra={chipCcys}
+              placeholder="Другая валюта…"
+            />
+          </div>
+          <button
+            type="button"
+            class={`${chipOnCls} disabled:opacity-40`}
+            disabled={!/^[A-Z]{3,5}$/.test(pickVal.trim().toUpperCase())}
+            onClick={() => addCcy(pickVal)}
+          >
+            Добавить
+          </button>
+        </div>
+      )}
       <div class="mb-4 flex items-center justify-center gap-3">
         <button
           type="button"
@@ -159,16 +227,22 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
       {!rep.loading && r && (
         <>
           <div class="grid grid-cols-3 gap-2.5">
-            <div class="rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
-              <div class="text-base font-semibold text-emerald-400">{fmtMinor(r.received.total, c)}</div>
+            <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
+              <div class="whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums text-emerald-400">
+                {fmtMinor(r.received.total, c)}
+              </div>
               <div class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-400">Получено</div>
             </div>
-            <div class="rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
-              <div class="text-base font-semibold">{fmtMinor(r.spent.total, c)}</div>
+            <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
+              <div class="whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums">
+                {fmtMinor(r.spent.total, c)}
+              </div>
               <div class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-400">Потрачено</div>
             </div>
-            <div class="rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
-              <div class={`text-base font-semibold ${r.net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
+              <div
+                class={`whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums ${r.net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
+              >
                 {r.net >= 0 ? '+' : '−'}
                 {fmtMinor(Math.abs(r.net), c)}
               </div>
@@ -187,7 +261,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
           )}
 
           <h2 class={`${headCls} mt-6`}>
-            <ChartPie size={16} strokeWidth={1.5} /> Куда ушли деньги
+            <ChartPie size={16} strokeWidth={1.5} /> Распределение расходов
           </h2>
           <div class={`${cardCls} mt-2`}>
             <div class="mb-3 mt-1 flex h-3.5 overflow-hidden rounded-full">
@@ -234,6 +308,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                     <div class={rowCls}>
                       <span>
                         {x.emoji} {x.name}
+                        <span class="ml-1 text-[11px] text-zinc-500">· {x.count}</span>
                       </span>
                       <span>
                         {fmtMinor(x.amount, c)} · {Math.round(x.share * 100)}%
@@ -252,26 +327,74 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
             <ChartColumn size={16} strokeWidth={1.5} /> Динамика
           </h2>
           <div class={`${cardCls} mt-2`}>
-            <div class="scrollbar-thin flex min-h-[110px] items-end gap-1 overflow-x-auto px-1 pb-1 pt-2">
-              {r.buckets.map((b) => (
-                <div class="flex min-w-[18px] flex-1 basis-[18px] flex-col items-center" key={b.key}>
-                  <div class="flex h-[88px] items-end gap-0.5">
-                    <div class="flex w-3 flex-col-reverse rounded-t-sm">
-                      <i class="block w-full" style={{ height: `${((b.living / maxB) * 88) | 0}px`, background: COLORS.living }} />
-                      <i class="block w-full" style={{ height: `${((b.other / maxB) * 88) | 0}px`, background: COLORS.commitments }} />
+            <div class="relative">
+              <div class="scrollbar-thin flex min-h-[110px] items-end gap-1 overflow-x-auto px-1 pb-1 pt-2">
+                {r.buckets.map((b) => (
+                  <button
+                    type="button"
+                    class={`flex min-w-[18px] flex-1 basis-[18px] flex-col items-center rounded-md pt-0.5 transition ${selB === b.key ? 'bg-white/10' : 'hover:bg-white/5'}`}
+                    key={b.key}
+                    onClick={() => setSelB((k) => (k === b.key ? null : b.key))}
+                  >
+                    <div class="flex h-[88px] items-end gap-0.5">
+                      <div class="flex w-3 flex-col-reverse rounded-t-sm">
+                        <i class="block w-full" style={{ height: `${((b.living / maxB) * 88) | 0}px`, background: COLORS.living }} />
+                        <i class="block w-full" style={{ height: `${((b.other / maxB) * 88) | 0}px`, background: COLORS.commitments }} />
+                      </div>
+                      <div class="w-[3px] self-end rounded-sm bg-emerald-500" style={{ height: `${((b.received / maxRecv) * 88) | 0}px` }} />
                     </div>
-                    <div class="w-[3px] self-end rounded-sm bg-emerald-500" style={{ height: `${((b.received / maxRecv) * 88) | 0}px` }} />
-                  </div>
-                  <div class="mt-1 text-[9px] text-zinc-500">{b.label}</div>
-                </div>
-              ))}
+                    <div class={`mt-1 text-[9px] ${selB === b.key ? 'font-medium text-sky-300' : 'text-zinc-500'}`}>
+                      {b.label}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {/* пунктир — средний расход за бакет */}
+              {avgB > 0 && (
+                <i
+                  class="pointer-events-none absolute inset-x-0 border-t border-dashed border-zinc-500/70"
+                  style={{ bottom: `${18 + Math.round((avgB / maxB) * 88)}px` }}
+                />
+              )}
             </div>
+            <div class="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-zinc-400">
+              <span class="inline-flex items-center gap-1">
+                <i class="h-2 w-2 rounded-[3px]" style={{ background: COLORS.living }} /> Повседневные
+              </span>
+              <span class="inline-flex items-center gap-1">
+                <i class="h-2 w-2 rounded-[3px]" style={{ background: COLORS.commitments }} /> Прочие
+                расходы
+              </span>
+              <span class="inline-flex items-center gap-1">
+                <i class="h-2 w-2 rounded-[3px] bg-emerald-500" /> Поступило
+              </span>
+              {avgB > 0 && (
+                <span class="inline-flex items-center gap-1">
+                  <i class="w-4 border-t border-dashed border-zinc-500" /> среднее
+                </span>
+              )}
+            </div>
+            {selBucket && (
+              <p class="mt-2 rounded-lg bg-white/5 px-3 py-2 text-center text-[12px] text-zinc-300">
+                <b>{selBucket.key.length > 7 ? fmtDay(selBucket.key) : selBucket.label}</b>
+                {' · '}
+                {fmtMinor(selBucket.living + selBucket.other, c)} потрачено
+                {' · '}
+                {fmtMinor(selBucket.received, c)} поступило
+              </p>
+            )}
           </div>
 
           {r.top_expenses.length > 0 && (
             <>
               <h2 class={`${headCls} mt-6`}>
                 <Receipt size={16} strokeWidth={1.5} /> Крупные траты
+                <Info title="Крупные траты">
+                  Крупная — это ≥2× типичной суммы своей категории за период (и ≥2% всех
+                  повседневных трат): 10 000 ₽ в кафе — крупно, а на ремонт авто — норма.
+                  Бейдж «×2,4» — во сколько раз больше обычного в категории.
+                  Три самые большие траты показаны в любом случае.
+                </Info>
               </h2>
               <div class={`${listCardCls} mt-2`}>
                 <ul class="divide-y divide-white/5">
@@ -281,11 +404,21 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                       onClick={() => nav.push({ id: 'expense', expenseId: e.id })}
                     >
                       <div class={rowCls}>
-                        <span>
+                        <span class="min-w-0 truncate">
                           {fmtDay(e.spent_on)}
                           {e.note ? ` · ${e.note}` : ''}
                         </span>
-                        <span>{fmtMinor(e.amount, c)}</span>
+                        <span class="ml-2 flex-none whitespace-nowrap tabular-nums">
+                          {e.ratio !== null && (
+                            <span class="mr-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 align-middle text-[10px] font-medium text-amber-300">
+                              ×{String(e.ratio).replace('.', ',')}
+                            </span>
+                          )}
+                          {fmtMinor(e.amount, c)}
+                        </span>
+                      </div>
+                      <div class="mt-0.5 text-[11px] text-zinc-500">
+                        {e.cat_emoji} {e.cat_name}
                       </div>
                     </li>
                   ))}

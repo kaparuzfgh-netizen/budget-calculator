@@ -519,6 +519,10 @@ export interface ReportTopExpense {
   amount: number;
   note: string | null;
   category_id: number | null;
+  cat_name: string;
+  cat_emoji: string;
+  /** ×N от медианы своей категории; null — просто крупная абсолютная (топ-3). */
+  ratio: number | null;
 }
 export interface Report {
   period: string;

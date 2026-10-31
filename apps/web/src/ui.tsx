@@ -411,12 +411,14 @@ export function CcySelect({
   extra = [],
   allowEmpty = false,
   emptyLabel = '—',
+  placeholder = '—',
 }: {
   value: string;
   onChange: (v: string) => void;
   extra?: readonly (string | null | undefined)[];
   allowEmpty?: boolean;
   emptyLabel?: string;
+  placeholder?: string;
 }) {
   const up = (x: string) => x.toUpperCase();
   const known = [
@@ -446,7 +448,13 @@ export function CcySelect({
   };
   return (
     <div>
-      <Select value={customMode ? CCY_CUSTOM : up(value)} options={options} onChange={pick} searchable />
+      <Select
+        value={customMode ? CCY_CUSTOM : up(value)}
+        options={options}
+        onChange={pick}
+        searchable
+        placeholder={placeholder}
+      />
       {customMode && (
         <input
           class={`${inputCls} mt-2`}

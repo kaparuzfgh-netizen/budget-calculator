@@ -176,11 +176,54 @@ export function buildReport(inp: ReportInput) {
     };
   });
 
-  const top_expenses = inp.expenses
+  // Крупные траты: топ-3 абсолютные + «выбросы» внутри категории
+  // (≥2× медианы своей категории и ≥2% повседневных — не мелочь).
+  const conv = inp.expenses
     .filter((e) => inRange(e.spent_on, R))
-    .map((e) => ({ id: e.id, spent_on: e.spent_on, amount: liv(e.amount_minor, e.currency), note: e.note, category_id: e.category_id }))
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 5);
+    .map((e) => ({ ...e, minor: liv(e.amount_minor, e.currency) }));
+  const byCat = new Map<number | null, number[]>();
+  for (const e of conv) {
+    const arr = byCat.get(e.category_id) ?? [];
+    arr.push(e.minor);
+    byCat.set(e.category_id, arr);
+  }
+  const median = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+  };
+  const floor = cur.living * 0.02;
+  const notable = new Map<number, { e: (typeof conv)[number]; ratio: number | null }>();
+  for (const e of [...conv].sort((a, b) => b.minor - a.minor).slice(0, 3)) {
+    notable.set(e.id, { e, ratio: null });
+  }
+  for (const e of conv) {
+    const xs = byCat.get(e.category_id)!;
+    if (xs.length < 3 || e.minor < floor) continue;
+    const med = median(xs);
+    if (med > 0 && e.minor >= 2 * med) {
+      notable.set(e.id, { e, ratio: Math.round((e.minor / med) * 10) / 10 });
+    }
+  }
+  const top_expenses = [...notable.values()]
+    .sort((a, b) => b.e.minor - a.e.minor)
+    .slice(0, 8)
+    .map(({ e, ratio }) => {
+      const meta =
+        e.category_id === null
+          ? { name: 'Без категории', emoji: '❔' }
+          : catMeta.get(e.category_id) ?? { name: '—', emoji: '❔' };
+      return {
+        id: e.id,
+        spent_on: e.spent_on,
+        amount: e.minor,
+        note: e.note,
+        category_id: e.category_id,
+        cat_name: meta.name,
+        cat_emoji: meta.emoji,
+        ratio,
+      };
+    });
 
   return {
     period: inp.period,

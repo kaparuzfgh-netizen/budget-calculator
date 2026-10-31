@@ -267,7 +267,7 @@ describe('/plan с фактом месяца', () => {
     // факт 3000€ → USD 3270; базовый 6200€ игнорируется
     await msg(OWNER + 44, '/plan');
     const t = last();
-    expect(t).toContain('3 270 $');
+    expect(t).toContain('3 270 $');
     expect(t).toContain('факт за');
     expect(t).toContain('1 записей');
     // без записей → базовый
@@ -280,7 +280,7 @@ describe('/plan с фактом месяца', () => {
     const uid3 = await setupUser(OWNER + 46, { incomeMinor: 0 });
     void uid3;
     await msg(OWNER + 46, '/plan');
-    expect(last()).toContain('618,56 $');
+    expect(last()).toContain('618,56 $');
     expect(last()).toContain('расчёт: платежи + бюджет + кредиты');
     // ни дохода, ни обязательств → «без дохода»
     await setupUser(OWNER + 47, { incomeMinor: 0, livingMinor: 0 });
@@ -288,7 +288,7 @@ describe('/plan с фактом месяца', () => {
     expect(last()).toContain('без дохода');
     // override
     await msg(OWNER + 45, '/plan 1000 usd');
-    expect(last()).toContain('1 000 $');
+    expect(last()).toContain('1 000 $');
     expect(last()).toContain('задано вручную');
   });
 });
@@ -335,10 +335,10 @@ describe('редактирование профиля (pf:*)', () => {
     await cb(OWNER + 52, 'pf:sec:commits');
     expect(last()).toContain('Аренда');
     await cb(OWNER + 52, `pf:cm:${cid}`);
-    expect(last()).toContain('700 $');
+    expect(last()).toContain('700 $');
     await cb(OWNER + 52, `pf:ca:${cid}`);
     await msg(OWNER + 52, '800');
-    expect(last()).toContain('800 $'); // карточка рендерится ПОСЛЕ мутации
+    expect(last()).toContain('800 $'); // карточка рендерится ПОСЛЕ мутации
     expect((await scoped(env.DB, uid).getCommitment(cid))!.amount_minor).toBe(80000);
     await cb(OWNER + 52, `pf:cday:${cid}`);
     await msg(OWNER + 52, '15');
@@ -349,7 +349,7 @@ describe('редактирование профиля (pf:*)', () => {
     expect((await scoped(env.DB, uid).getCommitment(cid))!.active).toBe(0);
     // выключенный не входит в /plan
     await msg(OWNER + 52, '/plan');
-    expect(last()).not.toContain('800 $');
+    expect(last()).not.toContain('800 $');
     await msg(OWNER + 52, '⚙️ Профиль'); // /plan закрыл меню — открываем заново
     await cb(OWNER + 52, 'pf:sec:commits');
     await cb(OWNER + 52, `pf:cm:${cid}`);
