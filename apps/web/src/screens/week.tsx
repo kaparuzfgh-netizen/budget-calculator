@@ -47,6 +47,7 @@ import {
   smGhostBtnCls,
   useData,
 } from '../ui';
+import { ShotButton } from './vision';
 
 const chipCls =
   'inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-zinc-900 px-3.5 py-2 text-[13px] text-zinc-300 transition hover:border-white/20';
@@ -500,6 +501,9 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
           </button>
         </form>
       </div>
+
+      {/* 📷 загрузка банковского скриншота — opt-in (Профиль → ⚡️ Возможности) */}
+      <ShotButton api={api} nav={nav} onFatal={onFatal} enabled={!!prof.data?.vision_enabled} />
     </>
   );
 }

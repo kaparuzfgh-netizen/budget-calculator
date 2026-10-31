@@ -61,6 +61,22 @@ const moneySchema = z.object({
   spent_on: zIso.optional(),
   received_on: zIso.optional(),
 });
+/** Одна строка пакетной записи трат (vision-загрузка ≤30): те же правила, что у одиночного POST. */
+const expenseItemSchema = z.object({
+  amount: zAmount,
+  currency: zCcy.optional(),
+  note: zNote,
+  /** Идемпотентность строки — свой client_id на позицию ('tma:<client_id>'). */
+  client_id: zClientId,
+  category_id: z.number().int().positive().nullable().optional(),
+  spent_on: zIso.optional(),
+});
+/**
+ * Пакетный POST /expenses: ключ items → схема-пачка (≤30 строк; даты и
+ * категории валидируются ДО первой вставки — «всё или ничего» по схеме;
+ * повтор по client_id даёт duplicate). Без items — одиночная moneySchema.
+ */
+const expenseBatchSchema = z.object({ items: z.array(expenseItemSchema).min(1).max(30) });
 const expensePatchSchema = z.object({
   amount: zAmount.optional(),
   currency: zCcy.optional(),
@@ -328,13 +344,66 @@ export function registerTmaApi(
   });
   app.post('/api/tma/expenses', tmaAuth, async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    const parsed = moneySchema.safeParse(body);
+    // наличие ключа items — однозначный выбор пакетной схемы (иначе одиночная)
+    const hasItems = typeof body === 'object' && body !== null && 'items' in body;
+    const parsed = (hasItems ? expenseBatchSchema : moneySchema).safeParse(body);
     if (!parsed.success) return c.json(bad('нужны amount (>0) и допустимые currency/note').body, 400);
     const repo = repoOf(c);
     const p = await profile(repo);
     if (!p) return c.json(notOnboarded().body, 403);
     const b = parsed.data;
     const today = todayInTz(p.timezone, new Date());
+    // ── пакетная запись (vision-скриншот): валидация всей пачки до первой
+    // вставки, дальше — та же логика, что у одиночной (дедуп + автокатегория)
+    if ('items' in b) {
+      for (const it of b.items) {
+        if (it.spent_on !== undefined && !dayInRange(it.spent_on, today))
+          return c.json(bad('дата: 2000-01-01 … сегодня').body, 400);
+        if (it.category_id != null && !(await repo.getCategory(it.category_id)))
+          return c.json(bad('категория не найдена').body, 400);
+      }
+      await repo.ensureCategories();
+      const cats = (await repo.listCategories()).results;
+      const ids: number[] = [];
+      let created = 0;
+      let duplicates = 0;
+      for (const it of b.items) {
+        const key = it.client_id ? `tma:${it.client_id}` : `tma:u:${crypto.randomUUID()}`;
+        if (it.client_id) {
+          const dup = await repo.findExpenseByKey(key);
+          if (dup) {
+            duplicates++;
+            ids.push(dup.id);
+            continue;
+          }
+        }
+        let categoryId = it.category_id ?? null;
+        let note = it.note ?? null;
+        if (categoryId === null) {
+          const m = matchCategory(note, cats);
+          categoryId = m.categoryId;
+          note = m.note;
+        }
+        const r = await repo.addExpense({
+          spent_on: it.spent_on ?? today,
+          amount_minor: toMinor(it.amount),
+          currency: it.currency ?? p.expense_currency ?? p.living_currency,
+          note,
+          source: 'manual', // строки проверены человеком в шторке — как ручной ввод
+          source_key: key,
+          category_id: categoryId,
+        });
+        if (r.meta.changes === 0) {
+          const dup = it.client_id ? await repo.findExpenseByKey(key) : null;
+          if (dup) ids.push(dup.id);
+          duplicates++;
+          continue;
+        }
+        created++;
+        ids.push(Number(r.meta.last_row_id));
+      }
+      return okJson(c, { created, duplicates, ids }, created ? 201 : 200);
+    }
     if (b.spent_on !== undefined && !dayInRange(b.spent_on, today))
       return c.json(bad('дата: 2000-01-01 … сегодня').body, 400);
     const key = b.client_id ? `tma:${b.client_id}` : `tma:u:${crypto.randomUUID()}`;

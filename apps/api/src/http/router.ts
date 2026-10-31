@@ -20,6 +20,7 @@ import { buildOverview } from '../tma/overview';
 import { registerTmaApi } from '../tma/api';
 import { registerTmaDebts } from '../tma/debts';
 import { registerTmaFx } from '../tma/fx';
+import { registerTmaVision } from '../tma/vision';
 
 const APP_VERSION = '0.1.0';
 
@@ -192,6 +193,16 @@ export function createRouter(deps: RouterDeps = {}) {
   registerTmaApi(app, tmaAuth, fxProvider);
   registerTmaDebts(app, tmaAuth, fxProvider);
   registerTmaFx(app, tmaAuth, fxProvider);
+  // Скриншот банка из Mini App — те же ключи/фетч, что и у бота
+  // (deps.vision в тестах, env-секреты в проде; резолвится на запрос).
+  registerTmaVision(app, tmaAuth, (c) =>
+    deps.vision ?? {
+      geminiKey: c.env.GEMINI_API_KEY,
+      geminiModel: c.env.GEMINI_MODEL,
+      groqKey: c.env.GROQ_API_KEY,
+      groqModel: c.env.GROQ_MODEL,
+    },
+  );
 
   app.post('/telegram/webhook', async (c) => {
     const auth = await verifyWebhookSecret(

@@ -34,6 +34,7 @@ import {
   TrendingUp,
   Upload,
   Wallet,
+  Zap,
 } from 'lucide-preact';
 import { ApiError } from '../api';
 import type {
@@ -571,8 +572,11 @@ function Switch({
   );
 }
 
+/** Ключи boolean-настроек профиля (PATCH /profile) — и напоминания, и фичи. */
+type ToggleKey = 'reminders_weekly' | 'reminders_payments' | 'fx_alerts_enabled' | 'vision_enabled';
+
 const REMINDERS: {
-  key: 'reminders_weekly' | 'reminders_payments' | 'fx_alerts_enabled' | 'vision_enabled';
+  key: ToggleKey;
   icon: typeof Bell;
   label: ComponentChildren;
   hint: string;
@@ -580,6 +584,15 @@ const REMINDERS: {
   { key: 'reminders_weekly', icon: CalendarClock, label: 'Еженедельный итог', hint: 'вс 20:00 — траты недели' },
   { key: 'reminders_payments', icon: Receipt, label: 'Платежи и сроки', hint: 'за 2 дня до срока, 10:00' },
   { key: 'fx_alerts_enabled', icon: TrendingUp, label: 'Алерты по курсам', hint: 'выгодные моменты для обмена' },
+];
+
+/** «⚡️ Возможности» — opt-in фичи (не напоминания), тот же PATCH-контракт. */
+const FEATURES: {
+  key: ToggleKey;
+  icon: typeof Bell;
+  label: ComponentChildren;
+  hint: string;
+}[] = [
   {
     key: 'vision_enabled',
     icon: Camera,
@@ -588,8 +601,10 @@ const REMINDERS: {
         Распознавание скриншотов
         <Info title="Распознавание скриншотов">
           <p>
-            Включите — и боту можно прислать скриншот банковского приложения:
-            он распознает траты и предложит записать.
+            Включите — и можно прислать скриншот банковского приложения боту
+            ИЛИ загрузить его здесь: кнопка «📷 Из скриншота» в форме траты.
+            Строки операций распознаются списком — перед записью их можно
+            проверить и поправить.
           </p>
           <p>
             Фото уходит в Google AI (резерв — Groq), хранится только результат.
@@ -598,7 +613,7 @@ const REMINDERS: {
         </Info>
       </>
     ),
-    hint: 'бот читает фото банка и предлагает записать траты',
+    hint: 'фото банка — в боте или в форме траты',
   },
 ];
 
@@ -643,9 +658,10 @@ function ProfileForms({
   const [tzErr, setTzErr] = useState<string | null>(null);
   const [tzBusy, setTzBusy] = useState(false);
 
-  // напоминания — переключатели сразу PATCH'ат
+  // напоминания и фичи — переключатели сразу PATCH'ат; ошибка — в своей карточке
   const [remBusy, setRemBusy] = useState(false);
   const [remErr, setRemErr] = useState<string | null>(null);
+  const [featErr, setFeatErr] = useState<string | null>(null);
 
   // экспорт
   const [expBusy, setExpBusy] = useState(false);
@@ -722,15 +738,20 @@ function ProfileForms({
     }
   };
 
-  const toggleReminder = async (key: (typeof REMINDERS)[number]['key'], value: boolean) => {
+  const toggleReminder = async (
+    key: ToggleKey,
+    value: boolean,
+    flash = 'Напоминания обновлены',
+    setErr = setRemErr,
+  ) => {
     setRemBusy(true);
-    setRemErr(null);
+    setErr(null);
     try {
       await api.patch('/api/tma/profile', { [key]: value });
-      nav.flash('Напоминания обновлены');
+      nav.flash(flash);
       reload();
     } catch (e) {
-      setRemErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
+      setErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
     } finally {
       setRemBusy(false);
     }
@@ -984,6 +1005,27 @@ function ProfileForms({
           </li>
         </ul>
         {remErr && <p class="px-4 pb-3 text-sm text-red-400">{remErr}</p>}
+      </div>
+
+      <h2 class={`${headCls} mt-6`}>
+        <Zap size={16} strokeWidth={1.5} /> Возможности
+      </h2>
+      <div class={`${listCardCls} mt-2`}>
+        <ul class="divide-y divide-white/5">
+          {FEATURES.map((f) => (
+            <li key={f.key}>
+              <Switch
+                icon={<f.icon size={17} strokeWidth={1.5} class="flex-none text-zinc-400" />}
+                label={f.label}
+                hint={f.hint}
+                checked={!!p[f.key]}
+                busy={remBusy}
+                onToggle={() => void toggleReminder(f.key, !p[f.key], 'Настройка сохранена', setFeatErr)}
+              />
+            </li>
+          ))}
+        </ul>
+        {featErr && <p class="px-4 pb-3 text-sm text-red-400">{featErr}</p>}
       </div>
 
       <h2 class={`${headCls} mt-6`}>

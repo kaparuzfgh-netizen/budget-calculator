@@ -63,7 +63,7 @@ describe('/api/tma/* — контракт', () => {
       ['GET', '/api/tma/commitments'], ['POST', '/api/tma/commitments'],
       ['GET', '/api/tma/commitments/1/payments'], ['POST', '/api/tma/commitments/1/payments'],
       ['PATCH', '/api/tma/commitment-payments/1'], ['DELETE', '/api/tma/commitment-payments/1'],
-      ['GET', '/api/tma/export'],
+      ['GET', '/api/tma/export'], ['POST', '/api/tma/vision/analyze'],
     ] as const) expect((await api(p, { method: m, body: {} })).status, `${m} ${p}`).toBe(401);
   });
 

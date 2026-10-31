@@ -8,7 +8,7 @@ import { parseWithGemini } from './gemini';
 import { parseWithGroq } from './groq';
 
 export { VisionError } from './types';
-export type { VisionProvider, VisionResult, VisionScreenType } from './types';
+export type { VisionProvider, VisionResult, VisionScreenType, VisionTx } from './types';
 export { sanitizeVision, visionPrompt, VISION_SCHEMA } from './parse';
 export { parseWithGemini } from './gemini';
 export { parseWithGroq } from './groq';

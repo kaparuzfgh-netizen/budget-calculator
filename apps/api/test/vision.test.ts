@@ -64,6 +64,82 @@ describe('sanitizeVision', () => {
     expect(() => sanitizeVision([1, 2], 'gemini', 'RUB')).toThrow(VisionError);
     expect(() => sanitizeVision('json', 'groq', 'RUB')).toThrow(VisionError);
   });
+  it('transactions: строки парсятся; сводка не ломается', () => {
+    const r = sanitizeVision(
+      {
+        screen_type: 'expense_analytics',
+        period: 'неделя',
+        total_spent: 1000,
+        currency: 'RUB',
+        transactions: [
+          { date: '2026-10-20', amount: 320, note: 'Кофейня', category: 'Кафе' },
+          { date: null, amount: 680.5, note: 'Магазин' },
+        ],
+      },
+      'gemini',
+      'RUB',
+    );
+    expect(r.screen_type).toBe('expense_analytics');
+    expect(r.total_spent).toBe(1000);
+    expect(r.transactions).toHaveLength(2);
+    expect(r.transactions![0]).toEqual({ date: '2026-10-20', amount: 320, note: 'Кофейня', category: 'Кафе' });
+    expect(r.transactions![1]).toMatchObject({ date: null, amount: 680.5, category: '' });
+  });
+  it('transactions: битые строки выпадают, строки обрезаются', () => {
+    const r = sanitizeVision(
+      {
+        screen_type: 'expense_analytics',
+        total_spent: 0, // итога нет — база капа = сумма самих строк
+        transactions: [
+          ...Array.from({ length: 28 }, (_, i) => ({ date: '2026-10-01', amount: 100, note: `t${i}` })),
+          { amount: 'мусор' },
+          { amount: -50 },
+          { amount: 0 },
+          null,
+          { amount: 9_000_000 }, // >5e6 — абсолютный предел
+          { amount: 100, date: 'не дата', note: 'x'.repeat(500), category: 'y'.repeat(300) },
+          { amount: 100, date: '2026-02-30' }, // несуществующая дата → null
+        ],
+      },
+      'groq',
+      'RUB',
+    );
+    expect(r.transactions).toHaveLength(30); // 30 валидных; битые строки выпали
+    expect(r.transactions![28]).toMatchObject({ date: null, amount: 100 });
+    expect(r.transactions![28]!.note).toHaveLength(200); // обрезано до 200
+    expect(r.transactions![28]!.category).toHaveLength(200);
+    expect(r.transactions![29]!.date).toBeNull(); // '2026-02-30' → null
+    expect(r.transactions!.every((t) => t.amount > 0 && t.amount <= 5_000_000)).toBe(true);
+  });
+  it('transactions: кап — 30 строк', () => {
+    const r = sanitizeVision(
+      { transactions: Array.from({ length: 40 }, (_, i) => ({ amount: 10, note: `t${i}` })) },
+      'gemini',
+      'RUB',
+    );
+    expect(r.transactions).toHaveLength(30);
+  });
+  it('transactions: сверх total*1.5 отсекается, как у категорий', () => {
+    const r = sanitizeVision(
+      {
+        screen_type: 'expense_analytics',
+        total_spent: 1000,
+        transactions: [
+          { amount: 1400 }, // ≤1500 — ок
+          { amount: 1600 }, // >total*1.5 — вылетает
+        ],
+      },
+      'gemini',
+      'RUB',
+    );
+    expect(r.transactions!.map((t) => t.amount)).toEqual([1400]);
+  });
+  it('transactions: нет/пустой массив — поле не добавляется', () => {
+    expect(sanitizeVision({ screen_type: 'expense_analytics' }, 'gemini', 'RUB').transactions).toBeUndefined();
+    expect(
+      sanitizeVision({ transactions: [{ amount: 'x' }] }, 'gemini', 'RUB').transactions,
+    ).toBeUndefined();
+  });
 });
 
 // ── unit: провайдеры на мокнутом fetch ──

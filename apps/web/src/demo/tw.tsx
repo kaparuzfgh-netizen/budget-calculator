@@ -206,6 +206,28 @@ const stubApi: Api = {
     applyDel(path);
     return Promise.resolve({ ok: true }) as Promise<T>;
   },
+  postRaw: <T,>(path: string): Promise<T> => {
+    console.log('[demo] POST (raw)', path);
+    // «разобранный» скриншот — шторка проверки в демо
+    return Promise.resolve({
+      ok: true,
+      result: {
+        provider: 'gemini',
+        screen_type: 'expense_analytics',
+        period: 'неделя',
+        total_spent: 1240,
+        currency: 'RUB',
+        top_categories: [],
+        is_full_month_analytics: false,
+        bank: 'Демо-банк',
+        debt_balance: 0,
+        transactions: [
+          { date: null, amount: 540, note: 'Продукты', category: '' },
+          { date: null, amount: 700, note: 'Кафе', category: '' },
+        ],
+      },
+    }) as Promise<T>;
+  },
   getBlob: (path) => {
     console.log('[demo] GET (blob)', path);
     return Promise.resolve(new Blob([JSON.stringify({ demo: true })], { type: 'application/json' }));

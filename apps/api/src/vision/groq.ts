@@ -33,7 +33,8 @@ export async function parseWithGroq(b64: string, mime: string, opts: GroqOpts): 
             text:
               opts.prompt +
               '\nВерни JSON с полями: screen_type, period, total_spent, currency, ' +
-              'top_categories[{category,amount}], is_full_month_analytics, bank, debt_balance.',
+              'top_categories[{category,amount}], is_full_month_analytics, bank, debt_balance, ' +
+              'transactions[{date,amount,note,category}].',
           },
           { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
         ],

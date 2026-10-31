@@ -308,6 +308,32 @@ export interface FxScreenData {
   exchanges: ExchangeItem[];
 }
 
+// ── vision /api/tma/vision/analyze ──
+
+/** Строка истории трат, распознанная на скриншоте (major units, как у API). */
+export interface VisionTxItem {
+  date: string | null;
+  amount: number;
+  note: string;
+  category: string;
+}
+export interface VisionAnalysis {
+  provider: 'gemini' | 'groq';
+  screen_type: 'expense_analytics' | 'debt_balance' | 'other';
+  period: string;
+  total_spent: number;
+  currency: string;
+  top_categories: { category: string; amount: number }[];
+  is_full_month_analytics: boolean;
+  bank: string;
+  debt_balance: number;
+  transactions?: VisionTxItem[];
+}
+export interface VisionAnalyzeResponse {
+  ok: boolean;
+  result: VisionAnalysis;
+}
+
 // ── клиент ──
 
 export interface Api {
@@ -315,6 +341,8 @@ export interface Api {
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   del<T>(path: string): Promise<T>;
+  /** Бинарный POST (загрузка скриншота): сырые байты + свой Content-Type. */
+  postRaw<T>(path: string, body: ArrayBuffer, contentType: string): Promise<T>;
   /** Бинарный ответ (экспорт JSON): Bearer + один reauth — как у req. */
   getBlob(path: string): Promise<Blob>;
 }
@@ -329,25 +357,31 @@ interface ApiOpts {
 export function createApi(opts: ApiOpts): Api {
   let reauthing: Promise<string> | null = null; // дедуп параллельных 401
 
-  const raw = (method: string, path: string, body: unknown, token: string): Promise<Response> =>
+  interface Send {
+    body?: BodyInit | undefined;
+    contentType?: string | undefined;
+  }
+
+  const raw = (method: string, path: string, send: Send, token: string): Promise<Response> =>
     fetch(path, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(send.contentType ? { 'Content-Type': send.contentType } : {}),
       },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(send.body !== undefined ? { body: send.body } : {}),
     });
 
-  const req = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-    let res = await raw(method, path, body, opts.getToken());
+  /** send → fetch с одним reauth при 401; тело ответа → JSON-контракт/ApiError. */
+  const req = async <T>(method: string, path: string, send: Send): Promise<T> => {
+    let res = await raw(method, path, send, opts.getToken());
     if (res.status === 401) {
       // Сессия протухла — один reauth и один повтор; дальше не мучаем.
       reauthing ??= opts.reauth().finally(() => {
         reauthing = null;
       });
       await reauthing;
-      res = await raw(method, path, body, opts.getToken());
+      res = await raw(method, path, send, opts.getToken());
     }
     if (res.status === 401 || res.status === 403) {
       throw new ApiError(res.status, 'forbidden', 'Нет доступа');
@@ -365,15 +399,45 @@ export function createApi(opts: ApiOpts): Api {
     return data as T;
   };
 
-  /** Скачивание файла (Bearer, один reauth) — blob уходит в <a download>. */
-  const getBlob = async (path: string): Promise<Blob> => {
-    let res = await raw('GET', path, undefined, opts.getToken());
+  /**
+   * Бинарный POST — как req, но 403 сохраняет код ошибки тела: у
+   * /vision/analyze легальный {error:{code:'disabled'}} ≠ «нет доступа».
+   */
+  const postRaw = async <T>(path: string, body: ArrayBuffer, contentType: string): Promise<T> => {
+    const send = { body, contentType };
+    let res = await raw('POST', path, send, opts.getToken());
     if (res.status === 401) {
       reauthing ??= opts.reauth().finally(() => {
         reauthing = null;
       });
       await reauthing;
-      res = await raw('GET', path, undefined, opts.getToken());
+      res = await raw('POST', path, send, opts.getToken());
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: { code?: string; message?: string };
+    };
+    if (res.status === 401 || (res.status === 403 && !data.error?.code)) {
+      throw new ApiError(res.status, 'forbidden', 'Нет доступа');
+    }
+    if (!res.ok) {
+      throw new ApiError(
+        res.status,
+        data.error?.code ?? 'error',
+        data.error?.message ?? `Сервер ответил ${res.status}`,
+      );
+    }
+    return data as T;
+  };
+
+  /** Скачивание файла (Bearer, один reauth) — blob уходит в <a download>. */
+  const getBlob = async (path: string): Promise<Blob> => {
+    let res = await raw('GET', path, {}, opts.getToken());
+    if (res.status === 401) {
+      reauthing ??= opts.reauth().finally(() => {
+        reauthing = null;
+      });
+      await reauthing;
+      res = await raw('GET', path, {}, opts.getToken());
     }
     if (res.status === 401 || res.status === 403) {
       throw new ApiError(res.status, 'forbidden', 'Нет доступа');
@@ -386,10 +450,19 @@ export function createApi(opts: ApiOpts): Api {
   };
 
   return {
-    get: (path) => req('GET', path),
-    post: (path, body) => req('POST', path, body),
-    patch: (path, body) => req('PATCH', path, body),
-    del: (path) => req('DELETE', path),
+    get: (path) => req('GET', path, {}),
+    post: (path, body) =>
+      req('POST', path, {
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        contentType: body !== undefined ? 'application/json' : undefined,
+      }),
+    patch: (path, body) =>
+      req('PATCH', path, {
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        contentType: body !== undefined ? 'application/json' : undefined,
+      }),
+    del: (path) => req('DELETE', path, {}),
+    postRaw,
     getBlob,
   };
 }
