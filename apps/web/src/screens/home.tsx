@@ -53,9 +53,50 @@ const MONTHS = [
   'июле', 'августе', 'сентябре', 'октябре', 'ноябре', 'декабре',
 ];
 
+/** Плавная кривая без перелётов: монотонная кубика Фрича–Карлсона. */
+function smoothPath(px: number[], py: number[]): string {
+  const n = px.length;
+  if (n < 2) return `M${(px[0] ?? 0).toFixed(1)},${(py[0] ?? 0).toFixed(1)}`;
+  const dx: number[] = [];
+  const sl: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx.push(px[i + 1]! - px[i]!);
+    sl.push((py[i + 1]! - py[i]!) / dx[i]!);
+  }
+  const t: number[] = [sl[0]!];
+  for (let i = 1; i < n - 1; i++) {
+    const s0 = sl[i - 1]!;
+    const s1 = sl[i]!;
+    t.push(s0 * s1 <= 0 ? 0 : (s0 + s1) / 2);
+  }
+  t.push(sl[n - 2]!);
+  for (let i = 0; i < n - 1; i++) {
+    if (sl[i] === 0) {
+      t[i] = 0;
+      t[i + 1] = 0;
+      continue;
+    }
+    const a = t[i]! / sl[i]!;
+    const b = t[i + 1]! / sl[i]!;
+    const s = a * a + b * b;
+    if (s > 9) {
+      const k = 3 / Math.sqrt(s);
+      t[i] = k * a * sl[i]!;
+      t[i + 1] = k * b * sl[i]!;
+    }
+  }
+  let d = `M${px[0]!.toFixed(1)},${py[0]!.toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i]! / 3;
+    d += `C${(px[i]! + h).toFixed(1)},${(py[i]! + t[i]! * h).toFixed(1)} ${(px[i + 1]! - h).toFixed(1)},${(py[i + 1]! - t[i + 1]! * h).toFixed(1)} ${px[i + 1]!.toFixed(1)},${py[i + 1]!.toFixed(1)}`;
+  }
+  return d;
+}
+
 /**
- * График темпа месяца: накопленные траты по дням (линия+заливка)
- * vs ровный график бюджета (пунктир) + точка-прогноз итога месяца.
+ * График темпа месяца (grafana-style): накопленные траты — плавная линия
+ * со свечением и градиентной заливкой; ровный график бюджета — пунктир;
+ * вертикаль «сейчас»; полая точка — прогноз итога при текущем темпе.
  * Цвет — «температура»: зелёный в графике, янтарь/красный при перегреве.
  */
 function TempoChart({
@@ -74,41 +115,54 @@ function TempoChart({
   color: string;
 }) {
   const W = 320;
-  const H = 112;
-  const padL = 6;
-  const padR = 12;
-  const padT = 10;
-  const padB = 8;
+  const H = 140;
+  const padL = 4;
+  const padR = 10;
+  const padT = 12;
+  const padB = 4;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
   const cum: number[] = [];
   for (let i = 0; i < dim; i++) cum.push((cum[i - 1] ?? 0) + (daily[i] ?? 0));
   const cumToday = cum[today - 1] ?? 0;
-  const yMax = Math.max(cap, proj, cumToday, 1) * 1.08;
+  const yMax = Math.max(cap, proj, cumToday, 1) * 1.07;
   const x = (d: number) => padL + (dim > 1 ? ((d - 1) / (dim - 1)) * plotW : plotW / 2);
   const y = (v: number) => padT + (1 - v / yMax) * plotH;
   const yBase = y(0);
-  const pts = Array.from({ length: today }, (_, i) => `${x(i + 1).toFixed(1)},${y(cum[i]!).toFixed(1)}`);
-  const linePts = `${x(1).toFixed(1)},${yBase.toFixed(1)} ${pts.join(' ')}`;
-  const areaD = `M ${x(1).toFixed(1)} ${yBase.toFixed(1)} ${pts.map((p) => `L ${p}`).join(' ')} L ${x(today).toFixed(1)} ${yBase.toFixed(1)} Z`;
-  const projY = y(Math.min(proj, yMax * 0.98));
+  const px = Array.from({ length: today }, (_, i) => x(i + 1));
+  const py = px.map((_, i) => y(cum[i]!));
+  const line = smoothPath(px, py);
+  const area = `${line}L${x(today).toFixed(1)},${yBase.toFixed(1)}L${px[0]!.toFixed(1)},${yBase.toFixed(1)}Z`;
+  const projY = y(Math.min(proj, yMax * 0.97));
+  const gridCls = '#3f3f46';
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" class="mt-2 block h-28 w-full" aria-hidden>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" class="mt-1 block h-36 w-full" aria-hidden>
       <defs>
         <linearGradient id="tempoFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+          <stop offset="0%" stopColor={color} stopOpacity="0.45" />
+          <stop offset="60%" stopColor={color} stopOpacity="0.12" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
+      {/* сетка: половина и потолок бюджета + нулевая ось */}
+      {cap > 0 && <line x1={padL} y1={y(cap / 2)} x2={W - padR} y2={y(cap / 2)} stroke={gridCls} strokeWidth="0.7" strokeDasharray="2 4" opacity="0.5" />}
+      {cap > 0 && <line x1={padL} y1={y(cap)} x2={W - padR} y2={y(cap)} stroke={gridCls} strokeWidth="0.9" strokeDasharray="4 3" opacity="0.8" />}
+      <line x1={padL} y1={yBase} x2={W - padR} y2={yBase} stroke="#52525b" strokeWidth="1" />
+      {/* вертикаль «сейчас» — как now-line в Grafana */}
+      <line x1={x(today)} y1={padT} x2={x(today)} y2={yBase} stroke="#71717a" strokeWidth="0.9" opacity="0.45" />
       {/* идеал: ровный график «бюджет/день × день» */}
-      <line x1={x(1)} y1={yBase} x2={x(dim)} y2={y(cap)} stroke="#71717a" strokeWidth="1" strokeDasharray="4 3" opacity="0.7" />
-      <path d={areaD} fill="url(#tempoFill)" />
-      <polyline points={linePts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <line x1={x(1)} y1={yBase} x2={x(dim)} y2={y(cap)} stroke="#a1a1aa" strokeWidth="1.1" strokeDasharray="5 3" opacity="0.75" />
+      <path d={area} fill="url(#tempoFill)" />
+      {/* свечение + сама линия факта */}
+      <path d={line} fill="none" stroke={color} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" opacity="0.18" />
+      <path d={line} fill="none" stroke={color} strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
       {proj > 0 && (
-        <line x1={x(today)} y1={y(cumToday)} x2={x(dim)} y2={projY} stroke={color} strokeWidth="1.5" strokeDasharray="3 3" opacity="0.7" />
+        <line x1={x(today)} y1={y(cumToday)} x2={x(dim)} y2={projY} stroke={color} strokeWidth="1.6" strokeDasharray="2.5 3" opacity="0.85" />
       )}
-      <circle cx={x(today)} cy={y(cumToday)} r="3" fill={color} />
-      {proj > 0 && <circle cx={x(dim)} cy={projY} r="3.5" fill="#18181b" stroke={color} strokeWidth="1.5" />}
+      {/* точка «сегодня» с ореолом + кольцо прогноза */}
+      <circle cx={x(today)} cy={y(cumToday)} r="6" fill={color} opacity="0.2" />
+      <circle cx={x(today)} cy={y(cumToday)} r="3.2" fill={color} stroke="#18181b" strokeWidth="1" />
+      {proj > 0 && <circle cx={x(dim)} cy={projY} r="4" fill="#18181b" stroke={color} strokeWidth="1.6" />}
     </svg>
   );
 }
@@ -219,12 +273,8 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
   // статус бюджета — единый источник (в «Тратах» только журнал)
   const weekShare = w.week_budget_minor > 0 ? w.week_spent_minor / w.week_budget_minor : 0;
   const spentShare = w.month_cap_minor > 0 ? w.month_spent_minor / w.month_cap_minor : 0;
-  const pace =
-    w.burn_rate <= 1
-      ? { t: 'в графике', cls: 'text-emerald-400', hex: '#34d399' }
-      : w.burn_rate <= 1.3
-        ? { t: 'чуть быстрее', cls: 'text-amber-300', hex: '#fbbf24' }
-        : { t: 'быстрее плана', cls: 'text-red-400', hex: '#f87171' };
+  const paceHex =
+    w.burn_rate <= 1 ? '#34d399' : w.burn_rate <= 1.3 ? '#fbbf24' : '#f87171';
   // прогноз итога месяца при текущем темпе; с 3-го дня — раньше шум
   const projMinor = w.month_day >= 3 ? Math.round((w.month_spent_minor / w.month_day) * w.month_days) : 0;
   const paidN = u.items.filter((x) => x.paid).length;
@@ -306,17 +356,23 @@ export function HomeScreen({ api, nav, onFatal, name }: ScreenProps & { name: st
                 краснее — тратите быстрее плана.
               </Info>
             </span>
-            <span class={pace.cls}>{pace.t}</span>
           </div>
           {w.month_cap_minor > 0 ? (
-            <TempoChart
-              daily={w.month_daily_minor}
-              today={w.month_day}
-              dim={w.month_days}
-              cap={w.month_cap_minor}
-              proj={projMinor}
-              color={pace.hex}
-            />
+            <>
+              <TempoChart
+                daily={w.month_daily_minor}
+                today={w.month_day}
+                dim={w.month_days}
+                cap={w.month_cap_minor}
+                proj={projMinor}
+                color={paceHex}
+              />
+              <div class="flex items-center justify-between text-[10px] text-zinc-600">
+                <span>1</span>
+                <span>день {w.month_day}</span>
+                <span>{w.month_days}</span>
+              </div>
+            </>
           ) : (
             <p class={`${mutedCls} mt-2`}>
               Бюджет месяца не задан — потрачено {fmtMinor(w.month_spent_minor, c)}
