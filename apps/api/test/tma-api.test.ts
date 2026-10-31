@@ -58,6 +58,7 @@ describe('/api/tma/* — контракт', () => {
   it('401 без токена на каждом роуте', async () => {
     for (const [m, p] of [
       ['GET', '/api/tma/plan'], ['GET', '/api/tma/week'], ['GET', '/api/tma/expenses'],
+      ['GET', '/api/tma/expenses/1'],
       ['POST', '/api/tma/expenses'], ['GET', '/api/tma/income'], ['POST', '/api/tma/income'],
       ['GET', '/api/tma/profile'], ['PATCH', '/api/tma/profile'],
       ['GET', '/api/tma/commitments'], ['POST', '/api/tma/commitments'],
@@ -115,6 +116,10 @@ describe('/api/tma/* — контракт', () => {
     const list = (await (await api('/api/tma/expenses', { token: A.token })).json()) as { expenses: { id: number; note: string }[] };
     // «кафе» автоматчится в категорию и вырезается из заметки — проверяем только id
     expect(list.expenses.some((e) => e.id === id)).toBe(true);
+    // GET по id: своя — ок, чужая → 404 (карточка из отчётов вне недели)
+    const one = (await (await api(`/api/tma/expenses/${id}`, { token: A.token })).json()) as { expense: { id: number } };
+    expect(one.expense.id).toBe(id);
+    expect((await api(`/api/tma/expenses/${id}`, { token: B.token })).status).toBe(404);
     // PATCH своей — ок; PATCH чужой → 404
     expect((await api(`/api/tma/expenses/${id}`, { method: 'PATCH', token: A.token, body: { amount: 400 } })).status).toBe(200);
     expect((await scoped(env.DB, A.uid).getExpense(id))!.amount_minor).toBe(40000);
@@ -122,6 +127,7 @@ describe('/api/tma/* — контракт', () => {
     expect((await api(`/api/tma/expenses/${id}`, { method: 'DELETE', token: B.token })).status).toBe(404);
     expect((await api(`/api/tma/expenses/${id}`, { method: 'DELETE', token: A.token })).status).toBe(200);
     expect((await scoped(env.DB, A.uid).listExpenses()).results).toHaveLength(0);
+    expect((await api(`/api/tma/expenses/${id}`, { token: A.token })).status).toBe(404);
   });
 
   it('income: add/list/delete; итог месяца в валюте профиля; чужой id → 404', async () => {

@@ -19,7 +19,7 @@ import {
   Trash2,
 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { Api, CategoriesList, ExpensesList, Profile, WeekStatus } from '../api';
+import type { Api, CategoriesList, ExpenseItem, ExpensesList, Profile, WeekStatus } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, fmtPct, noteError, parseAmount, todayIso } from '../fmt';
 import {
@@ -162,20 +162,35 @@ export function ExpenseScreen({
   onFatal,
   expenseId,
 }: ScreenProps & { expenseId: number }) {
-  const q = useData(() => api.get<ExpensesList>('/api/tma/expenses'), onFatal, []);
-  const item = q.data?.expenses.find((e) => e.id === expenseId);
+  // по id — запись доступна из любого места (неделя, отчёты), не только из
+  // недельного списка
+  const q = useData(
+    () => api.get<{ expense: ExpenseItem }>(`/api/tma/expenses/${expenseId}`),
+    onFatal,
+    [expenseId],
+  );
+  const item = q.data?.expense;
 
   if (q.loading) return <Loading />;
   if (q.error) {
+    // 404 — запись реально удалена; сетевые/прочие ошибки — общий вид
+    if (q.error instanceof ApiError && q.error.status === 404) {
+      return (
+        <ErrorView
+          title="Запись не найдена"
+          text="Трата уже удалена."
+          onRetry={nav.back}
+        />
+      );
+    }
     const v = errorView(q.error);
     return <ErrorView title={v.title} text={v.text} onRetry={q.reload} />;
   }
   if (!item) {
-    // запись удалена или ушла с этой недели — назад на список
     return (
       <ErrorView
         title="Запись не найдена"
-        text="Трата уже удалена или вне этой недели."
+        text="Трата уже удалена."
         onRetry={nav.back}
       />
     );

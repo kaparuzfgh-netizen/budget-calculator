@@ -342,6 +342,14 @@ export function registerTmaApi(
     const rows = (await repo.listExpenses(start)).results.slice(-50).reverse();
     return okJson(c, { week_start: start, expenses: rows.map((e) => ({ id: e.id, spent_on: e.spent_on, amount_minor: e.amount_minor, currency: e.currency, note: e.note, category_id: e.category_id })) });
   });
+  // одна запись по id — карточка открывается и из отчётов (любой период)
+  app.get('/api/tma/expenses/:id', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const e = await repoOf(c).getExpense(id);
+    if (!e) return c.json(notFound().body, 404);
+    return okJson(c, { expense: { id: e.id, spent_on: e.spent_on, amount_minor: e.amount_minor, currency: e.currency, note: e.note, category_id: e.category_id } });
+  });
   app.post('/api/tma/expenses', tmaAuth, async (c) => {
     const body = await c.req.json().catch(() => ({}));
     // наличие ключа items — однозначный выбор пакетной схемы (иначе одиночная)

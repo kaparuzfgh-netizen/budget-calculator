@@ -379,16 +379,20 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                 {r.buckets.map((b) => (
                   <button
                     type="button"
-                    class={`flex min-w-[18px] flex-1 basis-[18px] flex-col items-center rounded-md pt-0.5 transition ${selB === b.key ? '' : selB ? 'opacity-50' : 'hover:bg-white/5'}`}
+                    class="flex min-w-[18px] flex-1 basis-[18px] flex-col items-center rounded-md pt-0.5 transition"
                     key={b.key}
                     onClick={() => setSelB((k) => (k === b.key ? null : b.key))}
                   >
                     <div class="flex h-[88px] items-end gap-0.5">
-                      <div class="flex w-3 flex-col-reverse rounded-t-sm">
+                      <div
+                        class={`flex w-3 flex-col-reverse rounded-t-sm ${selB === b.key && b.living + b.other > 0 ? 'ring-1 ring-sky-300/70' : ''}`}
+                      >
                         <i class="block w-full" style={{ height: `${((b.living / maxB) * 88) | 0}px`, background: COLORS.living }} />
                         <i class="block w-full" style={{ height: `${((b.other / maxB) * 88) | 0}px`, background: COLORS.commitments }} />
                       </div>
-                      <div class="w-[3px] self-end rounded-sm bg-emerald-500" style={{ height: `${((b.received / maxRecv) * 88) | 0}px` }} />
+                      {b.received > 0 && (
+                        <div class="w-[3px] self-end rounded-sm bg-emerald-500" style={{ height: `${((b.received / maxRecv) * 88) | 0}px` }} />
+                      )}
                     </div>
                     <div class={`mt-1 text-[9px] ${selB === b.key ? 'font-medium text-sky-300' : 'text-zinc-500'}`}>
                       {b.label}
