@@ -57,6 +57,7 @@ import {
 } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   confirmCls,
   dangerBtnCls,
   ErrorView,
@@ -76,6 +77,7 @@ import {
   primaryBtnCls,
   rowCls,
   secondaryBtnCls,
+  Select,
   smBtnCls,
   smDangerBtnCls,
   smDangerFillBtnCls,
@@ -86,13 +88,16 @@ import {
 
 const TZ_PRESETS = ['Europe/Moscow', 'Asia/Bishkek', 'Europe/Berlin', 'UTC'] as const;
 
-// ── каденс платежа (monthly / interval_days / yearly — миграция 0016) ──
+// ── каденс платежа (миграции 0016+0017) ──
 
-const FREQ_LABELS: Record<CommitmentFrequency, string> = {
-  monthly: 'Каждый месяц',
-  interval_days: 'Каждые N дней',
-  yearly: 'Раз в год',
-};
+/** UI-частота: 'every_months' — это frequency 'monthly' + every_months ≥ 1 (0017). */
+type UiFreq = CommitmentFrequency | 'every_months';
+const FREQ_OPTIONS: { value: UiFreq; label: string }[] = [
+  { value: 'monthly', label: 'Каждый месяц' },
+  { value: 'every_months', label: 'Каждые N месяцев' },
+  { value: 'interval_days', label: 'Каждые N дней' },
+  { value: 'yearly', label: 'Раз в год' },
+];
 const MONTH_NAMES = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
@@ -100,35 +105,60 @@ const MONTH_NAMES = [
 
 /** Поля каденса для POST/PATCH: лишние для каденса поля обнуляем явно. */
 function cadenceBody(
-  freq: CommitmentFrequency,
+  freq: UiFreq,
   day: string,
   month: string,
   every: string,
   anchor: string,
+  everyM: string,
 ): {
   frequency: CommitmentFrequency;
   due_day: number | null;
   due_month: number | null;
   interval_days: number | null;
   anchor_on: string | null;
+  every_months: number;
 } {
+  if (freq === 'every_months') {
+    const n = Number(everyM.trim());
+    return {
+      frequency: 'monthly',
+      due_day: day.trim() ? Number(day.trim()) : null,
+      due_month: null,
+      interval_days: null,
+      // якорь — фаза «каждые N мес»; при N=1 — обычный monthly, якорь не нужен
+      anchor_on: n > 1 && anchor ? anchor : null,
+      every_months: n,
+    };
+  }
   return {
     frequency: freq,
     due_day: freq === 'interval_days' ? null : day.trim() ? Number(day.trim()) : null,
     due_month: freq === 'yearly' ? Number(month) : null,
     interval_days: freq === 'interval_days' ? Number(every.trim()) : null,
     anchor_on: freq === 'interval_days' && anchor ? anchor : null,
+    every_months: 1,
   };
 }
 
 /** Клиентская проверка полей каденса перед POST/PATCH (зеркало superRefine в api). */
 function cadenceError(
-  freq: CommitmentFrequency,
+  freq: UiFreq,
   day: string,
   month: string,
   every: string,
   anchor: string,
+  everyM: string,
 ): string | null {
+  if (freq === 'every_months') {
+    const n = Number(everyM.trim());
+    if (!Number.isInteger(n) || n < 1 || n > 24) return 'Каждые N месяцев — целое число от 1 до 24';
+    if (!day.trim()) return 'Укажите день месяца (1–31)';
+    const dErr = dayError(day);
+    if (dErr) return dErr;
+    if (n > 1 && !anchor) return 'Укажите дату первого платежа — она задаёт фазу';
+    return null;
+  }
   if (freq === 'interval_days') {
     const n = Number(every.trim());
     if (!Number.isInteger(n) || n < 1 || n > 366) return 'Интервал — целое число от 1 до 366 дней';
@@ -157,9 +187,11 @@ function CadenceFields({
   setEvery,
   anchor,
   setAnchor,
+  everyM,
+  setEveryM,
 }: {
-  freq: CommitmentFrequency;
-  setFreq: (f: CommitmentFrequency) => void;
+  freq: UiFreq;
+  setFreq: (f: UiFreq) => void;
   day: string;
   setDay: (s: string) => void;
   month: string;
@@ -168,21 +200,13 @@ function CadenceFields({
   setEvery: (s: string) => void;
   anchor: string;
   setAnchor: (s: string) => void;
+  everyM: string;
+  setEveryM: (s: string) => void;
 }) {
   return (
     <>
       <Field label="Периодичность">
-        <select
-          class={inputCls}
-          value={freq}
-          onChange={(e) => setFreq((e.target as HTMLSelectElement).value as CommitmentFrequency)}
-        >
-          {(Object.keys(FREQ_LABELS) as CommitmentFrequency[]).map((f) => (
-            <option key={f} value={f}>
-              {FREQ_LABELS[f]}
-            </option>
-          ))}
-        </select>
+        <Select value={freq} options={FREQ_OPTIONS} onChange={(v) => setFreq(v as UiFreq)} />
       </Field>
       {freq === 'monthly' && (
         <Field
@@ -212,6 +236,56 @@ function CadenceFields({
             onInput={(e) => setDay((e.target as HTMLInputElement).value)}
           />
         </Field>
+      )}
+      {freq === 'every_months' && (
+        <>
+          <div class="flex gap-3">
+            <Field
+              label={
+                <>
+                  Каждые N месяцев
+                  <Info title="Каждые N месяцев">
+                    <p>3 = раз в квартал, 12 = раз в год; дата фиксируется по дню месяца.</p>
+                    <p>
+                      Сроки — указанный день в каждом N-м месяце, отсчёт от месяца
+                      первого платежа. Дня 31-е в коротком месяце нет — срок
+                      клампится к его последнему дню (31.01 → 30.04).
+                    </p>
+                  </Info>
+                </>
+              }
+            >
+              <input
+                class={inputCls}
+                inputMode="numeric"
+                maxLength={2}
+                placeholder="3"
+                value={everyM}
+                onInput={(e) => setEveryM((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+            <Field label="День месяца">
+              <input
+                class={inputCls}
+                inputMode="numeric"
+                maxLength={2}
+                placeholder="31"
+                value={day}
+                onInput={(e) => setDay((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+          </div>
+          {Number(everyM.trim()) > 1 && (
+            <Field label="Дата первого платежа (месяц задаёт фазу)">
+              <input
+                class={inputCls}
+                type="date"
+                value={anchor}
+                onInput={(e) => setAnchor((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+          )}
+        </>
       )}
       {freq === 'interval_days' && (
         <div class="flex gap-3">
@@ -260,18 +334,14 @@ function CadenceFields({
             />
           </Field>
           <Field label="Месяц">
-            <select
-              class={inputCls}
+            <Select
               value={month}
-              onChange={(e) => setMonth((e.target as HTMLSelectElement).value)}
-            >
-              <option value="">—</option>
-              {MONTH_NAMES.map((m, i) => (
-                <option key={m} value={i + 1}>
-                  {m}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: '—' },
+                ...MONTH_NAMES.map((m, i) => ({ value: String(i + 1), label: m })),
+              ]}
+              onChange={setMonth}
+            />
           </Field>
         </div>
       )}
@@ -621,12 +691,7 @@ function ProfileForms({
               />
             </Field>
             <Field label="Валюта">
-              <input
-                class={inputCls}
-                maxLength={5}
-                value={capCcy}
-                onInput={(e) => setCapCcy((e.target as HTMLInputElement).value)}
-              />
+              <CcySelect value={capCcy} onChange={setCapCcy} extra={[p.living_currency]} />
             </Field>
           </div>
           <Field
@@ -643,12 +708,12 @@ function ProfileForms({
               </>
             }
           >
-            <input
-              class={inputCls}
-              maxLength={5}
-              placeholder={capCcy}
+            <CcySelect
               value={expCcy}
-              onInput={(e) => setExpCcy((e.target as HTMLInputElement).value)}
+              onChange={setExpCcy}
+              extra={[capCcy]}
+              allowEmpty
+              emptyLabel={`Как у бюджета (${capCcy.toUpperCase() || '—'})`}
             />
           </Field>
           <p class={`${mutedCls} mb-3`}>
@@ -681,12 +746,7 @@ function ProfileForms({
               </>
             }
           >
-            <input
-              class={inputCls}
-              maxLength={5}
-              value={incCcy}
-              onInput={(e) => setIncCcy((e.target as HTMLInputElement).value)}
-            />
+            <CcySelect value={incCcy} onChange={setIncCcy} extra={[p.income_currency]} />
           </Field>
           <Field
             label={
@@ -734,16 +794,14 @@ function ProfileForms({
       <div class={`${cardCls} mt-2`}>
         <form onSubmit={saveTz}>
           <Field label="Таймзона (IANA)">
-            <select
-              class={inputCls}
+            <Select
               value={tzSel}
-              onChange={(e) => setTzSel((e.target as HTMLSelectElement).value)}
-            >
-              {TZ_PRESETS.map((tz) => (
-                <option value={tz}>{tz}</option>
-              ))}
-              <option value="__custom">Другая…</option>
-            </select>
+              options={[
+                ...TZ_PRESETS.map((tz) => ({ value: tz, label: tz })),
+                { value: '__custom', label: 'Другая…' },
+              ]}
+              onChange={setTzSel}
+            />
           </Field>
           {tzSel === '__custom' && (
             <Field label="Своя таймзона">
@@ -860,12 +918,17 @@ function CommitmentCard({
   payments: CommitmentPayment[];
   reload: () => void;
 }) {
+  const [name, setName] = useState(item.name);
   const [amount, setAmount] = useState(String(item.amount_minor / 100));
-  const [freq, setFreq] = useState<CommitmentFrequency>(item.frequency);
+  const [ccy, setCcy] = useState(item.currency);
+  const [freq, setFreq] = useState<UiFreq>(
+    item.frequency === 'monthly' && item.every_months > 1 ? 'every_months' : item.frequency,
+  );
   const [day, setDay] = useState(item.due_day ? String(item.due_day) : '');
   const [month, setMonth] = useState(item.due_month ? String(item.due_month) : '');
   const [every, setEvery] = useState(item.interval_days ? String(item.interval_days) : '');
   const [anchor, setAnchor] = useState(item.anchor_on ?? todayIso());
+  const [everyM, setEveryM] = useState(item.every_months > 1 ? String(item.every_months) : '3');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -873,18 +936,23 @@ function CommitmentCard({
 
   const save = async (ev: Event) => {
     ev.preventDefault();
+    const nErr = nameError(name);
     const aErr = amountError(amount);
-    const cErr = cadenceError(freq, day, month, every, anchor);
-    if (aErr || cErr) {
-      setErr(aErr ?? cErr);
+    const cErr = currencyError(ccy);
+    const cdErr = cadenceError(freq, day, month, every, anchor, everyM);
+    const first = nErr ?? aErr ?? cErr ?? cdErr;
+    if (first) {
+      setErr(first);
       return;
     }
     setBusy(true);
     setErr(null);
     try {
       await api.patch(`/api/tma/commitments/${item.id}`, {
+        name: name.trim(),
         amount: parseAmount(amount),
-        ...cadenceBody(freq, day, month, every, anchor),
+        currency: ccy.trim().toUpperCase(),
+        ...cadenceBody(freq, day, month, every, anchor, everyM),
       });
       nav.flash('Платёж обновлён');
       reload();
@@ -934,6 +1002,14 @@ function CommitmentCard({
       </h1>
       <div class={cardCls}>
         <form onSubmit={save}>
+          <Field label="Название">
+            <input
+              class={inputCls}
+              maxLength={60}
+              value={name}
+              onInput={(e) => setName((e.target as HTMLInputElement).value)}
+            />
+          </Field>
           <div class="flex gap-3">
             <Field label="Сумма">
               <input
@@ -942,6 +1018,9 @@ function CommitmentCard({
                 value={amount}
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)}
               />
+            </Field>
+            <Field label="Валюта">
+              <CcySelect value={ccy} onChange={setCcy} extra={[item.currency]} />
             </Field>
           </div>
           <CadenceFields
@@ -955,8 +1034,9 @@ function CommitmentCard({
             setEvery={setEvery}
             anchor={anchor}
             setAnchor={setAnchor}
+            everyM={everyM}
+            setEveryM={setEveryM}
           />
-          <p class={`${mutedCls} mb-2`}>Валюта: {item.currency}</p>
           <p class={`${mutedCls} mb-2 flex items-center gap-1`}>
             {item.next_due_on ? `Срок ${fmtDay(item.next_due_on)}` : 'Этот месяц'}:{' '}
             {item.paid_this_month ? (
@@ -1150,11 +1230,12 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [ccy, setCcy] = useState('');
-  const [freq, setFreq] = useState<CommitmentFrequency>('monthly');
+  const [freq, setFreq] = useState<UiFreq>('monthly');
   const [day, setDay] = useState('');
   const [month, setMonth] = useState('');
   const [every, setEvery] = useState('');
   const [anchor, setAnchor] = useState(todayIso());
+  const [everyM, setEveryM] = useState('3');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -1170,7 +1251,7 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
     const nErr = nameError(name);
     const aErr = amountError(amount);
     const cErr = ccy.trim() ? currencyError(ccy) : null;
-    const cdErr = cadenceError(freq, day, month, every, anchor);
+    const cdErr = cadenceError(freq, day, month, every, anchor, everyM);
     const first = nErr ?? aErr ?? cErr ?? cdErr;
     if (first) {
       setErr(first);
@@ -1183,7 +1264,7 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
         name: name.trim(),
         amount: parseAmount(amount),
         ...(ccy.trim() ? { currency: ccy.trim().toUpperCase() } : {}),
-        ...cadenceBody(freq, day, month, every, anchor),
+        ...cadenceBody(freq, day, month, every, anchor, everyM),
       });
       nav.flash('Платёж добавлен');
       nav.back(); // → список платежей, перезагрузится
@@ -1221,12 +1302,12 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
               />
             </Field>
             <Field label={`Валюта (по умолч. ${defCcy})`}>
-              <input
-                class={inputCls}
-                maxLength={5}
-                placeholder={defCcy}
+              <CcySelect
                 value={ccy}
-                onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
+                onChange={setCcy}
+                extra={[defCcy]}
+                allowEmpty
+                emptyLabel={`По умолч. ${defCcy}`}
               />
             </Field>
           </div>
@@ -1241,6 +1322,8 @@ export function CommitmentAddScreen({ api, nav, onFatal }: ScreenProps) {
             setEvery={setEvery}
             anchor={anchor}
             setAnchor={setAnchor}
+            everyM={everyM}
+            setEveryM={setEveryM}
           />
           <FormError msg={err} />
           <button type="submit" class={primaryBtnCls} disabled={busy}>

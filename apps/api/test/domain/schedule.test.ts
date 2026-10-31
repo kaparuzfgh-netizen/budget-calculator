@@ -18,6 +18,15 @@ const m = (due_day: number | null): Cadence => ({
   interval_days: null,
   anchor_on: null,
   due_month: null,
+  every_months: null,
+});
+const em = (due_day: number | null, every_months: number | null, anchor_on: string | null): Cadence => ({
+  frequency: 'monthly',
+  due_day,
+  interval_days: null,
+  anchor_on,
+  due_month: null,
+  every_months,
 });
 const i = (interval_days: number | null, anchor_on: string | null): Cadence => ({
   frequency: 'interval_days',
@@ -25,6 +34,7 @@ const i = (interval_days: number | null, anchor_on: string | null): Cadence => (
   interval_days,
   anchor_on,
   due_month: null,
+  every_months: null,
 });
 const y = (due_day: number | null, due_month: number | null): Cadence => ({
   frequency: 'yearly',
@@ -32,6 +42,7 @@ const y = (due_day: number | null, due_month: number | null): Cadence => ({
   interval_days: null,
   anchor_on: null,
   due_month,
+  every_months: null,
 });
 
 describe('dueDateFor — кламп дня к концу месяца (легаси-семантика)', () => {
@@ -147,6 +158,63 @@ describe('isOccurrencePaid — окно (prevDue, occurrence]', () => {
     expect(isOccurrencePaid(c, '2026-03-15', ['2025-12-01'])).toBe(true); // заранее оплатил
     expect(isOccurrencePaid(c, '2026-03-15', ['2025-03-15'])).toBe(false); // прошлогодний срок
     expect(isOccurrencePaid(c, '2026-03-15', ['2025-03-16'])).toBe(true);
+  });
+});
+
+describe('every_months — «каждые N месяцев» (0017): фаза — месяц якоря', () => {
+  const q3 = em(31, 3, '2025-10-31'); // якорь 31.10 → сроки в окт/янв/апр/июл
+
+  it('nextDueOn: 31.10 + каждые 3 мес → 31.01, 30.04, 31.07, 31.10', () => {
+    expect(nextDueOn(q3, '2025-10-31')).toBe('2025-10-31'); // сам якорь — срок
+    expect(nextDueOn(q3, '2025-11-01')).toBe('2026-01-31');
+    expect(nextDueOn(q3, '2026-01-31')).toBe('2026-01-31');
+    expect(nextDueOn(q3, '2026-02-01')).toBe('2026-04-30'); // 31 → кламп апреля
+    expect(nextDueOn(q3, '2026-05-01')).toBe('2026-07-31');
+    expect(nextDueOn(q3, '2026-08-01')).toBe('2026-10-31');
+    expect(nextDueOn(q3, '2026-10-31')).toBe('2026-10-31');
+    expect(nextDueOn(q3, '2026-11-01')).toBe('2027-01-31');
+  });
+  it('развёртка без дрейфа дней: каждый срок — от якоря + k·N месяцев', () => {
+    expect(occurrencesInRange(q3, '2025-10-31', '2027-01-31')).toEqual([
+      '2025-10-31',
+      '2026-01-31',
+      '2026-04-30',
+      '2026-07-31',
+      '2026-10-31',
+      '2027-01-31',
+    ]);
+  });
+  it('кламп 31-го в коротком месяце; вне phase-месяцев сроков нет', () => {
+    const q2 = em(31, 2, '2026-01-31'); // якорь январь → янв/мар/май…
+    expect(nextDueOn(q2, '2026-02-01')).toBe('2026-03-31');
+    expect(occurrencesInRange(q2, '2026-02-01', '2026-02-28')).toEqual([]);
+    // день якоря игнорируется — фазу задаёт только его месяц
+    const off = em(15, 2, '2026-01-20');
+    expect(nextDueOn(off, '2026-01-01')).toBe('2026-01-15');
+    expect(nextDueOn(off, '2026-02-01')).toBe('2026-03-15');
+  });
+  it('prevDueOn/isOccurrencePaid: оплатное окно — (прошлый срок, срок]', () => {
+    expect(prevDueOn(q3, '2026-01-31')).toBe('2025-10-31');
+    expect(prevDueOn(q3, '2026-02-01')).toBe('2026-01-31');
+    expect(isOccurrencePaid(q3, '2026-01-31', ['2026-01-31'])).toBe(true);
+    expect(isOccurrencePaid(q3, '2026-01-31', ['2025-11-15'])).toBe(true); // ранняя — окно (31.10, 31.01]
+    expect(isOccurrencePaid(q3, '2026-01-31', ['2025-10-31'])).toBe(false); // гасила октябрьский срок
+    expect(isOccurrencePaid(q3, '2026-04-30', ['2026-02-01'])).toBe(true); // окно (31.01, 30.04]
+    expect(isOccurrencePaid(q3, '2026-04-30', ['2026-01-31'])).toBe(false); // гасила январский
+  });
+  it('every_months=1 — обычный monthly; >1 без якоря/дня — сроков нет', () => {
+    expect(nextDueOn(em(15, 1, '2025-10-31'), '2026-10-10')).toBe('2026-10-15');
+    expect(nextDueOn(em(15, 1, null), '2026-10-10')).toBe('2026-10-15');
+    expect(nextDueOn(em(null, 3, '2025-10-31'), '2026-10-10')).toBeNull();
+    expect(nextDueOn(em(15, 3, null), '2026-10-10')).toBeNull();
+    expect(nextDueOn(em(15, 3, 'не-дата'), '2026-10-10')).toBeNull();
+  });
+  it('monthlyAmount — сумма/N; cadenceLabel «каждые 3 мес (31-го)»', () => {
+    expect(monthlyAmount({ ...q3, amount_minor: 90000 })).toBe(300);
+    expect(monthlyAmount({ ...em(15, 12, '2026-01-15'), amount_minor: 120000 })).toBe(100);
+    expect(cadenceLabel(q3)).toBe('каждые 3 мес (31-го)');
+    expect(cadenceLabel(em(15, 12, '2026-01-15'))).toBe('каждые 12 мес (15-го)');
+    expect(cadenceLabel(em(15, 1, null))).toBe('15 числа'); // N=1 — обычная подпись
   });
 });
 

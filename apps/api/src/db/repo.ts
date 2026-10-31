@@ -55,6 +55,8 @@ export interface CommitmentRow {
   anchor_on: string | null;
   /** yearly: месяц платежа 1–12; NULL у прочих каденсов. */
   due_month: number | null;
+  /** monthly: «каждые N месяцев» 1–24 (0017); 1 — обычный monthly, фаза — месяц anchor_on. */
+  every_months: number;
   active: number;
   created_at: string;
 }
@@ -283,12 +285,13 @@ export function scoped(db: Env['DB'], userId: number) {
       interval_days?: number | null;
       anchor_on?: string | null;
       due_month?: number | null;
+      every_months?: number;
     }) {
       return db
         .prepare(
           `INSERT INTO commitments
-             (user_id, name, amount_minor, currency, due_day, frequency, interval_days, anchor_on, due_month)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (user_id, name, amount_minor, currency, due_day, frequency, interval_days, anchor_on, due_month, every_months)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           userId,
@@ -300,6 +303,7 @@ export function scoped(db: Env['DB'], userId: number) {
           c.interval_days ?? null,
           c.anchor_on ?? null,
           c.due_month ?? null,
+          c.every_months ?? 1,
         )
         .run();
     },
@@ -317,6 +321,7 @@ export function scoped(db: Env['DB'], userId: number) {
         interval_days?: number | null;
         anchor_on?: string | null;
         due_month?: number | null;
+        every_months?: number;
       },
     ) {
       const sets: string[] = ["updated_at = datetime('now')"];
@@ -356,6 +361,10 @@ export function scoped(db: Env['DB'], userId: number) {
       if (patch.due_month !== undefined) {
         sets.push('due_month = ?');
         binds.push(patch.due_month);
+      }
+      if (patch.every_months !== undefined) {
+        sets.push('every_months = ?');
+        binds.push(patch.every_months);
       }
       binds.push(id, userId);
       return db

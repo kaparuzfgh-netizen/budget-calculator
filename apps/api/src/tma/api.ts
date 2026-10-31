@@ -83,13 +83,15 @@ const categoryPatchSchema = z.object({
   archived: z.boolean().optional(),
   sort: z.number().int().optional(),
 });
-/** Каденс платежа (миграция 0016): frequency + поля по каденсу. */
+/** Каденс платежа (миграции 0016+0017): frequency + поля по каденсу. */
 const zFrequency = z.enum(['monthly', 'interval_days', 'yearly']);
 const cadenceFields = {
   frequency: zFrequency.optional(),
   interval_days: z.number().int().min(1).max(366).nullable().optional(),
   anchor_on: zIso.nullable().optional(),
   due_month: z.number().int().min(1).max(12).nullable().optional(),
+  /** «каждые N месяцев» (0017): 1–24; >1 только с frequency=monthly + anchor_on + due_day. */
+  every_months: z.number().int().min(1).max(24).nullable().optional(),
 };
 /** Явный NULL обязательного для каденса поля — сразу ошибка (superRefine на схемах). */
 function cadenceNullIssues(
@@ -104,6 +106,10 @@ function cadenceNullIssues(
   if (f === 'yearly') {
     if (v.due_day === null) ctx.addIssue({ code: 'custom', message: 'due_day: 1–31 обязателен' });
     if (v.due_month === null) ctx.addIssue({ code: 'custom', message: 'due_month: 1–12 обязателен' });
+  }
+  if (typeof v.every_months === 'number' && v.every_months > 1) {
+    if (v.due_day === null) ctx.addIssue({ code: 'custom', message: 'due_day: 1–31 обязателен' });
+    if (v.anchor_on === null) ctx.addIssue({ code: 'custom', message: 'anchor_on (YYYY-MM-DD) обязателен' });
   }
 }
 const commitSchema = z
@@ -126,6 +132,12 @@ const commitSchema = z
       if (v.due_day == null) ctx.addIssue({ code: 'custom', message: 'due_day: 1–31 обязателен' });
       if (v.due_month == null) ctx.addIssue({ code: 'custom', message: 'due_month: 1–12 обязателен' });
     }
+    if ((v.every_months ?? 1) > 1) {
+      if (f !== 'monthly')
+        ctx.addIssue({ code: 'custom', message: 'every_months > 1 — только с каденсом «каждый месяц»' });
+      if (v.due_day == null) ctx.addIssue({ code: 'custom', message: 'due_day: 1–31 обязателен' });
+      if (!v.anchor_on) ctx.addIssue({ code: 'custom', message: 'anchor_on (YYYY-MM-DD) обязателен' });
+    }
   });
 const commitPatchSchema = z
   .object({
@@ -144,11 +156,17 @@ function cadenceMergeError(m: {
   anchor_on: string | null;
   due_month: number | null;
   due_day: number | null;
+  every_months: number;
 }): string | null {
   if (m.frequency === 'interval_days' && (m.interval_days == null || !m.anchor_on))
     return 'для «каждые N дней» нужны interval_days (1–366) и anchor_on (YYYY-MM-DD)';
   if (m.frequency === 'yearly' && (m.due_day == null || m.due_month == null))
     return 'для «раз в год» нужны due_day (1–31) и due_month (1–12)';
+  if (m.every_months > 1) {
+    if (m.frequency !== 'monthly') return '«каждые N месяцев» — только с каденсом «каждый месяц»';
+    if (m.due_day == null || !m.anchor_on)
+      return 'для «каждые N месяцев» нужны due_day (1–31) и anchor_on (YYYY-MM-DD)';
+  }
   return null;
 }
 const cpayPostSchema = z.object({
@@ -714,6 +732,7 @@ export function registerTmaApi(
           interval_days: x.interval_days,
           anchor_on: x.anchor_on,
           due_month: x.due_month,
+          every_months: x.every_months,
           cadence: cadenceLabel(x),
           next_due_on: next,
           active: x.active,
@@ -746,6 +765,7 @@ export function registerTmaApi(
       interval_days: b.interval_days ?? null,
       anchor_on: b.anchor_on ?? null,
       due_month: b.due_month ?? null,
+      every_months: b.every_months ?? 1,
     });
     return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
   });
@@ -767,6 +787,7 @@ export function registerTmaApi(
       anchor_on: b.anchor_on !== undefined ? b.anchor_on : cur.anchor_on,
       due_month: b.due_month !== undefined ? b.due_month : cur.due_month,
       due_day: b.due_day !== undefined ? b.due_day : cur.due_day,
+      every_months: b.every_months !== undefined ? (b.every_months ?? 1) : cur.every_months,
     };
     const cadErr = cadenceMergeError(merged);
     if (cadErr) return c.json(bad(cadErr).body, 400);
@@ -779,6 +800,7 @@ export function registerTmaApi(
     if (b.interval_days !== undefined) patch.interval_days = b.interval_days;
     if (b.anchor_on !== undefined) patch.anchor_on = b.anchor_on;
     if (b.due_month !== undefined) patch.due_month = b.due_month;
+    if (b.every_months !== undefined) patch.every_months = b.every_months ?? 1;
     if (b.active !== undefined) patch.active = b.active ? 1 : 0;
     await repo.patchCommitment(id, patch);
     return okJson(c, { ok: true });

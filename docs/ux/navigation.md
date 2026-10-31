@@ -60,11 +60,11 @@ flowchart TD
   PF_HOME --> PF_COMMITS["Регулярные платежи: список"]
   PF_COMMITS --> PF_COMMIT["Платёж: карточка"]
   PF_COMMITS --> PF_COMMIT_ADD["Ввод нового платежа"]
-  PF_COMMIT_ADD --> PF_COMMIT_FREQ["Каденс: месяц / N дней / год"]
+  PF_COMMIT_ADD --> PF_COMMIT_FREQ["Каденс: месяц / N мес / N дней / год"]
   PF_COMMIT_ADD -- Отмена --> PF_COMMITS
   PF_COMMIT_FREQ -- Отмена --> PF_COMMITS
   PF_COMMIT_FREQ -. сохранено (день был в строке) .-> PF_COMMITS
-  PF_COMMIT_FREQ --> PF_COMMIT_CAD["Параметры каденса: день / интервал+дата / день+месяц"]
+  PF_COMMIT_FREQ --> PF_COMMIT_CAD["Параметры каденса: день / N мес+день+дата / интервал+дата / день+месяц"]
   PF_COMMIT_CAD -- Отмена --> PF_COMMITS
   PF_COMMIT_CAD -. сохранено .-> PF_COMMITS
   PF_COMMIT --> PF_COMMIT_AMOUNT["Ввод суммы"]
@@ -260,7 +260,7 @@ flowchart TD
 | PF_COMMITS | menu | 2 | PF_HOME | `[← Назад] [🏠 Меню]` |
 | PF_COMMIT | menu | 3 | PF_COMMITS | `[← Назад] [🏠 Меню]` |
 | PF_COMMIT_ADD | prompt | 3 | PF_COMMITS | `[✖ Отмена]` → PF_COMMITS |
-| PF_COMMIT_FREQ | prompt | 3 | PF_COMMITS | `[✖ Отмена]` → PF_COMMITS; кнопки `[Месяц] [N дней] [Год]` |
+| PF_COMMIT_FREQ | prompt | 3 | PF_COMMITS | `[✖ Отмена]` → PF_COMMITS; кнопки `[Месяц] [N мес] [N дней] [Год]` |
 | PF_COMMIT_CAD | prompt | 3 | PF_COMMITS | `[✖ Отмена]` → PF_COMMITS; сохранено → PF_COMMITS |
 | PF_COMMIT_AMOUNT | prompt | 4 | PF_COMMIT | `[✖ Отмена]` → PF_COMMIT |
 | PF_COMMIT_DAY | prompt | 4 | PF_COMMIT | `[✖ Отмена]` → PF_COMMIT |

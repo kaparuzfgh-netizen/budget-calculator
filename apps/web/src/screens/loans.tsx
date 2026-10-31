@@ -25,6 +25,7 @@ import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, nameError, parseAmount } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   confirmCls,
   dangerBtnCls,
   ErrorView,
@@ -542,8 +543,7 @@ export function LoanAddScreen({ api, nav }: ScreenProps) {
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)} />
             </Field>
             <Field label="Валюта">
-              <input class={inputCls} maxLength={5} placeholder="USD" value={ccy}
-                onInput={(e) => setCcy((e.target as HTMLInputElement).value)} />
+              <CcySelect value={ccy} onChange={setCcy} />
             </Field>
             <Field label="Срок (пусто — без срока)">
               <input class={inputCls} type="date" value={due} onInput={(e) => setDue((e.target as HTMLInputElement).value)} />

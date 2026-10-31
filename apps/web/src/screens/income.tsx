@@ -12,6 +12,7 @@ import type { ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, noteError, parseAmount, todayIso } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   confirmCls,
   ErrorView,
   errorView,
@@ -210,12 +211,12 @@ function IncomeAddForm({
             />
           </Field>
           <Field label={`Валюта (по умолч. ${defaultCcy})`}>
-            <input
-              class={inputCls}
-              maxLength={5}
-              placeholder={defaultCcy}
+            <CcySelect
               value={ccy}
-              onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
+              onChange={setCcy}
+              extra={[defaultCcy]}
+              allowEmpty
+              emptyLabel={`По умолч. ${defaultCcy}`}
             />
           </Field>
         </div>

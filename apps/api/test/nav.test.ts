@@ -239,7 +239,12 @@ function screenOf(): string {
   if (t.includes('Новый базовый')) return 'PF_TYPICAL_ASK';
   if (t.includes('бюджет повседневных')) return 'PF_LIVING_ASK';
   if (cbs.some((d) => d.startsWith('pf:cf:'))) return 'PF_COMMIT_FREQ';
-  if (t.includes('интервал в днях и дата') || t.includes('день и месяц платежа') || t.includes('день месяца 1–31'))
+  if (
+    t.includes('интервал в днях и дата') ||
+    t.includes('день и месяц платежа') ||
+    t.includes('день и дата первого платежа') ||
+    t.includes('день месяца 1–31')
+  )
     return 'PF_COMMIT_CAD';
   if (t.includes('Новый платёж')) return 'PF_COMMIT_ADD';
   if (t.includes('Новая сумма')) return 'PF_COMMIT_AMOUNT';
@@ -447,6 +452,23 @@ describe('контракт навигации (walk)', () => {
     expect(
       (await scoped(env.DB, uid).listCommitments()).results.some(
         (c) => c.name === 'Спорт' && c.frequency === 'interval_days' && c.interval_days === 14,
+      ),
+    ).toBe(true);
+    // «каждые N мес»: каденс → «3 31 31.10» → сохранено (monthly + every_months=3)
+    await cb(tgId, 'pf:cadd');
+    await msg(tgId, 'Страховая 3600');
+    await cb(tgId, 'pf:cf:e');
+    expect(screenOf()).toBe('PF_COMMIT_CAD');
+    await msg(tgId, '3 31 31.10');
+    expect(screenOf()).toBe('PF_COMMITS');
+    expect(
+      (await scoped(env.DB, uid).listCommitments()).results.some(
+        (c) =>
+          c.name === 'Страховая' &&
+          c.frequency === 'monthly' &&
+          c.every_months === 3 &&
+          c.due_day === 31 &&
+          c.anchor_on !== null,
       ),
     ).toBe(true);
 

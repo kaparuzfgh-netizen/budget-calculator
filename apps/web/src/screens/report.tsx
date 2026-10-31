@@ -19,6 +19,7 @@ import type { ScreenProps } from '../app';
 import { fmtDay, fmtMinor } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   ErrorView,
   errorView,
   h1Cls,
@@ -114,7 +115,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
           </button>
         ))}
       </div>
-      <div class="mb-3 flex flex-wrap gap-2">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
         {chipCcys.map((x) => (
           <button
             type="button"
@@ -124,6 +125,10 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
             {x}
           </button>
         ))}
+        {/* Остальные валюты — общий список + «Другое…» */}
+        <div class="w-24">
+          <CcySelect value={sel ?? ''} onChange={(v) => setCcy(v)} extra={chipCcys} />
+        </div>
       </div>
       <div class="mb-4 flex items-center justify-center gap-3">
         <button

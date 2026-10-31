@@ -26,6 +26,7 @@ import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, fmtPct, noteError, parseAmount, todayIso } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   confirmCls,
   dangerBtnCls,
   ErrorView,
@@ -262,12 +263,7 @@ function ExpenseCard({
               />
             </Field>
             <Field label="Валюта">
-              <input
-                class={inputCls}
-                maxLength={5}
-                value={ccy}
-                onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
-              />
+              <CcySelect value={ccy} onChange={setCcy} extra={[item.currency]} />
             </Field>
           </div>
           <Field label="Дата">
@@ -450,12 +446,12 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
               />
             </Field>
             <Field label={`Валюта (по умолч. ${defCcy})`}>
-              <input
-                class={inputCls}
-                maxLength={5}
-                placeholder={defCcy}
+              <CcySelect
                 value={ccy}
-                onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
+                onChange={setCcy}
+                extra={[defCcy]}
+                allowEmpty
+                emptyLabel={`По умолч. ${defCcy}`}
               />
             </Field>
           </div>

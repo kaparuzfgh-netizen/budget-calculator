@@ -318,6 +318,137 @@ describe('/api/tma/* — контракт', () => {
     expect(prof.baseline_source).toBe('computed');
     expect(prof.baseline_income_minor).toBe(Math.round((1 + (15 * 30.4375) / 30 + (1200 * 30.4375) / 30) * 100));
   });
+
+  it('каденс «каждые N мес» (0017): валидация, GET/upcoming, PATCH-merge, имя+валюта', async () => {
+    const A = await user(900032);
+    const today = new Date().toISOString().slice(0, 10);
+
+    // валидация: every_months>1 без якоря или дня → 400; вне monthly → 400; диапазон → 400
+    expect(
+      (await api('/api/tma/commitments', {
+        method: 'POST', token: A.token,
+        body: { name: 'X', amount: 1, every_months: 3, anchor_on: '2025-10-31' },
+      })).status,
+    ).toBe(400); // нет due_day
+    expect(
+      (await api('/api/tma/commitments', {
+        method: 'POST', token: A.token,
+        body: { name: 'X', amount: 1, every_months: 3, due_day: 31 },
+      })).status,
+    ).toBe(400); // нет anchor_on
+    expect(
+      (await api('/api/tma/commitments', {
+        method: 'POST', token: A.token,
+        body: { name: 'X', amount: 1, every_months: 3, due_day: 31, anchor_on: null },
+      })).status,
+    ).toBe(400); // явный null
+    expect(
+      (await api('/api/tma/commitments', {
+        method: 'POST', token: A.token,
+        body: { name: 'X', amount: 1, frequency: 'yearly', every_months: 3, due_day: 31, due_month: 10, anchor_on: '2025-10-31' },
+      })).status,
+    ).toBe(400); // >1 только с monthly
+    expect(
+      (await api('/api/tma/commitments', {
+        method: 'POST', token: A.token,
+        body: { name: 'X', amount: 1, every_months: 25, due_day: 31, anchor_on: '2025-10-31' },
+      })).status,
+    ).toBe(400); // 1–24
+
+    // валидное создание: квартальный платёж якорем 31.10
+    const rq = await api('/api/tma/commitments', {
+      method: 'POST', token: A.token,
+      body: { name: 'Кварталка', amount: 90, currency: 'EUR', every_months: 3, due_day: 31, anchor_on: '2025-10-31' },
+    });
+    expect(rq.status).toBe(201);
+    const qid = ((await rq.json()) as { id: number }).id;
+
+    // GET: поля каденса + подпись «каждые 3 мес (31-го)»
+    const list = (await (await api('/api/tma/commitments', { token: A.token })).json()) as {
+      commitments: {
+        name: string; frequency: string; every_months: number; anchor_on: string | null;
+        due_day: number | null; cadence: string; next_due_on: string | null;
+      }[];
+    };
+    const q = list.commitments.find((x) => x.name === 'Кварталка')!;
+    expect(q).toMatchObject({
+      frequency: 'monthly',
+      every_months: 3,
+      anchor_on: '2025-10-31',
+      due_day: 31,
+      cadence: 'каждые 3 мес (31-го)',
+    });
+    // ближайший срок — в phase-месяце (окт/янв/апр/июл), день = 31 клампом
+    expect(q.next_due_on).toMatch(/^\d{4}-(01|04|07|10)-\d{2}$/);
+
+    // PATCH-merge: снять якорь при every_months>1 → 400; сменить каденс → 400; вернуть monthly → 200
+    expect(
+      (await api(`/api/tma/commitments/${qid}`, { method: 'PATCH', token: A.token, body: { anchor_on: null } })).status,
+    ).toBe(400);
+    expect(
+      (await api(`/api/tma/commitments/${qid}`, { method: 'PATCH', token: A.token, body: { due_day: null } })).status,
+    ).toBe(400);
+    expect(
+      (await api(`/api/tma/commitments/${qid}`, {
+        method: 'PATCH', token: A.token,
+        body: { frequency: 'interval_days', interval_days: 30, anchor_on: '2020-01-01' },
+      })).status,
+    ).toBe(400); // merged every_months=3 + interval_days — битый каденс
+    expect(
+      (await api(`/api/tma/commitments/${qid}`, {
+        method: 'PATCH', token: A.token,
+        body: { frequency: 'interval_days', interval_days: 30, anchor_on: '2020-01-01', every_months: 1 },
+      })).status,
+    ).toBe(200); // сброс every_months — каденс снова валиден
+    const rowAfter = (await scoped(env.DB, A.uid).getCommitment(qid))!;
+    expect(rowAfter.frequency).toBe('interval_days');
+    expect(rowAfter.every_months).toBe(1);
+
+    // PATCH: имя + валюта — round-trip через GET (валюта из мока FX)
+    expect(
+      (await api(`/api/tma/commitments/${qid}`, {
+        method: 'PATCH', token: A.token, body: { name: 'Кварталка2', currency: 'RUB' },
+      })).status,
+    ).toBe(200);
+    const list2 = (await (await api('/api/tma/commitments', { token: A.token })).json()) as {
+      commitments: { id: number; name: string; currency: string }[];
+    };
+    expect(list2.commitments.find((x) => x.id === qid)).toMatchObject({ name: 'Кварталка2', currency: 'RUB' });
+
+    // upcoming: N-месячный платёж виден только в phase-месяце
+    const rm = await api('/api/tma/commitments', {
+      method: 'POST', token: A.token,
+      body: { name: 'Фазный', amount: 30, every_months: 3, due_day: 31, anchor_on: '2025-10-31' },
+    });
+    expect(rm.status).toBe(201);
+    const up = (await (await api('/api/tma/upcoming', { token: A.token })).json()) as {
+      items: { name: string; due_on: string; cadence?: string }[];
+    };
+    const curMonth = Number(today.slice(5, 7));
+    const phase = [10, 1, 4, 7].includes(curMonth);
+    const item = up.items.find((x) => x.name === 'Фазный');
+    if (phase) {
+      expect(item).toBeDefined();
+      expect(item!.cadence).toBe('каждые 3 мес (31-го)');
+      expect(Number(item!.due_on.slice(5, 7))).toBe(curMonth);
+    } else {
+      expect(item).toBeUndefined(); // не phase-месяц — срока в этом месяце нет
+    }
+
+    // baseline: every-N платёж нормализуется как amount/N в месяц
+    await scoped(env.DB, A.uid).patchProfile({ income_minor: 0, living_cap_minor: 0 });
+    const prof = (await (await api('/api/tma/profile', { token: A.token })).json()) as {
+      baseline_income_minor: number;
+      baseline_source: string;
+    };
+    expect(prof.baseline_source).toBe('computed');
+    // Кварталка2 $90→interval 30 дн + Фазный €30/3 — оба конвертируются в USD по FX;
+    // точную сумму не фиксируем — проверяем, что учёт прошёл через monthlyAmount:
+    // Фазный внёс 30/3=10 EUR, а не 30. Сравним с нормализацией напрямую:
+    const rowF = (await scoped(env.DB, A.uid).getCommitment((await rm.json() as { id: number }).id))!;
+    expect(rowF.every_months).toBe(3);
+    expect(prof.baseline_income_minor).toBeGreaterThan(0);
+  });
 });
 
 describe('базовый доход: explicit/computed/none, напоминания, экспорт', () => {

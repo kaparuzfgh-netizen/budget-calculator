@@ -147,9 +147,11 @@ export interface Commitment {
   /** Каденс (миграция 0016); легаси-строки — 'monthly'. */
   frequency: CommitmentFrequency;
   interval_days: number | null;
-  anchor_on: string | null; // 'YYYY-MM-DD' первый платёж interval_days
+  anchor_on: string | null; // 'YYYY-MM-DD' первый платёж interval_days / фаза «каждые N мес»
   due_month: number | null;
-  /** Подпись каденса: «1 числа» · «каждые 14 дн» · «15 марта» · «без даты». */
+  /** «каждые N месяцев» 1–24 (миграция 0017); 1 — обычный monthly. */
+  every_months: number;
+  /** Подпись каденса: «1 числа» · «каждые 3 мес (31-го)» · «каждые 14 дн» · «15 марта» · «без даты». */
   cadence: string;
   /** Ближайший срок 'YYYY-MM-DD'; null — платёж без расписания. */
   next_due_on: string | null;

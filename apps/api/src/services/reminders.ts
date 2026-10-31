@@ -12,7 +12,8 @@
  *      пропущенные дни и периоды). Дата события — день срока, не день
  *      прогона. Claim: долги 'd:<id>:<YYYY-MM>', monthly-платежи
  *      'c:<id>:<YYYY-MM>' (легаси-семантика «на объект+месяц»), прочие
- *      каденсы 'c:<id>:<occurrence>' — удалённая юзером автозапись не
+ *      каденсы — включая monthly «каждые N мес» (N>1, 0017) —
+ *      'c:<id>:<occurrence>' — удалённая юзером автозапись не
  *      воскресает, а следующий срок проводится снова. Объект, заведённый
  *      после даты срока, начнёт проводиться со следующего срока.
  *      Уведомление — одно на прогон, best-effort: записи уже корректны,
@@ -290,14 +291,17 @@ export async function runReminders(
         }
         for (const c of commits) {
           const mine = paidOns.get(c.id) ?? [];
-          // Окно развёртки сроков: monthly — сроки текущего месяца (легаси-
-          // семантика «раз в месяц, в день срока»); interval/yearly — все
-          // пропущенные сроки за последние ~370 дней (loop bound внутри).
-          const from = c.frequency === 'monthly' ? `${monthKey}-01` : plusDays(lp, -370);
+          // Окно развёртки сроков: обычный monthly (every_months=1) — сроки
+          // текущего месяца (легаси-семантика «раз в месяц, в день срока»);
+          // «каждые N мес» и interval/yearly — все пропущенные сроки за
+          // последние ~370 дней: срок N-месячного каденса мог пропасть в
+          // прошлом phase-месяце (loop bound внутри).
+          const monthlyOnce = c.frequency === 'monthly' && (c.every_months ?? 1) <= 1;
+          const from = monthlyOnce ? `${monthKey}-01` : plusDays(lp, -370);
           for (const occ of occurrencesInRange(c, from, lp.iso)) {
             if (c.created_at.slice(0, 10) > occ) continue; // заведён после срока — со след. срока
             if (isOccurrencePaid(c, occ, mine)) continue; // срок уже оплачен своим периодом
-            const key = c.frequency === 'monthly' ? `c:${c.id}:${occ.slice(0, 7)}` : `c:${c.id}:${occ}`;
+            const key = monthlyOnce ? `c:${c.id}:${occ.slice(0, 7)}` : `c:${c.id}:${occ}`;
             const claim = await repo.claimReminder('auto_post', key);
             if (claim.meta.changes !== 1) continue;
             try {

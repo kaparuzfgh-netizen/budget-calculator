@@ -387,6 +387,7 @@ async function runPfEffects(
         interval_days: e.c.intervalDays ?? null,
         anchor_on: e.c.anchorOn ?? null,
         due_month: e.c.dueMonth ?? null,
+        every_months: e.c.everyMonths ?? 1,
       });
     else if (e.kind === 'commit_patch') await repo.patchCommitment(e.id, e.patch);
     else if (e.kind === 'commit_del') await repo.deleteCommitment(e.id);

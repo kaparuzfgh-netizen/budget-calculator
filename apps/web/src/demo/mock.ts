@@ -137,11 +137,11 @@ export const PROFILE: Profile = {
 
 export const COMMITMENTS: CommitmentsList = {
   commitments: [
-    { id: 1, name: 'Аренда', amount_minor: 50000, currency: 'USD', due_day: 1, frequency: 'monthly', interval_days: null, anchor_on: null, due_month: null, cadence: '1 числа', next_due_on: '2026-04-01', active: 1, paid_this_month: false, last_paid_on: null },
-    { id: 2, name: 'Интернет', amount_minor: 60000, currency: 'KGS', due_day: 5, frequency: 'monthly', interval_days: null, anchor_on: null, due_month: null, cadence: '5 числа', next_due_on: '2026-04-05', active: 1, paid_this_month: true, last_paid_on: '2026-03-05' },
-    { id: 3, name: 'Нетфликс', amount_minor: 999, currency: 'USD', due_day: 15, frequency: 'monthly', interval_days: null, anchor_on: null, due_month: null, cadence: '15 числа', next_due_on: '2026-04-15', active: 1, paid_this_month: false, last_paid_on: null },
-    { id: 4, name: 'Страховка', amount_minor: 120000, currency: 'USD', due_day: 20, frequency: 'yearly', interval_days: null, anchor_on: null, due_month: 9, cadence: '20 сентября', next_due_on: '2026-09-20', active: 1, paid_this_month: false, last_paid_on: '2025-09-20' },
-    { id: 5, name: 'Спортзал', amount_minor: 250000, currency: 'KGS', due_day: null, frequency: 'monthly', interval_days: null, anchor_on: null, due_month: null, cadence: 'без даты', next_due_on: null, active: 0, paid_this_month: false, last_paid_on: null },
+    { id: 1, name: 'Аренда', amount_minor: 50000, currency: 'USD', due_day: 1, frequency: 'monthly', interval_days: null, anchor_on: null, due_month: null, every_months: 1, cadence: '1 числа', next_due_on: '2026-04-01', active: 1, paid_this_month: false, last_paid_on: null },
+    { id: 2, name: 'Интернет', amount_minor: 60000, currency: 'KGS', due_day: 5, frequency: 'monthly', interval_days: null, anchor_on: '2026-01-05', due_month: null, every_months: 3, cadence: 'каждые 3 мес (5-го)', next_due_on: '2026-04-05', active: 1, paid_this_month: true, last_paid_on: '2026-01-05' },
+    { id: 3, name: 'Нетфликс', amount_minor: 999, currency: 'USD', due_day: 15, frequency: 'monthly', interval_days: null, anchor_on: null, due_month: null, every_months: 1, cadence: '15 числа', next_due_on: '2026-04-15', active: 1, paid_this_month: false, last_paid_on: null },
+    { id: 4, name: 'Страховка', amount_minor: 120000, currency: 'USD', due_day: 20, frequency: 'yearly', interval_days: null, anchor_on: null, due_month: 9, every_months: 1, cadence: '20 сентября', next_due_on: '2026-09-20', active: 1, paid_this_month: false, last_paid_on: '2025-09-20' },
+    { id: 5, name: 'Спортзал', amount_minor: 250000, currency: 'KGS', due_day: null, frequency: 'monthly', interval_days: null, anchor_on: null, due_month: null, every_months: 1, cadence: 'без даты', next_due_on: null, active: 0, paid_this_month: false, last_paid_on: null },
   ],
 };
 

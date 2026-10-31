@@ -21,6 +21,7 @@ import type { ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, parseAmount } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   ErrorView,
   errorView,
   evEditCls,
@@ -316,12 +317,10 @@ function ExchangeAddForm({ api, done }: { api: Api; done: (m: string) => void })
       <form onSubmit={(e) => void submit(e)}>
         <div class="flex gap-3">
           <Field label="Из чего">
-            <input class={inputCls} maxLength={5} placeholder="EUR" value={from} autoFocus
-              onInput={(e) => setFrom((e.target as HTMLInputElement).value)} />
+            <CcySelect value={from} onChange={setFrom} />
           </Field>
           <Field label="Во что">
-            <input class={inputCls} maxLength={5} placeholder="RUB" value={to}
-              onInput={(e) => setTo((e.target as HTMLInputElement).value)} />
+            <CcySelect value={to} onChange={setTo} />
           </Field>
         </div>
         <div class="flex gap-3">

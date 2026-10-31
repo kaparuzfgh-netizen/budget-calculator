@@ -47,8 +47,12 @@ function applyPatch(path: string, body: Record<string, unknown>): void {
   if (id !== null) {
     const c = COMMITMENTS.commitments.find((x) => x.id === id);
     if (!c) return;
+    if (typeof body.name === 'string') c.name = body.name;
     if (typeof body.amount === 'number') c.amount_minor = num(body.amount) ?? c.amount_minor;
+    if (typeof body.currency === 'string') c.currency = body.currency;
     if ('due_day' in body) c.due_day = (body.due_day as number | null) ?? null;
+    if ('anchor_on' in body) c.anchor_on = (body.anchor_on as string | null) ?? null;
+    if ('every_months' in body) c.every_months = (body.every_months as number | null) ?? 1;
     if ('active' in body) c.active = body.active ? 1 : 0;
     return;
   }
@@ -108,6 +112,7 @@ function applyPost(path: string, body: Record<string, unknown>): void {
       interval_days: (body.interval_days as number | null) ?? null,
       anchor_on: (body.anchor_on as string | null) ?? null,
       due_month: (body.due_month as number | null) ?? null,
+      every_months: (body.every_months as number | null) ?? 1,
       cadence: '1 числа',
       next_due_on: null,
       active: 1,

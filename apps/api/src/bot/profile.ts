@@ -28,7 +28,8 @@ export interface PfState {
     origin?: string | undefined; // экран-источник для «Назад»/«Отмена»
     /** добавление платежа: разобранная строка до выбора каденса (0016). */
     pendingCommit?: ParsedCommitment | undefined;
-    pendingFreq?: 'monthly' | 'interval_days' | 'yearly' | undefined;
+    /** 'every_months' — UI-режим шага каденса → frequency monthly + everyMonths. */
+    pendingFreq?: 'monthly' | 'interval_days' | 'yearly' | 'every_months' | undefined;
   };
 }
 
@@ -77,6 +78,7 @@ export type PfEffect =
         interval_days?: number | null;
         anchor_on?: string | null;
         due_month?: number | null;
+        every_months?: number;
       };
     }
   | { kind: 'commit_del'; id: number }
@@ -441,7 +443,10 @@ export function renderPf(
           `Новый платёж «${escapeHtml(pc.name)}» — ${fmtMoney(pc.amount, pc.currency ?? p.income_currency)}\n` +
           'Как часто платите?',
         markup: kb(
-          [[btn('Каждый месяц', 'pf:cf:m'), btn('Каждые N дней', 'pf:cf:i'), btn('Раз в год', 'pf:cf:y')]],
+          [
+            [btn('Каждый месяц', 'pf:cf:m'), btn('Каждые N мес', 'pf:cf:e')],
+            [btn('Каждые N дней', 'pf:cf:i'), btn('Раз в год', 'pf:cf:y')],
+          ],
           'PF_COMMIT_FREQ',
         ),
       };
@@ -455,7 +460,10 @@ export function renderPf(
           ? `«${escapeHtml(pc.name)}» — интервал в днях и дата первого платежа (например: <code>14 01.11</code>):`
           : f === 'yearly'
             ? `«${escapeHtml(pc.name)}» — день и месяц платежа (например: <code>15 3</code> или <code>15.03</code>):`
-            : `«${escapeHtml(pc.name)}» — день месяца 1–31 (0 — без даты):`;
+            : f === 'every_months'
+              ? `«${escapeHtml(pc.name)}» — каждые сколько месяцев, день и дата первого платежа ` +
+                '(например: <code>3 31 31.10</code> — раз в квартал, 12 — раз в год):'
+              : `«${escapeHtml(pc.name)}» — день месяца 1–31 (0 — без даты):`;
       return { step: 'add_commit_cad', text, markup: promptKb('PF_COMMIT_CAD') };
     }
     case 'PF_COMMIT_AMOUNT': {
@@ -1027,6 +1035,7 @@ export function advancePf(state: PfState, input: PfInput, ctx: PfCtx): { state: 
         if (pc.dueDay) return add({ ...pc, frequency: 'monthly' });
         return go('PF_COMMIT_CAD', { ...d, pendingFreq: 'monthly' });
       }
+      if (cb === 'pf:cf:e') return go('PF_COMMIT_CAD', { ...d, pendingFreq: 'every_months' });
       if (cb === 'pf:cf:i') return go('PF_COMMIT_CAD', { ...d, pendingFreq: 'interval_days' });
       if (cb === 'pf:cf:y') return go('PF_COMMIT_CAD', { ...d, pendingFreq: 'yearly' });
       return { state, effects: [] };
@@ -1068,6 +1077,31 @@ export function advancePf(state: PfState, input: PfInput, ctx: PfCtx): { state: 
         if (!anchor || !Number.isInteger(n) || n < 1 || n > 366)
           return ok(state, send('Формат: интервал и дата — «14 01.11» (1–366 дней).'));
         return add({ ...pc, frequency: 'interval_days', intervalDays: n, anchorOn: anchor, dueDay: undefined });
+      }
+      if (f === 'every_months') {
+        // «3 31 31.10» | «3 31 2025-10-31» — каждые N месяцев, день, дата первого
+        let n = NaN;
+        let day = NaN;
+        let anchor: string | null = null;
+        const isoM = /^(\d{1,2})\s+(\d{1,2})\s+(\d{4}-\d{2}-\d{2})$/.exec(text);
+        if (isoM) {
+          n = Number(isoM[1]);
+          day = Number(isoM[2]);
+          anchor = isoM[3]!;
+          if (Number.isNaN(Date.parse(`${anchor}T00:00:00Z`))) anchor = null;
+        } else {
+          const m = /^(\d{1,2})\s+(.+)$/.exec(text);
+          if (m) {
+            const ad = parseAmountDate(m[2]!, ctx.today);
+            if (ad.badDate) return ok(state, send('Не понял дату — формат ДД.ММ (или ДД.ММ.ГГГГ).'));
+            n = Number(m[1]);
+            day = Number(ad.amountText);
+            anchor = ad.eventOn;
+          }
+        }
+        if (!anchor || !Number.isInteger(n) || n < 2 || n > 24 || !Number.isInteger(day) || day < 1 || day > 31)
+          return ok(state, send('Формат: интервал, день и дата первого — «3 31 31.10» (2–24 мес, день 1–31).'));
+        return add({ ...pc, frequency: 'monthly', everyMonths: n, dueDay: day, anchorOn: anchor });
       }
       // yearly: «15 3» | «15.03»; только число — день из исходной строки
       let day = pc.dueDay;

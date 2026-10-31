@@ -11,6 +11,7 @@ import type { ScreenProps } from '../app';
 import { amountError, currencyError, fmtMinor, parseAmount } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   ErrorView,
   errorView,
   Field,
@@ -160,12 +161,12 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
               />
             </Field>
             <Field label="Валюта">
-              <input
-                class={inputCls}
-                maxLength={5}
-                placeholder={p.income_currency}
+              <CcySelect
                 value={ccy}
-                onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
+                onChange={setCcy}
+                extra={[p.income_currency]}
+                allowEmpty
+                emptyLabel={`По умолч. ${p.income_currency}`}
               />
             </Field>
           </div>

@@ -35,6 +35,7 @@ import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, dayError, fmtDay, fmtMinor, nameError, parseAmount } from '../fmt';
 import {
   cardCls,
+  CcySelect,
   confirmCls,
   dangerBtnCls,
   ErrorView,
@@ -52,6 +53,7 @@ import {
   mutedCls,
   primaryBtnCls,
   rowCls,
+  Select,
   smBtnCls,
   smDangerBtnCls,
   smDangerFillBtnCls,
@@ -703,9 +705,8 @@ export function DebtAddScreen({ api, nav }: ScreenProps) {
               <input class={inputCls} inputMode="decimal" placeholder="999000" value={amount}
                 onInput={(e) => setAmount((e.target as HTMLInputElement).value)} />
             </Field>
-            <Field label="Валюта (USD, RUB, KGS…)">
-              <input class={inputCls} maxLength={5} placeholder="USD" value={ccy}
-                onInput={(e) => setCcy((e.target as HTMLInputElement).value)} />
+            <Field label="Валюта">
+              <CcySelect value={ccy} onChange={setCcy} />
             </Field>
           </div>
           <div class="flex gap-3">
@@ -718,10 +719,14 @@ export function DebtAddScreen({ api, nav }: ScreenProps) {
                 onInput={(e) => setPayment((e.target as HTMLInputElement).value)} />
             </Field>
             <Field label="Периодичность">
-              <select class={inputCls} value={freq} onChange={(e) => setFreq((e.target as HTMLSelectElement).value as 'monthly' | 'biweekly')}>
-                <option value="monthly">ежемесячно</option>
-                <option value="biweekly">раз в 2 недели</option>
-              </select>
+              <Select
+                value={freq}
+                options={[
+                  { value: 'monthly', label: 'ежемесячно' },
+                  { value: 'biweekly', label: 'раз в 2 недели' },
+                ]}
+                onChange={(v) => setFreq(v as 'monthly' | 'biweekly')}
+              />
             </Field>
           </div>
           <Field label="День платежа (1–31, пусто — без дня)">

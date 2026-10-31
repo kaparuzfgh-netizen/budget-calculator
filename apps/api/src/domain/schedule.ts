@@ -1,9 +1,11 @@
 /**
- * schedule.ts — периодичность регулярных платежей (commitments, миграция 0016).
+ * schedule.ts — периодичность регулярных платежей (commitments, миграции 0016+0017).
  *
  * Чистые функции над ISO-датами 'YYYY-MM-DD' (как dates.ts): «сегодня» —
  * параметром, внутри только UTC-арифметика. Каденсы:
  *   monthly       — день месяца 1–31, кламп к последнему дню (31 → февр. 28/29);
+ *                   every_months > 1 — сроки каждые N месяцев, фаза задаётся
+ *                   месяцем anchor_on (0017; обязательны due_day и anchor_on);
  *   interval_days — каждые n дней от якорной даты anchor_on;
  *   yearly        — день+месяц раз в год (тот же кламп; 29.02 → 28 в невисокосном).
  * Платёж без даты возможен только у monthly (due_day = NULL) — тогда сроков нет.
@@ -19,6 +21,8 @@ export interface Cadence {
   interval_days: number | null;
   anchor_on: string | null;
   due_month: number | null;
+  /** monthly: «каждые N месяцев» 1–24 (0017); NULL/1 — обычный monthly. */
+  every_months: number | null;
 }
 
 const RE_ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -83,6 +87,22 @@ function anchorMs(c: Cadence): number | null {
   }
 }
 
+/** Абсолютный индекс месяца: y*12 + m - 1 («месяцы от нуля»). */
+const monthIdx = (y: number, m: number) => y * 12 + (m - 1);
+/** Индекс месяца → (год, месяц). */
+const idxToYm = (i: number): [number, number] => [Math.floor(i / 12), (i % 12) + 1];
+
+/**
+ * «Каждые N месяцев» (0017): при every_months > 1 индекс месяца якоря —
+ * фаза отсчёта сроков (месяцы сроков ≡ якорному mod N). Вызывается только
+ * при em > 1; якорь обязателен по контракту API — битый/пустой → null
+ * (каденс неполный, как interval без якоря → сроков нет).
+ */
+function everyMonthsAnchorIdx(c: Cadence): number | null {
+  if (anchorMs(c) === null || !c.anchor_on) return null;
+  return monthIdx(Number(c.anchor_on.slice(0, 4)), Number(c.anchor_on.slice(5, 7)));
+}
+
 /** Самая поздняя дата срока ≤ iso; null — нет сроков или iso раньше первого. */
 function onOrBefore(c: Cadence, iso: string): string | null {
   const y = Number(iso.slice(0, 4));
@@ -90,6 +110,17 @@ function onOrBefore(c: Cadence, iso: string): string | null {
   switch (c.frequency) {
     case 'monthly': {
       if (!c.due_day) return null;
+      const em = c.every_months ?? 1;
+      if (em > 1) {
+        // «каждые N мес»: ближайший phase-месяц ≤ (y,m); его срок позже iso —
+        // берём предыдущий phase-месяц (фаза бесконечна в обе стороны).
+        const am = everyMonthsAnchorIdx(c);
+        if (am === null) return null;
+        const idx = am + Math.floor((monthIdx(y, m) - am) / em) * em;
+        const occ = monthlyIso(c.due_day, ...idxToYm(idx));
+        if (occ <= iso) return occ;
+        return monthlyIso(c.due_day, ...idxToYm(idx - em));
+      }
       const occ = monthlyIso(c.due_day, y, m);
       if (occ <= iso) return occ;
       const [py, pm] = prevMonth(y, m);
@@ -124,6 +155,18 @@ export function nextDueOn(c: Cadence, fromIso: string): string | null {
   switch (c.frequency) {
     case 'monthly': {
       if (!c.due_day) return null;
+      const em = c.every_months ?? 1;
+      if (em > 1) {
+        // «каждые N мес»: ближайший phase-месяц ≥ (y,m); его срок раньше
+        // fromIso — следующий phase-месяц. Каждый срок считается от месяца
+        // якоря + k·N месяцев — без дрейфа дней от клампнутой даты.
+        const am = everyMonthsAnchorIdx(c);
+        if (am === null) return null;
+        const idx = am + Math.ceil((monthIdx(y, m) - am) / em) * em;
+        const occ = monthlyIso(c.due_day, ...idxToYm(idx));
+        if (occ >= fromIso) return occ;
+        return monthlyIso(c.due_day, ...idxToYm(idx + em));
+      }
       const occ = monthlyIso(c.due_day, y, m);
       if (occ >= fromIso) return occ;
       const [ny, nm] = nextMonth(y, m);
@@ -182,8 +225,9 @@ export function isOccurrencePaid(c: Cadence, occurrenceIso: string, paidOns: str
 }
 
 /**
- * Эквивалент платежа в месяц: monthly → amount; interval → amount·30.4375/n;
- * yearly → amount/12. Округление — на потребителе (round2).
+ * Эквивалент платежа в месяц: monthly → amount/every_months;
+ * interval → amount·30.4375/n; yearly → amount/12.
+ * Округление — на потребителе (round2).
  */
 export function monthlyAmount(c: Cadence & { amount_minor: number }): number {
   const a = c.amount_minor / 100;
@@ -192,8 +236,10 @@ export function monthlyAmount(c: Cadence & { amount_minor: number }): number {
       return c.interval_days ? (a * 30.4375) / c.interval_days : a;
     case 'yearly':
       return a / 12;
-    default:
-      return a;
+    default: {
+      const em = c.every_months ?? 1;
+      return em > 1 ? a / em : a;
+    }
   }
 }
 
@@ -212,14 +258,20 @@ const MONTHS_GEN = [
   'декабря',
 ];
 
-/** Короткая подпись каденса: «1 числа» · «каждые 14 дн» · «15 марта» · «без даты». */
+/**
+ * Короткая подпись каденса: «1 числа» · «каждые 3 мес (31-го)» ·
+ * «каждые 14 дн» · «15 марта» · «без даты».
+ */
 export function cadenceLabel(c: Cadence): string {
   switch (c.frequency) {
     case 'interval_days':
       return c.interval_days ? `каждые ${c.interval_days} дн` : 'без даты';
     case 'yearly':
       return c.due_day && c.due_month ? `${c.due_day} ${MONTHS_GEN[c.due_month - 1]}` : 'без даты';
-    default:
+    default: {
+      const em = c.every_months ?? 1;
+      if (em > 1) return c.due_day ? `каждые ${em} мес (${c.due_day}-го)` : `каждые ${em} мес`;
       return c.due_day ? `${c.due_day} числа` : 'без даты';
+    }
   }
 }

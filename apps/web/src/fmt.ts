@@ -46,6 +46,43 @@ export const todayIso = (): string => {
 export const LIMITS = { maxAmount: 1e9, maxNote: 200, maxName: 60 } as const;
 export const CCY_RE = /^[A-Z]{3,5}$/;
 
+/**
+ * Список валют для селектов (~30 ходовых кодов). Не в списке →
+ * опция «Другое…» открывает свободный ввод (валидация currencyError).
+ */
+export const CCY_LIST: readonly string[] = [
+  'USD',
+  'EUR',
+  'RUB',
+  'KGS',
+  'KZT',
+  'UAH',
+  'UZS',
+  'GEL',
+  'AMD',
+  'AZN',
+  'BYN',
+  'TRY',
+  'GBP',
+  'CHF',
+  'JPY',
+  'CNY',
+  'AED',
+  'INR',
+  'THB',
+  'VND',
+  'KRW',
+  'PLN',
+  'CZK',
+  'HUF',
+  'CAD',
+  'AUD',
+  'NZD',
+  'SEK',
+  'NOK',
+  'DKK',
+];
+
 /** «1 234,56» / «1234.56» → number | null (null — не число). */
 export function parseAmount(raw: string): number | null {
   const s = raw

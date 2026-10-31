@@ -4,10 +4,12 @@
  * хук useData, подписанные поля форм, «ⓘ»-подсказка-шторка и общие
  * классы (карточки/кнопки/ряды), чтобы экраны держались единого стиля.
  */
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
 import type { ComponentChildren } from 'preact';
 import {
+  Check,
+  ChevronDown,
   ChevronLeft,
   CircleAlert,
   House,
@@ -16,6 +18,7 @@ import {
   X,
 } from 'lucide-preact';
 import { isAuthError } from './api';
+import { CCY_LIST } from './fmt';
 
 // ── общие классы (единый словарь стиля экранов) ──
 
@@ -249,4 +252,153 @@ export function Info({ title, children }: { title: string; children: ComponentCh
 
 export function FormError({ msg }: { msg: string | null }) {
   return msg ? <p class="mb-3 text-sm text-red-400">{msg}</p> : null;
+}
+
+// ── селекты ──
+
+/** Опция Select: строка — и значение, и подпись. */
+export interface SelectOption {
+  value: string;
+  label: string;
+}
+const optOf = (o: string | SelectOption): SelectOption => (typeof o === 'string' ? { value: o, label: o } : o);
+
+/**
+ * Тёмный селект в стиле inputCls — нативный <select> в UI не используем
+ * (WebView рисует его не в теме). Панель — absolute под кнопкой;
+ * закрывается по клику вне, Escape и выбору; Enter/Space на кнопке — toggle.
+ */
+export function Select({
+  value,
+  options,
+  onChange,
+  placeholder = '—',
+  disabled = false,
+}: {
+  value: string;
+  options: readonly (string | SelectOption)[];
+  onChange: (v: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  const opts = options.map(optOf);
+  const cur = opts.find((o) => o.value === value);
+  return (
+    <div class="relative" ref={root}>
+      <button
+        type="button"
+        class={`${inputCls} flex items-center justify-between gap-2 text-left disabled:opacity-50`}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
+      >
+        <span class={`truncate ${cur ? '' : 'text-zinc-600'}`}>{cur?.label ?? placeholder}</span>
+        <ChevronDown size={16} strokeWidth={1.5} class="flex-none text-zinc-400" />
+      </button>
+      {open && (
+        <div class="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-xl border border-white/10 bg-zinc-900 shadow-xl shadow-black/40">
+          {opts.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-[15px] text-zinc-100 transition hover:bg-white/5"
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+            >
+              <span class="truncate">{o.label}</span>
+              {o.value === value && <Check size={15} strokeWidth={1.5} class="flex-none text-sky-400" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Маркер опции «Другое…» в селекте валют. */
+const CCY_CUSTOM = '__ccy_custom__';
+
+/**
+ * Поле валюты: Select из CCY_LIST ∪ extra ∪ текущее значение и финальная
+ * опция «Другое…» → свободный ввод (его валидирует currencyError в форме).
+ * allowEmpty — первой опцией идёт «пустое» значение (emptyLabel), пустая
+ * строка = «как у бюджета»/дефолт профиля.
+ */
+export function CcySelect({
+  value,
+  onChange,
+  extra = [],
+  allowEmpty = false,
+  emptyLabel = '—',
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  extra?: readonly (string | null | undefined)[];
+  allowEmpty?: boolean;
+  emptyLabel?: string;
+}) {
+  const up = (x: string) => x.toUpperCase();
+  const known = [
+    ...new Set(
+      [...extra.filter((x): x is string => !!x), ...CCY_LIST, ...(value ? [value] : [])].map(up),
+    ),
+  ];
+  const custom = !!value && !known.includes(up(value));
+  const [customMode, setCustomMode] = useState(custom);
+  // значение пришло извне и оно в списке → выходим из режима «Другое»
+  useEffect(() => {
+    if (value && known.includes(up(value))) setCustomMode(false);
+  }, [value]);
+  const options: SelectOption[] = [
+    ...(allowEmpty ? [{ value: '', label: emptyLabel }] : []),
+    ...known.map((x) => ({ value: x, label: x })),
+    { value: CCY_CUSTOM, label: 'Другое…' },
+  ];
+  const pick = (v: string) => {
+    if (v === CCY_CUSTOM) {
+      setCustomMode(true);
+      onChange(''); // сбрасываем — код введёт вручную
+    } else {
+      setCustomMode(false);
+      onChange(v);
+    }
+  };
+  return (
+    <div>
+      <Select value={customMode ? CCY_CUSTOM : up(value)} options={options} onChange={pick} />
+      {customMode && (
+        <input
+          class={`${inputCls} mt-2`}
+          maxLength={5}
+          placeholder="USD"
+          value={value}
+          onInput={(e) => onChange((e.target as HTMLInputElement).value.toUpperCase())}
+        />
+      )}
+    </div>
+  );
 }
