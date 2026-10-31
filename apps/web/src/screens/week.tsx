@@ -13,8 +13,6 @@
 import { useMemo, useState } from 'preact/hooks';
 import {
   CalendarDays,
-  ChevronDown,
-  ChevronRight,
   CircleHelp,
   Plus,
   Sparkles,
@@ -35,6 +33,7 @@ import {
   FormError,
   h1Cls,
   headCls,
+  Info,
   inputCls,
   liCls,
   listCardCls,
@@ -387,8 +386,6 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
   const [ccy, setCcy] = useState('');
   const [note, setNote] = useState('');
   const [catId, setCatId] = useState<number | null>(null);
-  // «Ещё ▸»: состояние раскрытия живёт, пока смонтирован компонент
-  const [more, setMore] = useState(false);
   const [spentOn, setSpentOn] = useState(todayIso());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -417,7 +414,7 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
         ...(ccy.trim() ? { currency: ccy.trim().toUpperCase() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
         ...(catId !== null ? { category_id: catId } : {}),
-        ...(more && spentOn ? { spent_on: spentOn } : {}),
+        ...(spentOn ? { spent_on: spentOn } : {}),
         client_id: clientId,
       });
       nav.flash('Трата записана');
@@ -446,55 +443,54 @@ export function SpentAddScreen({ api, nav, onFatal }: ScreenProps) {
                 autoFocus
               />
             </Field>
-            <Field label={`Валюта (по умолч. ${defCcy})`}>
+            <Field label="Валюта">
               <CcySelect
                 value={ccy}
                 onChange={setCcy}
                 extra={[defCcy]}
                 allowEmpty
-                emptyLabel={`По умолч. ${defCcy}`}
+                emptyLabel={`${defCcy} · по умолч.`}
               />
             </Field>
           </div>
-          <Field label="Заметка">
-            <input
-              class={inputCls}
-              maxLength={200}
-              placeholder="необязательно"
-              value={note}
-              onInput={(e) => setNote((e.target as HTMLInputElement).value)}
-            />
-          </Field>
-          <Field label="Категория">
-            <CategoryChips api={api} onFatal={onFatal} value={catId} onChange={setCatId} />
-          </Field>
-          <button
-            type="button"
-            class="mb-3 flex items-center gap-1 text-[13px] text-sky-400 transition hover:text-sky-300"
-            onClick={() => setMore(!more)}
-          >
-            {more ? (
-              <>
-                Ещё <ChevronDown size={14} strokeWidth={1.5} />
-              </>
-            ) : (
-              <>
-                Ещё <ChevronRight size={14} strokeWidth={1.5} />
-              </>
-            )}
-          </button>
-          {more && (
-            <Field label="Дата">
+          <div class="flex gap-3">
+            <Field label="Заметка">
               <input
                 class={inputCls}
-                type="date"
-                max={todayIso()}
-                min="2000-01-01"
-                value={spentOn}
-                onInput={(e) => setSpentOn((e.target as HTMLInputElement).value)}
+                maxLength={200}
+                placeholder="необязательно"
+                value={note}
+                onInput={(e) => setNote((e.target as HTMLInputElement).value)}
               />
             </Field>
-          )}
+            <div class="w-36 flex-none">
+              <Field label="Дата">
+                <input
+                  class={inputCls}
+                  type="date"
+                  max={todayIso()}
+                  min="2000-01-01"
+                  value={spentOn}
+                  onInput={(e) => setSpentOn((e.target as HTMLInputElement).value)}
+                />
+              </Field>
+            </div>
+          </div>
+          <Field
+            label={
+              <>
+                Категория
+                <Info title="Категория «Авто»">
+                  Категория подбирается по словам заметки: «такси» → Транспорт,
+                  «аптека» → Здоровье, «подписка» → Связь и подписки. Свои категории
+                  распознаются по названию. Если совпадения нет — трата останется
+                  без категории. При разборе скриншота «Авто» работает так же.
+                </Info>
+              </>
+            }
+          >
+            <CategoryChips api={api} onFatal={onFatal} value={catId} onChange={setCatId} />
+          </Field>
           <FormError msg={err} />
           <button type="submit" class={primaryBtnCls} disabled={busy}>
             {busy ? 'Записываю…' : 'Записать'}
