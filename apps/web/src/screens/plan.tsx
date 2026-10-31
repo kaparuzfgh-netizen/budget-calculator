@@ -18,6 +18,7 @@ import {
   FormError,
   h1Cls,
   headCls,
+  Info,
   inputCls,
   listCardCls,
   Loading,
@@ -77,6 +78,9 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
   }
   const p = q.data;
   const usd = 'USD';
+  // «виртуальный» доход: вычислен из обязательств или подставлен вручную —
+  // итоги плана тогда оценочные, а не по факту
+  const estimated = p.income_source === 'computed' || p.income_source === 'override';
 
   return (
     <>
@@ -86,12 +90,24 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
 
       <h2 class={headCls}>
         <Banknote size={16} strokeWidth={1.5} /> Доход
+        <Info title="Откуда берётся доход">
+          <p><b>Факт по записям</b> — сумма внесённых доходов за месяц.</p>
+          <p><b>Базовый доход</b> — задан в профиле.</p>
+          <p><b>Расчёт (обязательства)</b> — оценка: регулярные платежи + бюджет,
+            если доход нигде не задан. Итоги тогда ориентировочные.</p>
+          <p><b>Задано вручную</b> — пробный пересчёт из формы ниже.</p>
+        </Info>
       </h2>
       <div class={`${cardCls} mt-2`}>
         <div class="text-2xl font-semibold">{fmtMinor(p.income_minor, p.income_currency)}</div>
         <div class={`${mutedCls} mt-0.5`}>
           {INCOME_SOURCE[p.income_source]}
           {p.income_entries_count ? ` · записей: ${p.income_entries_count}` : ''}
+          {estimated && (
+            <span class="ml-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 align-middle text-[10px] font-medium text-amber-300">
+              ≈ {p.income_source === 'override' ? 'сценарий' : 'оценка'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -128,11 +144,13 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
       <div class={`${cardCls} mt-2`}>
         <div class={rowCls}>
           <span>Бюджет</span>
-          <b>{fmtMinor(p.living_usd_minor, usd)}</b>
+          <b class={estimated ? 'text-amber-300' : ''}>{fmtMinor(p.living_usd_minor, usd)}</b>
         </div>
         <div class={`${rowCls} mt-2`}>
           <span>Свободный остаток</span>
-          <b class={p.surplus_usd_minor < 0 ? 'text-red-400' : ''}>{fmtMinor(p.surplus_usd_minor, usd)}</b>
+          <b class={p.surplus_usd_minor < 0 ? 'text-red-400' : estimated ? 'text-amber-300' : ''}>
+            {fmtMinor(p.surplus_usd_minor, usd)}
+          </b>
         </div>
         {p.bonus && (
           <div class={`${rowCls} mt-2`}>
@@ -143,12 +161,19 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
           </div>
         )}
       </div>
-      <p class={`${mutedCls} mt-2`}>Итоги в базовой валюте USD · курсы на {p.fx_as_of || '—'}</p>
+      <p class={`${mutedCls} mt-2`}>
+        Итоги в базовой валюте USD · курсы на {p.fx_as_of || '—'}
+        {estimated && <span class="text-amber-300/80"> · ≈ по оценке дохода</span>}
+      </p>
 
       <h2 class={`${headCls} mt-6`}>
         <Pencil size={16} strokeWidth={1.5} /> Доход вручную
       </h2>
       <div class={`${cardCls} mt-2`}>
+        <p class={`${mutedCls} mb-3`}>
+          Пробный пересчёт: подставьте сумму и посмотрите план с другим доходом —
+          записи и профиль не меняются.
+        </p>
         <form onSubmit={submit}>
           <div class="flex gap-3">
             <Field label="Сумма">
