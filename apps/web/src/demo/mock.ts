@@ -166,7 +166,10 @@ export const CATEGORIES: CategoriesList = {
 
 // ── сценарии темпа месяца для ?demo=home&pace=low|ok|over ──
 
-const DAILY_W = [1.1, 0.5, 1.4, 0.8, 0.3, 2.0, 1.0, 0.7, 1.2, 0.4, 1.3, 0.9, 0.5, 1.6, 0.2, 0.9, 0.7, 0.6];
+const DAILY_W = [
+  1.1, 0.5, 1.4, 0.8, 0.3, 2.0, 1.0, 0.7, 1.2, 0.4, 1.3, 0.9, 0.5, 1.6, 0.2, 0.9,
+  0.7, 0.6, 1.5, 0.4, 1.1, 0.8, 0.3, 1.7, 0.9, 0.5, 1.3, 0.6, 1.0, 0.4, 1.2,
+];
 
 /** Дневные траты: первые `days` дней по весам, сумма = targetMinor. */
 function dailyMinor(targetMinor: number, days: number, dim: number): number[] {
@@ -180,22 +183,30 @@ function dailyMinor(targetMinor: number, days: number, dim: number): number[] {
 }
 
 /**
- * WeekStatus под темп месяца: low — далеко под идеалом (rate ~0.34),
- * ok — по графику (~0.86), over — перегрев (~1.38, прогноз выше бюджета).
- * Бюджет недели/месяца и «сегодня» — как в базовой фикстуре WEEK.
+ * WeekStatus под темп месяца на произвольный день `day` (1..31):
+ * pace — burn rate (low ~0.34, ok ~0.86, over ~1.38), потрачено =
+ * cap × (day/dim) × rate. Неделя = Пн–Вс, содержащая «сегодня» (март 2026).
  */
-export function tempoWeek(pace: 'low' | 'ok' | 'over'): WeekStatus {
-  const spent = { low: 1200000, ok: 3000000, over: 4800000 }[pace];
+export function tempoWeek(pace: 'low' | 'ok' | 'over', day = 18): WeekStatus {
+  const rate = { low: 0.34, ok: 0.86, over: 1.38 }[pace];
   const wSpent = { low: 180000, ok: 640000, over: 1820000 }[pace];
-  const { week_budget_minor: budget, month_cap_minor: cap, month_day, month_days, days_left } = WEEK;
+  const { week_budget_minor: budget, month_cap_minor: cap } = WEEK;
+  const dim = WEEK.month_days;
+  const today = Math.max(1, Math.min(day, dim));
+  const spent = Math.round(cap * (today / dim) * rate);
+  const dow = (new Date(2026, 2, today).getDay() + 6) % 7;
+  const iso = (d: number) => new Date(2026, 2, d).toISOString().slice(0, 10);
   return {
     ...WEEK,
+    week_from: iso(today - dow),
+    week_to: iso(today - dow + 6),
     week_spent_minor: wSpent,
     week_over: wSpent > budget,
     week_remaining_minor: budget - wSpent,
     month_spent_minor: spent,
-    month_daily_minor: dailyMinor(spent, month_day, month_days),
-    burn_rate: spent / cap / (month_day / month_days),
-    daily_allowance_minor: Math.max(0, Math.round((cap - spent) / days_left)),
+    month_day: today,
+    month_daily_minor: dailyMinor(spent, today, dim),
+    burn_rate: rate,
+    daily_allowance_minor: Math.max(0, Math.round((cap - spent) / Math.max(1, dim - today))),
   };
 }

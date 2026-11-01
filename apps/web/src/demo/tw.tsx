@@ -25,7 +25,12 @@ const PACE = ((): keyof typeof PACE_LABELS => {
   const p = new URLSearchParams(location.search).get('pace');
   return p === 'low' || p === 'over' ? p : 'ok';
 })();
-const WEEK = tempoWeek(PACE);
+// «крутилка дня»: &day=1..31 (дефолт 18) — стартовый день, дальше слайдером живьём
+const DAY0 = (() => {
+  const d = Number(new URLSearchParams(location.search).get('day'));
+  return Number.isFinite(d) && d >= 1 && d <= 31 ? Math.round(d) : 18;
+})();
+const WEEK = tempoWeek(PACE, DAY0);
 
 const CHART_LABELS = { race: 'гонка', line: 'линия' } as const;
 const CHART = ((): TempoKind => {
@@ -255,7 +260,17 @@ type DemoName = (typeof SCREENS)[number];
 
 function DemoApp({ name }: { name: string }) {
   const [flash, setFlash] = useState<string | null>(null);
+  const [day, setDay] = useState(DAY0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // слайдер «день месяца»: фикстуру правим на месте, экран перемонтируем по key
+  const onDay = (d: number) => {
+    setDay(d);
+    Object.assign(WEEK, tempoWeek(PACE, d));
+    const u = new URL(location.href);
+    if (d === 18) u.searchParams.delete('day');
+    else u.searchParams.set('day', String(d));
+    history.replaceState(null, '', u);
+  };
   const nav: Nav = {
     push: (r) => console.log('[demo] nav.push', r),
     back: () => console.log('[demo] nav.back'),
@@ -271,7 +286,7 @@ function DemoApp({ name }: { name: string }) {
 
   const screen =
     name === 'home' ? (
-      <HomeScreen {...props} name="Демо" tempo={CHART} />
+      <HomeScreen key={day} {...props} name="Демо" tempo={CHART} />
     ) : name === 'week' ? (
       <WeekScreen {...props} />
     ) : name === 'income' ? (
@@ -326,6 +341,18 @@ function DemoApp({ name }: { name: string }) {
                 {CHART_LABELS[k]}
               </a>
             ))}
+          </p>
+          <p class="flex items-center gap-2">
+            день:
+            <input
+              type="range"
+              min={1}
+              max={31}
+              value={day}
+              onInput={(e) => onDay(Number((e.target as HTMLInputElement).value))}
+              class="w-40 accent-sky-400"
+            />
+            <span class="w-6 text-zinc-400">{day}</span>
           </p>
         </div>
       )}
