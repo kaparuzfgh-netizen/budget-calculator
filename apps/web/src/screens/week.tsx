@@ -399,26 +399,30 @@ function CategoryChips({
       </button>
       {addCat && (
         <span class="flex w-full items-center gap-2">
-          <input
-            class={`${smInputCls} w-14 flex-none`}
-            value={catEmoji}
-            maxLength={4}
-            onInput={(e) => setCatEmoji((e.target as HTMLInputElement).value)}
-          />
-          <input
-            class={`${smInputCls} min-w-0 flex-1`}
-            value={catName}
-            maxLength={32}
-            placeholder="Название"
-            autoFocus
-            onInput={(e) => setCatName((e.target as HTMLInputElement).value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                void addCategory();
-              }
-            }}
-          />
+          <span class="w-12 flex-none">
+            <input
+              class={smInputCls}
+              value={catEmoji}
+              maxLength={4}
+              onInput={(e) => setCatEmoji((e.target as HTMLInputElement).value)}
+            />
+          </span>
+          <span class="min-w-0 flex-1">
+            <input
+              class={smInputCls}
+              value={catName}
+              maxLength={32}
+              placeholder="Название"
+              autoFocus
+              onInput={(e) => setCatName((e.target as HTMLInputElement).value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void addCategory();
+                }
+              }}
+            />
+          </span>
           <button type="button" class={smBtnCls} disabled={catBusy} onClick={() => void addCategory()}>
             <Check size={14} strokeWidth={1.5} />
           </button>

@@ -146,12 +146,12 @@ function CushionCard({
             <input
               class={inputCls}
               inputMode="decimal"
-              placeholder="например, 150000"
+              placeholder="150000"
               value={val}
               onInput={(e) => setVal((e.target as HTMLInputElement).value)}
             />
           </Field>
-          <button type="submit" class={smPrimaryBtnCls} disabled={busy}>
+          <button type="submit" class={`${smPrimaryBtnCls} mb-3`} disabled={busy}>
             Сохранить
           </button>
         </div>
