@@ -118,6 +118,15 @@ function paceRGB(rate: number): [number, number, number] {
 const paceColor = (rate: number): string => `rgb(${paceRGB(rate).join(',')})`;
 const paceFill = (rate: number, a: number): string => `rgba(${paceRGB(rate).join(',')},${a})`;
 
+/** Подписи вариантов для переключателя в «деталях». */
+const TEMPO_LABELS: Record<TempoKind, string> = {
+  gauge: 'шкала',
+  race: 'гонка',
+  line: 'линия',
+  thermo: 'термометр',
+  heat: 'карта',
+};
+
 /** Пояснения ⓘ к каждому варианту графика темпа. */
 const TEMPO_INFO: Record<TempoKind, string> = {
   line: 'Линия — накопленные траты по дням месяца; пунктир — ровный график бюджета; полая точка — итог при текущем темпе. Цвет — температура: белый — тратите мало, зелёный — в графике, красный — перегрев. В «деталях» ползунок «Что если» крутит прогноз.',
@@ -280,51 +289,93 @@ function ThermoChart({ today, dim, cap, spent, proj, rate, effRate, scenario, cu
 }
 
 /**
- * «Шкала» (grafana-gauge): полукруг, стрелка = темп к идеалу
- * (×1 — точно по графику). Зоны температуры: холодно → норма → жарко.
+ * «Шкала» (grafana-gauge): полукруг 0→100% и ДВЕ стрелки — «дни» (тонкая
+ * светлая) vs «бюджет» (толстая, температурная). Дуга-разрыв между ними
+ * окрашена температурой зазора; при «Что если» — призрачная стрелка до
+ * прогнозной доли. Бюджет впереди дней — перебор.
  */
-function GaugeChart({ effRate }: TempoProps) {
-  const R = 104;
+function GaugeChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: TempoProps) {
   const cx = 160;
-  const cy = 128;
-  const max = 2;
-  const a = (r: number) => Math.PI * (1 - Math.min(r, max) / max);
-  const pt = (r: number, rad = R) => [cx + rad * Math.cos(a(r)), cy - rad * Math.sin(a(r))] as const;
-  const arc = (r0: number, r1: number, c: string) => {
-    const [x0, y0] = pt(r0);
-    const [x1, y1] = pt(r1);
-    return (
-      <path key={r0} d={`M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1}`} stroke={c} strokeWidth="15" fill="none" />
-    );
-  };
-  const needle = paceColor(effRate);
-  const [nx, ny] = pt(effRate, R - 28);
-  const pct = Math.round((effRate - 1) * 100);
+  const cy = 132;
+  const R = 100;
+  const max = 1.15;
+  const a = (s: number) => Math.PI * (1 - Math.min(s, max) / max);
+  const pt = (s: number, rad = R) => [cx + rad * Math.cos(a(s)), cy - rad * Math.sin(a(s))] as const;
+  const dayShare = dim > 0 ? today / dim : 0;
+  const spentShare = cap > 0 ? spent / cap : 0;
+  const projShare = cap > 0 && proj > 0 ? proj / cap : 0;
+  const factC = paceColor(rate);
+  const effC = paceColor(effRate);
+  // дуга-разрыв между стрелками — температура зазора
+  const lo = Math.min(dayShare, spentShare);
+  const hi = Math.max(dayShare, spentShare);
+  const [g0x, g0y] = pt(lo, R - 10);
+  const [g1x, g1y] = pt(hi, R - 10);
+  const [dx, dy] = pt(dayShare, R - 24);
+  const [bx, by] = pt(spentShare, R - 24);
+  const [px_, py] = pt(projShare, R - 24);
+  const ticks = [0, 0.5, 1];
   return (
-    <svg viewBox="0 0 320 152" class="mt-2 block h-32 w-full" aria-hidden>
-      {arc(0, 0.6, '#52525b')}
-      {arc(0.6, 1, '#34d399')}
-      {arc(1, 1.3, '#fbbf24')}
-      {arc(1.3, 2, '#f87171')}
-      {[0, 1, 2].map((r) => {
-        const [tx, ty] = pt(r, R - 12);
-        const [lx, ly] = pt(r, R + 16);
-        const [ox, oy] = pt(r);
-        return (
-          <g key={r}>
-            <line x1={ox} y1={oy} x2={tx} y2={ty} stroke="#a1a1aa" strokeWidth="2" />
-            <text x={lx} y={ly + 4} textAnchor="middle" fontSize="11" fill="#71717a">
-              {r === 0 ? '0' : r === 1 ? 'план' : '×2'}
-            </text>
-          </g>
-        );
-      })}
-      <line x1={cx} y1={cy} x2={nx} y2={ny} stroke={needle} strokeWidth="4" strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r="7" fill="#18181b" stroke={needle} strokeWidth="2.5" />
-      <text x={cx} y={cy - 36} textAnchor="middle" fontSize="24" fontWeight="600" fill={needle}>
-        {pct > 0 ? `+${pct}%` : pct < 0 ? `−${-pct}%` : 'по плану'}
-      </text>
-    </svg>
+    <>
+      <svg viewBox="0 0 320 156" class="mt-2 block h-32 w-full" aria-hidden>
+        {/* трек дуги 0→115% */}
+        <path
+          d={`M${pt(0)[0]} ${pt(0)[1]} A${R} ${R} 0 0 1 ${pt(max)[0]} ${pt(max)[1]}`}
+          stroke="#3f3f46"
+          strokeWidth="3"
+          fill="none"
+          opacity="0.6"
+        />
+        {/* разрыв «дни vs бюджет» — чем горячее, тем больше отрыв */}
+        <path
+          d={`M${g0x} ${g0y} A${R - 10} ${R - 10} 0 0 1 ${g1x} ${g1y}`}
+          stroke={factC}
+          strokeWidth="10"
+          fill="none"
+          opacity="0.5"
+          strokeLinecap="round"
+        />
+        {ticks.map((t) => {
+          const [tx, ty] = pt(t, R - 3);
+          const [lx, ly] = pt(t, R + 16);
+          const [ox, oy] = pt(t, R + 3);
+          return (
+            <g key={t}>
+              <line x1={ox} y1={oy} x2={tx} y2={ty} stroke="#a1a1aa" strokeWidth="2" />
+              <text x={lx} y={ly + 4} textAnchor="middle" fontSize="10" fill="#71717a">
+                {Math.round(t * 100)}%
+              </text>
+            </g>
+          );
+        })}
+        {/* стрелка бюджета — толстая, температурная */}
+        <line x1={cx} y1={cy} x2={bx} y2={by} stroke={factC} strokeWidth="4.5" strokeLinecap="round" />
+        {/* сценарий — призрачная пунктирная стрелка до прогнозной доли */}
+        {proj > 0 && scenario && (
+          <line x1={cx} y1={cy} x2={px_} y2={py} stroke={effC} strokeWidth="2" strokeDasharray="4 4" strokeLinecap="round" opacity="0.85" />
+        )}
+        {/* стрелка дней — тонкая светлая поверх, чтобы читалась и при совпадении */}
+        <line x1={cx} y1={cy} x2={dx} y2={dy} stroke="#d4d4d8" strokeWidth="2" strokeLinecap="round" />
+        <circle cx={cx} cy={cy} r="6" fill="#18181b" stroke="#a1a1aa" strokeWidth="2" />
+        <text x={cx} y={cy - 34} textAnchor="middle" fontSize="26" fontWeight="600" fill={factC}>
+          {Math.round(spentShare * 100)}%
+        </text>
+        <text x={cx} y={cy - 20} textAnchor="middle" fontSize="10" fill="#71717a">
+          бюджета
+        </text>
+      </svg>
+      <div class="mt-0.5 flex items-center justify-center gap-4 text-[10px] text-zinc-500">
+        <span>
+          <i class="mr-1 inline-block h-[2px] w-4 translate-y-[-2px] bg-zinc-300" />
+          дни
+        </span>
+        <span>
+          <i class="mr-1 inline-block h-[2px] w-4 translate-y-[-2px]" style={{ background: factC }} />
+          бюджет
+        </span>
+        {scenario && <span style={{ color: effC }}>··· сценарий</span>}
+      </div>
+    </>
   );
 }
 
@@ -510,6 +561,17 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
   const up = useData(() => api.get<Upcoming>('/api/tma/upcoming'), onFatal, []);
   const [openB, setOpenB] = useState(false);
   const [whatIfMinor, setWhatIfMinor] = useState<number | null>(null);
+  // вид hero-графика: tempo-проп — стартовый (демо), дальше — выбор в «деталях»
+  const [chartKind, setChartKind] = useState<TempoKind>(() => {
+    if (tempo) return tempo;
+    try {
+      const v = localStorage.getItem('bc.tempoChart') as TempoKind | null;
+      return v && v in TEMPO_LABELS ? v : 'gauge';
+    } catch {
+      return 'gauge';
+    }
+  });
+  const tempoKind = chartKind;
 
   if (ov.loading || wk.loading || up.loading) return <Loading />;
   const err = ov.error ?? wk.error ?? up.error;
@@ -549,7 +611,6 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
     w.month_cap_minor > 0 ? (effDailyMinor * w.month_days) / w.month_cap_minor : 0;
   const projColor = paceColor(scenarioRatio);
   const effRate = scenario ? scenarioRatio : w.burn_rate;
-  const tempoKind: TempoKind = tempo ?? 'line';
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
@@ -674,6 +735,31 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
         </div>
         {openB && (
           <div class="mt-3 border-t border-white/5 pt-3">
+            <div class={rowCls}>
+              <span class={mutedCls}>вид</span>
+              <span class="flex flex-wrap gap-1.5">
+                {(Object.keys(TEMPO_LABELS) as TempoKind[]).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => {
+                      setChartKind(k);
+                      try {
+                        localStorage.setItem('bc.tempoChart', k);
+                      } catch {
+                        // приватный режим — выбор живёт до перезагрузки
+                      }
+                    }}
+                    class={`rounded-full px-2.5 py-1 text-[11px] ${
+                      k === tempoKind ? 'bg-zinc-700 text-white' : 'text-zinc-500'
+                    }`}
+                  >
+                    {TEMPO_LABELS[k]}
+                  </button>
+                ))}
+              </span>
+            </div>
+            <div class="my-3 border-t border-white/5" />
             <div class={rowCls}>
               <span class={mutedCls}>
                 Неделя · {fmtDay(w.week_from)} – {fmtDay(w.week_to)}
