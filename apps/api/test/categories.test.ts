@@ -39,6 +39,24 @@ const tenv = () => ({
   JWT_SECRET,
 });
 
+// «сегодня» в тестах — реальное (профили UTC): метки месяцев/недель вычисляем
+// динамически, иначе тесты ломаются на границе месяца
+const M_NAMES = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const M_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const todayIso = () => new Date().toISOString().slice(0, 10);
+/** Метка месяца 'Ноябрь 2026'; offset -1 — прошлый месяц. */
+const monthLabel = (offset = 0) => {
+  const n = new Date();
+  const d = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth() + offset, 1));
+  return `${M_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+};
+/** Короткое имя месяца понедельника текущей недели ('окт'). */
+const weekStartShort = () => {
+  const n = new Date();
+  const dow = (n.getUTCDay() + 6) % 7;
+  return M_SHORT[new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() - dow)).getUTCMonth()]!;
+};
+
 let u = 1;
 const post = (body: unknown) =>
   app.fetch(
@@ -262,7 +280,7 @@ describe('TMA /api/tma/categories + report', () => {
     const rep = await api('/api/tma/report?period=month&offset=0', { token: ta });
     expect(rep.status).toBe(200);
     const rj = (await rep.json()) as { label: string; spent: { living: number }; categories: unknown[] };
-    expect(rj.label).toBe('Октябрь 2026');
+    expect(rj.label).toBe(monthLabel());
     expect(rj.spent.living).toBe(500);
     expect((await api('/api/tma/report?period=bogus', { token: ta })).status).toBe(400);
     expect((await api('/api/tma/report?offset=1', { token: ta })).status).toBe(400);
@@ -282,7 +300,8 @@ describe('TMA /api/tma/upcoming', () => {
     await ra.addDebt({ name: 'Рассрочка', currency: 'USD', rate: 0, frequency: 'biweekly', initial_balance_minor: 100000, initial_payment_minor: 10000, epoch: '2026-10-01', due_day: 10, source_key: null });
     await scoped(env.DB, b).addCommitment({ name: 'Чужое', amount_minor: 1, currency: 'USD', due_day: 2 });
     // оплачиваем интернет — paid=true
-    await ra.addCommitmentPayment({ commitment_id: Number(c2.meta.last_row_id), amount_minor: 500, currency: 'USD', paid_on: '2026-10-20', source: 'manual', source_key: 'x' });
+    // оплата «сегодня» — всегда внутри окна текущего срока (prevDue < today ≤ occurrence)
+    await ra.addCommitmentPayment({ commitment_id: Number(c2.meta.last_row_id), amount_minor: 500, currency: 'USD', paid_on: todayIso(), source: 'manual', source_key: 'x' });
     const res = await api('/api/tma/upcoming', { token: ta });
     expect(res.status).toBe(200);
     const j = (await res.json()) as { month: string; currency_hint: string; items: { kind: string; name: string; paid: boolean; overdue: boolean; due_on: string }[] };
@@ -294,7 +313,8 @@ describe('TMA /api/tma/upcoming', () => {
     expect(names).not.toContain('Рассрочка'); // biweekly не входит
     expect(names).not.toContain('Чужое'); // tenant B
     const ar = j.items.find((x) => x.name === 'Аренда')!;
-    expect(ar.overdue).toBe(true); // due 1-е < today, не оплачено
+    // due 1-е, не оплачено → просрочен, только когда today позже 1-го числа
+    expect(ar.overdue).toBe(ar.due_on < todayIso());
     expect(ar.paid).toBe(false);
     const inet = j.items.find((x) => x.name === 'Интернет')!;
     expect(inet.paid).toBe(true);
@@ -363,11 +383,11 @@ describe('бот: быстрый ввод, пикер категории, отч
     await user(OWNER + 72);
     await msg(OWNER + 72, '/report');
     expect(last()).toContain('Потрачено');
-    expect(last()).toContain('Октябрь 2026');
+    expect(last()).toContain(monthLabel());
     await cb(OWNER + 72, 'rp:week:0');
-    expect(edited.at(-1)!.text).toContain('окт');
+    expect(edited.at(-1)!.text).toContain(weekStartShort());
     await cb(OWNER + 72, 'rp:month:-1');
-    expect(edited.at(-1)!.text).toContain('Сентябрь 2026');
+    expect(edited.at(-1)!.text).toContain(monthLabel(-1));
     // невалидный — молча
     const len = edited.length;
     await cb(OWNER + 72, 'rp:bogus:0');
