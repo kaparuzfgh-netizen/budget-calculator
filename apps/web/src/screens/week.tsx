@@ -12,11 +12,14 @@
  */
 import { useMemo, useState } from 'preact/hooks';
 import {
+  Check,
   CircleHelp,
   Plus,
   Receipt,
   Sparkles,
+  Tags,
   Trash2,
+  X,
 } from 'lucide-preact';
 import { ApiError } from '../api';
 import type { Api, CategoriesList, ExpenseItem, ExpensesList, Profile, WeekStatus } from '../api';
@@ -44,6 +47,7 @@ import {
   smBtnCls,
   smDangerFillBtnCls,
   smGhostBtnCls,
+  smInputCls,
   useData,
 } from '../ui';
 import { ShotButton } from './vision';
@@ -91,9 +95,14 @@ export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
 
       <div class="mt-5 flex items-center justify-between">
         <h2 class={headCls}>Записи</h2>
-        <button type="button" class={smBtnCls} onClick={() => nav.push({ id: 'spent-add' })}>
-          <Plus size={14} strokeWidth={1.5} /> Трата
-        </button>
+        <span class="flex items-center gap-2">
+          <button type="button" class={smBtnCls} onClick={() => nav.push({ id: 'categories' })}>
+            <Tags size={14} strokeWidth={1.5} /> Категории
+          </button>
+          <button type="button" class={smBtnCls} onClick={() => nav.push({ id: 'spent-add' })}>
+            <Plus size={14} strokeWidth={1.5} /> Трата
+          </button>
+        </span>
       </div>
       <div class={`${listCardCls} mt-2`}>
         {ex.data.expenses.length ? (
@@ -327,7 +336,38 @@ function CategoryChips({
   allowNone?: boolean;
 }) {
   const q = useData(() => api.get<CategoriesList>('/api/tma/categories'), onFatal, []);
+  // «＋ Категория» — inline-добавление: переход на экран категорий стёр бы
+  // введённые поля формы (стек рендерит только верхний экран).
+  const [addCat, setAddCat] = useState(false);
+  const [catName, setCatName] = useState('');
+  const [catEmoji, setCatEmoji] = useState('📦');
+  const [catErr, setCatErr] = useState<string | null>(null);
+  const [catBusy, setCatBusy] = useState(false);
+
   if (q.loading || q.error || !q.data) return null;
+
+  const addCategory = async () => {
+    if (!catName.trim()) return setCatErr('Введите название');
+    setCatBusy(true);
+    setCatErr(null);
+    try {
+      const res = await api.post<{ id?: number }>('/api/tma/categories', {
+        name: catName.trim(),
+        emoji: catEmoji.trim() || '📦',
+      });
+      setCatName('');
+      setCatEmoji('📦');
+      setAddCat(false);
+      if (typeof res.id === 'number') onChange(res.id);
+      q.reload();
+    } catch (e) {
+      setCatErr(e instanceof ApiError ? e.message : 'Не удалось добавить');
+    } finally {
+      setCatBusy(false);
+    }
+    return undefined;
+  };
+
   return (
     <div class="flex flex-wrap gap-2">
       <button
@@ -354,6 +394,40 @@ function CategoryChips({
           {x.emoji} {x.name}
         </button>
       ))}
+      <button type="button" class={chipCls} onClick={() => setAddCat((v) => !v)}>
+        <Plus size={14} strokeWidth={1.5} /> Категория
+      </button>
+      {addCat && (
+        <span class="flex w-full items-center gap-2">
+          <input
+            class={`${smInputCls} w-14 flex-none`}
+            value={catEmoji}
+            maxLength={4}
+            onInput={(e) => setCatEmoji((e.target as HTMLInputElement).value)}
+          />
+          <input
+            class={`${smInputCls} min-w-0 flex-1`}
+            value={catName}
+            maxLength={32}
+            placeholder="Название"
+            autoFocus
+            onInput={(e) => setCatName((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void addCategory();
+              }
+            }}
+          />
+          <button type="button" class={smBtnCls} disabled={catBusy} onClick={() => void addCategory()}>
+            <Check size={14} strokeWidth={1.5} />
+          </button>
+          <button type="button" class={smBtnCls} onClick={() => setAddCat(false)}>
+            <X size={14} strokeWidth={1.5} />
+          </button>
+        </span>
+      )}
+      {catErr && <span class="w-full text-[13px] text-red-400">{catErr}</span>}
     </div>
   );
 }

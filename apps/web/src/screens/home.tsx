@@ -16,7 +16,6 @@ import {
   Landmark,
   Plus,
   Receipt,
-  Tags,
   User,
   Wallet,
 } from 'lucide-preact';
@@ -891,9 +890,6 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
         </button>
         <button type="button" class={tileCls} onClick={() => nav.push({ id: 'fx' })}>
           <ArrowLeftRight size={18} strokeWidth={1.5} class={iconCls} /> Курсы
-        </button>
-        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'categories' })}>
-          <Tags size={18} strokeWidth={1.5} class={iconCls} /> Категории
         </button>
       </div>
     </>
