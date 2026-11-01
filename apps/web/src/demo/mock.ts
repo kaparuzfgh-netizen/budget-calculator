@@ -53,6 +53,11 @@ export const WEEK: WeekStatus = {
     85000, 200000, 130000, 70000, 240000, 0, 90000, 80000, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ],
+  month_top: [
+    { name: 'Продукты', emoji: '🛒', spent_minor: 980000, share: 0.42 },
+    { name: 'Кафе', emoji: '☕', spent_minor: 610000, share: 0.26 },
+    { name: 'Транспорт', emoji: '🚌', spent_minor: 410000, share: 0.17 },
+  ],
   burn_rate: 0.67,
   daily_allowance_minor: 195000,
   days_left: 13,
@@ -206,6 +211,8 @@ export function tempoWeek(pace: 'low' | 'ok' | 'over', day = 18): WeekStatus {
     month_spent_minor: spent,
     month_day: today,
     month_daily_minor: dailyMinor(spent, today, dim),
+    // доли топ-категорий из базовой фикстуры, суммы — под сценарный итог
+    month_top: WEEK.month_top.map((x) => ({ ...x, spent_minor: Math.round(spent * x.share) })),
     burn_rate: rate,
     daily_allowance_minor: Math.max(0, Math.round((cap - spent) / Math.max(1, dim - today))),
   };

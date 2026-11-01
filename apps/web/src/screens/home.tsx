@@ -378,6 +378,37 @@ function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: Upcoming
   );
 }
 
+/**
+ * «Что делать» — детерминированный совет из фактических трат: разрыв между
+ * текущей нормой и лимитом на день закрываем конкретной топ-категорией.
+ * Возвращает null, когда бюджет не задан или месяц закончился.
+ */
+function tempoAdvice(w: WeekStatus, c: string): { text: string; tone: string } | null {
+  if (w.month_cap_minor <= 0 || w.days_left <= 0 || w.month_day <= 0) return null;
+  const m = (minor: number) => fmtMinor(Math.round(minor), c);
+  const allowance = w.daily_allowance_minor;
+  const cur = Math.round(w.month_spent_minor / w.month_day);
+  const gap = cur - allowance; // >0 — перерасход в день, <0 — запас
+  const top = w.month_top?.[0];
+  const topDaily = top ? Math.round(top.spent_minor / w.month_day) : 0;
+  if (gap <= 0) {
+    return { text: `В графике: держите траты до ${m(allowance)}/день — запас ${m(-gap)}/день.`, tone: 'text-emerald-300/90' };
+  }
+  if (!top) {
+    return { text: `Чтобы вписаться, сократите траты на ${m(gap)}/день.`, tone: 'text-amber-300/90' };
+  }
+  if (topDaily >= gap) {
+    return {
+      text: `Больше всего съедает «${top.name}» — ${m(top.spent_minor)} за месяц. Урежьте её на ${m(gap)}/день — вернётесь в график.`,
+      tone: 'text-amber-300/90',
+    };
+  }
+  return {
+    text: `До графика не хватает ${m(gap)}/день — «${top.name}» целиком даёт только ${m(topDaily)}: придётся резать и другие категории.`,
+    tone: 'text-red-300/90',
+  };
+}
+
 export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { name: string | null; tempo?: TempoKind }) {
   const ov = useData(() => api.get<Overview>('/api/tma/overview'), onFatal, []);
   const wk = useData(() => api.get<WeekStatus>('/api/tma/week'), onFatal, []);
@@ -612,6 +643,11 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                 {fmtMinor(w.daily_allowance_minor, c)} · {w.days_left} дн. до конца месяца
               </span>
             </div>
+            {(() => {
+              const adv = tempoAdvice(w, c);
+              if (!adv) return null;
+              return <p class={`mt-1.5 text-[12px] leading-snug ${adv.tone}`}>{adv.text}</p>;
+            })()}
             {w.month_cap_minor > 0 && w.month_day >= 3 && (
               <div onClick={(e) => e.stopPropagation()}>
                 <div class="my-3 border-t border-white/5" />
@@ -633,23 +669,37 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                 </div>
                 {(() => {
                   const maxDaily = Math.max(100, Math.ceil((w.month_cap_minor / 100 / w.month_days) * 3 / 100) * 100);
+                  const limitPos = Math.min(w.daily_allowance_minor / 100 / maxDaily, 1) * 100;
                   return (
-                    <input
-                      type="range"
-                      min={0}
-                      max={maxDaily}
-                      step={Math.max(10, Math.round(maxDaily / 60))}
-                      value={Math.min(Math.round(effDailyMinor / 100), maxDaily)}
-                      onInput={(e) => setWhatIfMinor(Number((e.target as HTMLInputElement).value) * 100)}
-                      class="mt-2 w-full"
-                      style={{ accentColor: projColor }}
-                      aria-label="Дневная норма трат для сценария «Что если»"
-                    />
+                    <>
+                      <div class="relative">
+                        <input
+                          type="range"
+                          min={0}
+                          max={maxDaily}
+                          step={Math.max(10, Math.round(maxDaily / 60))}
+                          value={Math.min(Math.round(effDailyMinor / 100), maxDaily)}
+                          onInput={(e) => setWhatIfMinor(Number((e.target as HTMLInputElement).value) * 100)}
+                          class="mt-2 w-full"
+                          style={{ accentColor: projColor }}
+                          aria-label="Дневная норма трат для сценария «Что если»"
+                        />
+                        {/* риска «лимита»: бегунок правее неё — итог за бюджетом */}
+                        <div
+                          class="pointer-events-none absolute top-1/2 h-4 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded bg-white/60"
+                          style={{ left: `${limitPos}%` }}
+                        />
+                      </div>
+                      <p class="mt-0.5 text-center text-[10px] text-zinc-600">︱лимит</p>
+                    </>
                   );
                 })()}
                 <div class={`${rowCls} mt-1`}>
                   <span class={`${mutedCls} text-[12px]`}>
-                    итог месяца ≈ {fmtMinor(projMinor, c)}
+                    {effDailyMinor !== w.daily_allowance_minor
+                      ? `${effDailyMinor > w.daily_allowance_minor ? 'выше' : 'ниже'} лимита на ${fmtMinor(Math.abs(effDailyMinor - w.daily_allowance_minor), c)}/день · `
+                      : ''}
+                    итог ≈ {fmtMinor(projMinor, c)}
                   </span>
                   {whatIfMinor !== null && (
                     <button type="button" class="text-[12px] text-sky-400" onClick={() => setWhatIfMinor(null)}>

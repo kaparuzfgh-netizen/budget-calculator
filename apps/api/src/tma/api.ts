@@ -307,6 +307,7 @@ export function registerTmaApi(
       const inLiving = expenses.map((e) => ({
         date: e.spent_on,
         amount: convert(e.amount_minor / 100, e.currency, p.living_currency, { perUsd: fxr.perUsd }),
+        cat: e.category_id as number | null,
       }));
       const s = weeklyStatus({
         expenses: inLiving,
@@ -316,16 +317,30 @@ export function registerTmaApi(
       });
       const wEnd = new Date(`${wStart}T00:00:00Z`);
       wEnd.setUTCDate(wEnd.getUTCDate() + 6);
-      // дневные траты месяца — для графика темпа (накопленные vs идеал)
+      // дневные траты месяца — для графика темпа (накопленные vs идеал);
+      // заодно — суммы по категориям для совета «что резать»
       const dim = daysInMonth(today);
       const curMonth = today.slice(0, 7);
       const daily = new Array<number>(dim).fill(0);
+      const byCat = new Map<number | null, number>();
       for (const e of inLiving) {
         if (e.date.slice(0, 7) === curMonth) {
           const d = Number(e.date.slice(8, 10));
           if (d >= 1 && d <= dim) daily[d - 1]! += e.amount;
+          byCat.set(e.cat, (byCat.get(e.cat) ?? 0) + e.amount);
         }
       }
+      // топ-3 категории месяца → имена из реестра категорий юзера
+      const cats = new Map((await repo.listCategories(true)).results.map((x) => [x.id, x]));
+      const month_top = [...byCat.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([id, sum]) => ({
+          name: (id !== null && cats.get(id)?.name) || 'Без категории',
+          emoji: (id !== null && cats.get(id)?.emoji) || '📦',
+          spent_minor: toMinor(round2(sum)),
+          share: s.monthSpent > 0 ? round2(sum / s.monthSpent) : 0,
+        }));
       return okJson(c, {
         currency: p.living_currency,
         week_from: wStart,
@@ -339,6 +354,7 @@ export function registerTmaApi(
         month_day: dayOfMonth(today),
         month_days: daysInMonth(today),
         month_daily_minor: daily.map((v) => toMinor(round2(v))),
+        month_top,
         burn_rate: s.burnRate,
         daily_allowance_minor: toMinor(round2(s.dailyAllowance)),
         days_left: s.daysLeft,

@@ -75,6 +75,8 @@ export interface WeekStatus {
   month_days: number;
   /** Траты по дням месяца [день1..деньN], minor — график темпа. */
   month_daily_minor: number[];
+  /** Топ-3 категории месяца (living, share = доля трат) — совет «что резать». */
+  month_top: { name: string; emoji: string; spent_minor: number; share: number }[];
   /** >1 — тратим быстрее плана (форматировать через fmtPct). */
   burn_rate: number;
   daily_allowance_minor: number;
