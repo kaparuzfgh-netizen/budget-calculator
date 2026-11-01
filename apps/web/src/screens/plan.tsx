@@ -151,7 +151,11 @@ function CushionCard({
               onInput={(e) => setVal((e.target as HTMLInputElement).value)}
             />
           </Field>
-          <button type="submit" class={`${smPrimaryBtnCls} mb-3`} disabled={busy}>
+          <button
+            type="submit"
+            class="mb-3 inline-flex flex-1 items-center justify-center gap-1 rounded-xl bg-sky-600 px-3 py-2.5 text-[15px] font-medium text-white transition hover:bg-sky-500 disabled:opacity-50 disabled:hover:bg-sky-600"
+            disabled={busy}
+          >
             Сохранить
           </button>
         </div>
