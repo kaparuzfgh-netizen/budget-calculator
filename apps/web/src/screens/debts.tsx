@@ -9,8 +9,9 @@
  * DebtAddScreen: POST /api/tma/debts.
  * Идемпотентность мутаций — client_id на форму (retry не задвоит событие).
  */
-import { useState } from 'preact/hooks';
+import { useRef, useState } from 'preact/hooks';
 import {
+  Camera,
   CircleCheck,
   HandCoins,
   History,
@@ -23,13 +24,14 @@ import {
   TrendingDown,
 } from 'lucide-preact';
 import type { LucideIcon } from 'lucide-preact';
-import { ApiError } from '../api';
+import { ApiError, isAuthError } from '../api';
 import type {
   Api,
   DebtDetail,
   DebtEvent,
   DebtsList,
   PrepayPreview,
+  VisionAnalyzeResponse,
 } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, dayError, fmtDay, fmtMinor, nameError, parseAmount } from '../fmt';
@@ -53,13 +55,16 @@ import {
   mutedCls,
   primaryBtnCls,
   rowCls,
+  secondaryBtnCls,
   Select,
   smBtnCls,
   smDangerBtnCls,
   smDangerFillBtnCls,
   smGhostBtnCls,
+  smPrimaryBtnCls,
   useData,
 } from '../ui';
+import { MAX_IMAGE_BYTES, visionErrorText } from './vision';
 
 const EVENT_KIND: Record<DebtEvent['kind'], { icon: LucideIcon; label: string }> = {
   payment: { icon: CircleCheck, label: 'Платёж' },
@@ -165,7 +170,7 @@ export function DebtScreen({ api, nav, onFatal, debtId }: ScreenProps & { debtId
     nav.flash(msg);
     q.reload();
   };
-  const props = { api, debt: v, done };
+  const props = { api, debt: v, done, onFatal };
 
   return (
     <>
@@ -250,6 +255,7 @@ interface FormProps {
   api: Api;
   debt: DebtDetail;
   done: (msg: string) => void;
+  onFatal: () => void;
 }
 
 /** Общие куски формы события: сумма + дата. */
@@ -286,7 +292,13 @@ function PayForm({ api, debt, done }: FormProps) {
     <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => void submit(e)}>
         <div class="flex gap-3">
-          <Field label={`Сумма (по графику ${fmtMinor(debt.payment_minor, debt.currency)})`}>
+          <Field
+            label={
+              <>
+                Сумма <span class="text-zinc-500">· по графику {fmtMinor(debt.payment_minor, debt.currency)}</span>
+              </>
+            }
+          >
             <input class={inputCls} inputMode="decimal" placeholder={String(scheduled)} value={f.amount}
               onInput={(e) => f.setAmount((e.target as HTMLInputElement).value)} />
           </Field>
@@ -385,12 +397,24 @@ function PrepayForm({ api, debt, done }: FormProps) {
             <span>−{preview.months_saved} мес при том же платеже</span>
           </div>
           <p class={`${mutedCls} mb-2 mt-3`}>Что уменьшаем?</p>
-          <div class="flex gap-2">
-            <button type="button" class={primaryBtnCls} disabled={f.busy} onClick={() => void record('reduce_payment')}>
-              <TrendingDown size={16} strokeWidth={1.5} /> Платёж (−{fmtMinor(preview.payment_saved_minor, debt.currency)})
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" class={smPrimaryBtnCls} disabled={f.busy} onClick={() => void record('reduce_payment')}>
+              <span class="flex flex-col items-center gap-0.5">
+                <span class="flex items-center gap-1.5">
+                  <TrendingDown size={14} strokeWidth={1.5} /> Платёж
+                </span>
+                <span class="text-xs font-normal text-sky-200">
+                  −{fmtMinor(preview.payment_saved_minor, debt.currency)}
+                </span>
+              </span>
             </button>
-            <button type="button" class={primaryBtnCls} disabled={f.busy} onClick={() => void record('reduce_term')}>
-              <Hourglass size={16} strokeWidth={1.5} /> Срок (−{preview.months_saved} мес)
+            <button type="button" class={smPrimaryBtnCls} disabled={f.busy} onClick={() => void record('reduce_term')}>
+              <span class="flex flex-col items-center gap-0.5">
+                <span class="flex items-center gap-1.5">
+                  <Hourglass size={14} strokeWidth={1.5} /> Срок
+                </span>
+                <span class="text-xs font-normal text-sky-200">−{preview.months_saved} мес</span>
+              </span>
             </button>
           </div>
         </div>
@@ -399,7 +423,7 @@ function PrepayForm({ api, debt, done }: FormProps) {
   );
 }
 
-function ReconcileForm({ api, debt, done }: FormProps) {
+function ReconcileForm({ api, debt, done, onFatal }: FormProps) {
   const f = useEventForm();
   const submit = async (ev: Event) => {
     ev.preventDefault();
@@ -422,7 +446,7 @@ function ReconcileForm({ api, debt, done }: FormProps) {
     <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => void submit(e)}>
         <div class="flex gap-3">
-          <Field label={`Факт. остаток по выписке (сейчас ${fmtMinor(debt.balance_minor, debt.currency)})`}>
+          <Field label="Остаток по выписке">
             <input class={inputCls} inputMode="decimal" placeholder={String(debt.balance_minor / 100)} value={f.amount}
               onInput={(e) => f.setAmount((e.target as HTMLInputElement).value)} />
           </Field>
@@ -430,10 +454,92 @@ function ReconcileForm({ api, debt, done }: FormProps) {
             <input class={inputCls} type="date" value={f.on} onInput={(e) => f.setOn((e.target as HTMLInputElement).value)} />
           </Field>
         </div>
+        <p class={`${mutedCls} mb-3`}>В приложении сейчас: {fmtMinor(debt.balance_minor, debt.currency)}</p>
+        <ReconcileShot api={api} currency={debt.currency} onFatal={onFatal} onFill={(a) => f.setAmount(String(a))} />
         <FormError msg={f.err} />
         <button type="submit" class={primaryBtnCls} disabled={f.busy}>Записать сверку</button>
       </form>
     </div>
+  );
+}
+
+/**
+ * «Заполнить по выписке»: скриншот экрана кредита из банковского приложения →
+ * /vision/analyze → screen_type 'debt_balance' → остаток подставляется в поле.
+ * Запись — только через «Записать сверку»: пользователь проверяет сумму.
+ * Фича opt-in: без vision_enabled сервер отвечает 'disabled' → подсказка.
+ */
+function ReconcileShot({
+  api,
+  currency,
+  onFill,
+  onFatal,
+}: {
+  api: Api;
+  currency: string;
+  onFill: (amount: number) => void;
+  onFatal: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > MAX_IMAGE_BYTES) {
+      setErr('Файл больше 10 МБ — выберите скриншот поменьше');
+      return;
+    }
+    const buf = await file.arrayBuffer();
+    setBusy(true);
+    setErr(null);
+    setNote(null);
+    try {
+      const res = await api.postRaw<VisionAnalyzeResponse>(
+        '/api/tma/vision/analyze',
+        buf,
+        file.type || 'application/octet-stream',
+      );
+      const r = res.result;
+      if (r.screen_type === 'debt_balance' && r.debt_balance > 0) {
+        onFill(r.debt_balance);
+        setNote(
+          r.currency && r.currency !== currency
+            ? `На выписке валюта ${r.currency}, а кредит — ${currency}: проверьте сумму вручную`
+            : 'Остаток подставлен — проверьте и нажмите «Записать сверку»',
+        );
+      } else {
+        setErr('Это не похоже на экран кредита с остатком долга — введите сумму вручную');
+      }
+    } catch (e) {
+      if (isAuthError(e)) {
+        onFatal();
+        return;
+      }
+      setErr(visionErrorText(e));
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        class="hidden"
+        onChange={(e) => void onFile((e.target as HTMLInputElement).files?.[0])}
+      />
+      <button type="button" class={`${secondaryBtnCls} mb-1`} disabled={busy} onClick={() => fileRef.current?.click()}>
+        <Camera size={16} strokeWidth={1.5} /> {busy ? 'Распознаю выписку…' : 'Заполнить по выписке'}
+      </button>
+      <p class={`${mutedCls} mb-3`}>Скриншот экрана кредита из банковского приложения — остаток подставится в поле.</p>
+      {note ? <p class="mb-3 text-[13px] text-sky-300">{note}</p> : null}
+      <FormError msg={err} />
+    </>
   );
 }
 
@@ -484,7 +590,13 @@ function EditForm({ api, debt, done }: FormProps) {
           <Field label="Платёж за период">
             <input class={inputCls} inputMode="decimal" value={payment} onInput={(e) => setPayment((e.target as HTMLInputElement).value)} />
           </Field>
-          <Field label="День (пусто — без дня)">
+          <Field
+            label={
+              <>
+                День <span class="text-zinc-500">· пусто — без даты</span>
+              </>
+            }
+          >
             <input class={inputCls} inputMode="numeric" maxLength={2} placeholder="—" value={day}
               onInput={(e) => setDay((e.target as HTMLInputElement).value)} />
           </Field>
@@ -722,14 +834,20 @@ export function DebtAddScreen({ api, nav }: ScreenProps) {
               <Select
                 value={freq}
                 options={[
-                  { value: 'monthly', label: 'ежемесячно' },
-                  { value: 'biweekly', label: 'раз в 2 недели' },
+                  { value: 'monthly', label: 'ежемес.' },
+                  { value: 'biweekly', label: 'раз в 2 нед.' },
                 ]}
                 onChange={(v) => setFreq(v as 'monthly' | 'biweekly')}
               />
             </Field>
           </div>
-          <Field label="День платежа (1–31, пусто — без дня)">
+          <Field
+            label={
+              <>
+                День платежа <span class="text-zinc-500">· 1–31, пусто — без даты</span>
+              </>
+            }
+          >
             <input class={inputCls} inputMode="numeric" maxLength={2} placeholder="—" value={day}
               onInput={(e) => setDay((e.target as HTMLInputElement).value)} />
           </Field>

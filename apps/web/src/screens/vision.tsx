@@ -29,7 +29,7 @@ import {
   useData,
 } from '../ui';
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // как на сервере (tma/vision)
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // как на сервере (tma/vision)
 
 // ── дедуп повторных файлов: SHA-256 байтов → localStorage (последние 50) ──
 
@@ -76,7 +76,7 @@ const plural = (n: number): string => {
 };
 
 /** Код ошибки /vision/analyze → текст для пользователя (без внутренностей). */
-const visionErrorText = (e: unknown): string => {
+export const visionErrorText = (e: unknown): string => {
   if (e instanceof ApiError) {
     switch (e.code) {
       case 'disabled':

@@ -194,11 +194,14 @@ export function useFatalOn(cond: boolean, onFatal: () => void): void {
 /**
  * Поле с подписью. flex-1 — чтобы в рядах `flex gap-3` поля делили
  * ширину поровну (как старый .inline > *); вне flex-ряда flex-1 инертен.
+ * flex-col + растущая подпись: в ряду все label тянутся до самого высокого
+ * и инпуты выравниваются по нижнему краю — длинные подписи в соседних
+ * полях ряда больше не сдвигают инпут.
  */
 export function Field({ label, children }: { label: ComponentChildren; children: ComponentChildren }) {
   return (
-    <label class="mb-3 block min-w-0 flex-1">
-      <span class="mb-1.5 flex items-center text-[13px] text-zinc-400">{label}</span>
+    <label class="mb-3 flex min-w-0 flex-1 flex-col">
+      <span class="mb-1.5 flex flex-1 items-start text-[13px] text-zinc-400">{label}</span>
       {children}
     </label>
   );

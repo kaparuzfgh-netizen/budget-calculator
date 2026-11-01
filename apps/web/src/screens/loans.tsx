@@ -265,7 +265,13 @@ function RepayForm({ api, loan, done }: { api: Api; loan: LoanDetail; done: (m: 
     <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => void submit(e)}>
         <div class="flex gap-3">
-          <Field label={`Сумма (остаток ${fmtMinor(loan.remaining_minor, loan.currency)})`}>
+          <Field
+            label={
+              <>
+                Сумма <span class="text-zinc-500">· остаток {fmtMinor(loan.remaining_minor, loan.currency)}</span>
+              </>
+            }
+          >
             <input class={inputCls} inputMode="decimal" value={amount}
               onInput={(e) => setAmount((e.target as HTMLInputElement).value)} autoFocus />
           </Field>
@@ -306,7 +312,13 @@ function DueForm({ api, loan, done }: { api: Api; loan: LoanDetail; done: (m: st
   return (
     <div class={`${cardCls} mt-3`}>
       <form onSubmit={(e) => { e.preventDefault(); void save(on); }}>
-        <Field label={`Срок возврата (сейчас ${loan.due_on ? fmtDay(loan.due_on) : 'без срока'})`}>
+        <Field
+          label={
+            <>
+              Срок возврата <span class="text-zinc-500">· сейчас {loan.due_on ? fmtDay(loan.due_on) : 'без срока'}</span>
+            </>
+          }
+        >
           <input class={inputCls} type="date" value={on} onInput={(e) => setOn((e.target as HTMLInputElement).value)} />
         </Field>
         <FormError msg={err} />
@@ -545,7 +557,13 @@ export function LoanAddScreen({ api, nav }: ScreenProps) {
             <Field label="Валюта">
               <CcySelect value={ccy} onChange={setCcy} />
             </Field>
-            <Field label="Срок (пусто — без срока)">
+            <Field
+              label={
+                <>
+                  Срок <span class="text-zinc-500">· пусто — без срока</span>
+                </>
+              }
+            >
               <input class={inputCls} type="date" value={due} onInput={(e) => setDue((e.target as HTMLInputElement).value)} />
             </Field>
           </div>
