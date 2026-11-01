@@ -40,6 +40,8 @@ export interface ProfileRow {
   vision_enabled: number;
   /** Валютные алерты (миграция 0013): окно ≥85 / ≤15 перцентиля, 1/нед на пару. */
   fx_alerts_enabled: number;
+  /** «Подушка безопасности» — ручной остаток в living_currency (миграция 0019); NULL → не задана. */
+  cushion_minor: number | null;
 }
 
 export interface CommitmentRow {
@@ -226,7 +228,7 @@ export function scoped(db: Env['DB'], userId: number) {
     async upsertProfile(
       p: Omit<
         ProfileRow,
-        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency' | 'reminder_hour'
+        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency' | 'reminder_hour' | 'cushion_minor'
       > & {
         reminders_weekly?: number;
         reminders_payments?: number;
@@ -717,6 +719,7 @@ export function scoped(db: Env['DB'], userId: number) {
       reminder_hour?: number | null;
       vision_enabled?: number;
       fx_alerts_enabled?: number;
+      cushion_minor?: number;
     }) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string | null)[] = [];
@@ -733,6 +736,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'reminder_hour',
         'vision_enabled',
         'fx_alerts_enabled',
+        'cushion_minor',
       ] as const;
       for (const f of FIELDS) {
         if (patch[f] !== undefined) {

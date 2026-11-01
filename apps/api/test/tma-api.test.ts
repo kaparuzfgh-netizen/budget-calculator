@@ -108,6 +108,20 @@ describe('/api/tma/* — контракт', () => {
     expect(pj.weekly_budget_minor).toBe(120000); // 520000*12/52
     expect((await api('/api/tma/profile', { method: 'PATCH', token, body: { timezone: 'bad/tz' } })).status).toBe(400);
     expect((await api('/api/tma/profile', { method: 'PATCH', token, body: {} })).status).toBe(400);
+    // подушка: PATCH profile {cushion} → план считает покрытие в месяцах
+    expect((await api('/api/tma/profile', { method: 'PATCH', token, body: { cushion: -5 } })).status).toBe(400);
+    await api('/api/tma/profile', { method: 'PATCH', token, body: { cushion: 7800 } });
+    const prof = (await (await api('/api/tma/profile', { token })).json()) as { cushion_minor: number | null };
+    expect(prof.cushion_minor).toBe(780000);
+    const p3 = (await (await api('/api/tma/plan', { token })).json()) as {
+      today: string;
+      cushion: { minor: number; currency: string; months: number; goal_months: number };
+    };
+    expect(p3.today).toBe(todayInTz('UTC', new Date()));
+    expect(p3.cushion.minor).toBe(780000);
+    expect(p3.cushion.currency).toBe('USD');
+    expect(p3.cushion.months).toBe(1.5); // 7800 / (0 обязательных + 5200 бюджет)
+    expect(p3.cushion.goal_months).toBe(3);
   });
 
   it('expenses CRUD + client_id идемпотентность + изоляция', async () => {

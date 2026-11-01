@@ -207,6 +207,8 @@ const profilePatchSchema = z.object({
   vision_enabled: z.boolean().optional(),
   /** Свой час начала окна напоминаний 0–23; null — легаси (платежи 10:00, итог вс 20:00). */
   reminder_hour: z.number().int().min(0).max(23).nullable().optional(),
+  /** «Подушка безопасности» в валюте бюджета (major); 0 — сброс. */
+  cushion: z.number().finite().min(0).max(LIMITS.maxAmount).optional(),
 });
 
 export function registerTmaApi(
@@ -262,8 +264,14 @@ export function registerTmaApi(
         dcaTargets: { USD: 1 },
         fx: { perUsd: fxr.perUsd },
       });
+      // «подушка»: остаток в валюте бюджета vs месячная потребность
+      // (обязательные + повседневные) — покрытие в месяцах, цель 3
+      const needUsd = mandatoryUsd + w.livingUsd;
+      const cushionMinor = p.cushion_minor ?? 0;
+      const cushionUsd = usd(cushionMinor / 100, p.living_currency, fxr.perUsd);
       return okJson(c, {
         month,
+        today: todayInTz(p.timezone, now),
         income_minor: Math.round(inc.amount * 100),
         income_currency: inc.currency,
         income_source: inc.source,
@@ -271,6 +279,12 @@ export function registerTmaApi(
         mandatory_usd_minor: toMinor(round2(mandatoryUsd)),
         living_usd_minor: toMinor(round2(w.livingUsd)),
         surplus_usd_minor: toMinor(round2(w.surplusUsd)),
+        cushion: {
+          minor: cushionMinor,
+          currency: p.living_currency,
+          months: needUsd > 0 ? Math.round((cushionUsd / needUsd) * 10) / 10 : 0,
+          goal_months: 3,
+        },
         bonus:
           p.bonus_prepay_share + p.bonus_dca_share > 0 && w.bonusDeltaUsd > 0
             ? { delta_usd_minor: toMinor(round2(w.bonusDeltaUsd)), prepay_usd_minor: toMinor(round2(w.toPrepayUsd)), dca_usd_minor: toMinor(round2(w.toDcaUsd)) }
@@ -773,6 +787,7 @@ export function registerTmaApi(
       reminder_hour: p.reminder_hour,
       fx_alerts_enabled: p.fx_alerts_enabled,
       vision_enabled: p.vision_enabled,
+      cushion_minor: p.cushion_minor,
     });
   });
   app.patch('/api/tma/profile', tmaAuth, async (c) => {
@@ -800,6 +815,7 @@ export function registerTmaApi(
     if (b.reminder_hour !== undefined) patch.reminder_hour = b.reminder_hour;
     if (b.fx_alerts_enabled !== undefined) patch.fx_alerts_enabled = b.fx_alerts_enabled ? 1 : 0;
     if (b.vision_enabled !== undefined) patch.vision_enabled = b.vision_enabled ? 1 : 0;
+    if (b.cushion !== undefined) patch.cushion_minor = toMinor(b.cushion);
     if (!Object.keys(patch).length) return c.json(bad('нет полей для изменения').body, 400);
     await repo.patchProfile(patch);
     const np = await repo.getProfile();

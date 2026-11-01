@@ -15,9 +15,10 @@ import { flashCls, mutedCls } from '../ui';
 import { HomeScreen, type TempoKind } from '../screens/home';
 import { WeekScreen } from '../screens/week';
 import { IncomeScreen } from '../screens/income';
+import { PlanScreen } from '../screens/plan';
 import { ProfileScreen } from '../screens/profile';
 import { CategoriesScreen } from '../screens/categories';
-import { CATEGORIES, COMMITMENTS, EXPENSES, INCOME, OVERVIEW, PROFILE, UPCOMING, tempoWeek } from './mock';
+import { CATEGORIES, COMMITMENTS, EXPENSES, INCOME, OVERVIEW, PLAN, PROFILE, UPCOMING, tempoWeek } from './mock';
 
 // сценарий темпа: ?demo=home&pace=low|ok|over; вариант графика: &chart=line|thermo|gauge|heat
 const PACE_LABELS = { low: 'мало', ok: 'средне', over: 'перебор' } as const;
@@ -59,6 +60,14 @@ function applyPatch(path: string, body: Record<string, unknown>): void {
     if (typeof body.timezone === 'string') PROFILE.timezone = body.timezone;
     for (const k of ['reminders_weekly', 'reminders_payments', 'fx_alerts_enabled', 'vision_enabled'] as const) {
       if (k in body) PROFILE[k] = body[k] ? 1 : 0;
+    }
+    if (typeof body.cushion === 'number') {
+      // демо-курс KGS ≈ 87/USD: месяцы = подушка / (обязательные+бюджет)
+      const need = (PLAN.mandatory_usd_minor + PLAN.living_usd_minor) / 100;
+      const minor = num(body.cushion) ?? 0;
+      PLAN.cushion.minor = minor;
+      PROFILE.cushion_minor = minor;
+      PLAN.cushion.months = need > 0 ? Math.round(((minor / 100 / 87) / need) * 10) / 10 : 0;
     }
     return;
   }
@@ -200,6 +209,7 @@ const stubApi: Api = {
       '/api/tma/overview': OVERVIEW,
       '/api/tma/week': WEEK,
       '/api/tma/upcoming': UPCOMING,
+      '/api/tma/plan': PLAN,
       '/api/tma/expenses': EXPENSES,
       '/api/tma/income': INCOME,
       '/api/tma/profile': PROFILE,
@@ -255,7 +265,7 @@ const stubApi: Api = {
 
 // ── stub Nav + оболочка ──
 
-const SCREENS = ['home', 'week', 'income', 'profile', 'categories'] as const;
+const SCREENS = ['home', 'week', 'income', 'plan', 'profile', 'categories'] as const;
 type DemoName = (typeof SCREENS)[number];
 
 function DemoApp({ name }: { name: string }) {
@@ -291,6 +301,8 @@ function DemoApp({ name }: { name: string }) {
       <WeekScreen {...props} />
     ) : name === 'income' ? (
       <IncomeScreen {...props} />
+    ) : name === 'plan' ? (
+      <PlanScreen {...props} />
     ) : name === 'profile' ? (
       <ProfileScreen {...props} />
     ) : name === 'categories' ? (

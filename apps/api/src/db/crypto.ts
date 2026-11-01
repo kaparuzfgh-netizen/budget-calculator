@@ -108,7 +108,12 @@ export async function decNum(userId: number, table: string, col: string, v: unkn
 /** Спек зашифрованных колонок: только они шифруются; остальное — plaintext. */
 export type FieldsSpec = Record<string, Record<string, 'num' | 'str'>>;
 export const FIELDS: FieldsSpec = {
-  profiles: { income_minor: 'num', living_cap_minor: 'num', weekly_budget_minor: 'num' },
+  profiles: {
+    income_minor: 'num',
+    living_cap_minor: 'num',
+    weekly_budget_minor: 'num',
+    cushion_minor: 'num',
+  },
   commitments: { name: 'str', amount_minor: 'num' },
   commitment_payments: { amount_minor: 'num' },
   weekly_expenses: { amount_minor: 'num', note: 'str' },

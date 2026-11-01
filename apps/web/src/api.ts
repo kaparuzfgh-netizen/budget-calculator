@@ -88,6 +88,8 @@ export interface WeekStatus {
 
 export interface PlanData {
   month: string;
+  /** Сегодня в таймзоне пользователя — «сейчас/через N дн» в календаре платежей. */
+  today: string;
   income_minor: number;
   income_currency: string;
   income_source: IncomeSource;
@@ -96,6 +98,8 @@ export interface PlanData {
   living_usd_minor: number;
   surplus_usd_minor: number;
   bonus: { delta_usd_minor: number; prepay_usd_minor: number; dca_usd_minor: number } | null;
+  /** Подушка: остаток в валюте бюджета + покрытие «обязательные+повседневные» в мес. */
+  cushion: { minor: number; currency: string; months: number; goal_months: number };
   commitments: OverviewCommitment[];
   fx_as_of: string;
 }
@@ -149,6 +153,8 @@ export interface Profile {
   reminder_hour?: number | null;
   fx_alerts_enabled?: number;
   vision_enabled?: number;
+  /** Подушка безопасности в living_currency (миграция 0019); null — не задана. */
+  cushion_minor?: number | null;
 }
 
 export type CommitmentFrequency = 'monthly' | 'interval_days' | 'yearly';

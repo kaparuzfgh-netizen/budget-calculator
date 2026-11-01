@@ -10,6 +10,7 @@ import type {
   ExpensesList,
   IncomeList,
   Overview,
+  PlanData,
   Profile,
   Upcoming,
   WeekStatus,
@@ -112,6 +113,24 @@ export const UPCOMING: Upcoming = {
   ],
 };
 
+/** Связные числа: доход 2164 EUR ≈ 2360 USD; обязательные ≈ 517, бюджет 60 000 с ≈ 690. */
+export const PLAN: PlanData = {
+  month: '2026-03',
+  today: '2026-03-18',
+  income_minor: 216402,
+  income_currency: 'EUR',
+  income_source: 'actual',
+  income_entries_count: 2,
+  mandatory_usd_minor: 51700,
+  living_usd_minor: 69000,
+  surplus_usd_minor: 115300,
+  bonus: null,
+  // 180 000 с ≈ 2 070 USD → ~1.7 мес от (517+690) USD потребности
+  cushion: { minor: 18000000, currency: 'KGS', months: 1.7, goal_months: 3 },
+  commitments: OVERVIEW.commitments,
+  fx_as_of: '2026-03-18',
+};
+
 export const EXPENSES: ExpensesList = {
   week_start: '2026-03-16',
   expenses: [
@@ -148,6 +167,7 @@ export const PROFILE: Profile = {
   reminders_payments: 1,
   fx_alerts_enabled: 1,
   vision_enabled: 0,
+  cushion_minor: 18000000,
 };
 
 export const COMMITMENTS: CommitmentsList = {
