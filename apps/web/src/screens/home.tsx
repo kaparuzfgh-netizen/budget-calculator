@@ -127,7 +127,7 @@ const TEMPO_LABELS: Record<TempoKind, string> = {
 /** Пояснения ⓘ к каждому варианту графика темпа. */
 const TEMPO_INFO: Record<TempoKind, string> = {
   line: 'Линия — накопленные траты по дням месяца; пунктир — ровный график бюджета; полая точка — итог при текущем темпе. Цвет — температура: белый — тратите мало, зелёный — в графике, красный — перегрев. В «деталях» ползунок «Что если» крутит прогноз.',
-  race: 'Две шкалы наперегонки: «дни месяца» — сколько времени прошло, «бюджет» — сколько потрачено. Бюджет бежит впереди дней — перебираете. Пунктирная риска — итог при текущем темпе; штриховка до неё — ползунок «Что если» в деталях.',
+  race: 'Две шкалы, у каждой свой финиш справа: «дни месяца» — до конца месяца, «бюджет» — до 100% лимита. Бюджет бежит впереди дней — перебираете; штриховка и пунктирная риска за краем — перебор за бюджет. Ползунок «Что если» в деталях двигает риску.',
 };
 
 /** Вариант hero-графика темпа: «гонка» по умолчанию, «линия» — альтернатива. */
@@ -235,19 +235,20 @@ function TempoChart({ daily, today, dim, cap, proj, rate, effRate, scenario }: T
 }
 
 /**
- * «Гонка»: две шкалы на общей оси — «дни месяца» vs «бюджет».
- * Бюджет впереди дней — тратите быстрее плана. Пунктирная риска — итог
- * прогноза; при «Что если» к нему штриховка от текущего уровня.
+ * «Гонка»: две шкалы, у каждой СВОЙ финиш на правом краю —
+ * «дни месяца» всегда 0→конец месяца, «бюджет» 0→100% лимита.
+ * Перебор (прогноз > 100%) вылезает за правый край трека — штриховка
+ * и пунктирная риска торчат за финишем. pr-8 резервирует место хвосту.
  */
 function RaceChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: TempoProps) {
   const dayShare = dim > 0 ? today / dim : 0;
   const spentShare = cap > 0 ? spent / cap : 0;
   const projShare = cap > 0 && proj > 0 ? proj / cap : 0;
-  const scale = Math.max(1, spentShare, projShare) * 1.04;
-  const pct = (s: number) => `${(Math.min(s / scale, 1) * 100).toFixed(2)}%`;
-  const over = scale > 1.06;
+  const tailShare = Math.min(Math.max(projShare, 0), 1.1);
+  const pct = (s: number) => `${(Math.min(s, 1.1) * 100).toFixed(1)}%`;
+  const effC = paceColor(effRate);
   return (
-    <div class="mt-4 space-y-4">
+    <div class="mt-4 space-y-4 pr-8">
       <div>
         <div class="mb-1 flex justify-between text-[11px] text-zinc-500">
           <span>дни месяца</span>
@@ -258,9 +259,8 @@ function RaceChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: Te
         <div class="relative h-3.5 rounded-full bg-zinc-800/80">
           <div
             class="absolute inset-y-0 left-0 rounded-full"
-            style={{ width: pct(dayShare), background: 'linear-gradient(90deg,#71717a,#a1a1aa)' }}
+            style={{ width: pct(Math.min(dayShare, 1)), background: 'linear-gradient(90deg,#71717a,#a1a1aa)' }}
           />
-          {over && <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: pct(1) }} />}
         </div>
       </div>
       <div>
@@ -272,28 +272,30 @@ function RaceChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: Te
           <div
             class="absolute inset-y-0 left-0 rounded-full"
             style={{
-              width: pct(spentShare),
+              width: pct(Math.min(spentShare, 1)),
               background: `linear-gradient(90deg, ${paceFill(rate, 0.3)}, ${paceColor(rate)})`,
             }}
           />
-          {/* «Что если»: штриховка от текущего уровня до прогнозной риски */}
-          {proj > 0 && scenario && (
+          {/* «Что если»: штриховой хвост от текущего уровня до прогноза — за финишем перебор */}
+          {projShare > spentShare && scenario && (
             <div
-              class="absolute inset-y-0 rounded-r-full"
+              class="absolute inset-y-0"
               style={{
-                left: pct(spentShare),
-                width: `max(0px, calc(${pct(projShare)} - ${pct(spentShare)}))`,
+                left: pct(Math.min(spentShare, 1)),
+                width: pct(Math.max(tailShare - spentShare, 0)),
                 background: `repeating-linear-gradient(45deg, ${paceFill(effRate, 0.55)} 0 3px, transparent 3px 7px)`,
               }}
             />
           )}
+          {/* финиш бюджета — правый край трека; виден отдельно при переборе */}
+          {projShare > 1 && <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: '100%' }} />}
+          {/* пунктирная риска итога — может стоять за финишем */}
           {proj > 0 && (
             <div
               class="absolute -inset-y-1 w-0 -translate-x-1/2 border-r-2 border-dashed"
-              style={{ left: pct(projShare), borderColor: paceColor(effRate) }}
+              style={{ left: pct(tailShare), borderColor: effC }}
             />
           )}
-          {over && <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: pct(1) }} />}
         </div>
       </div>
     </div>
