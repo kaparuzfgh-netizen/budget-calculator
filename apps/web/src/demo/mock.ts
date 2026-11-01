@@ -40,6 +40,7 @@ export const WEEK: WeekStatus = {
   currency: 'KGS',
   week_from: '2026-03-16',
   week_to: '2026-03-22',
+  week_day: 3, // 18 марта 2026 — среда
   week_spent_minor: 214000,
   week_budget_minor: 1384615,
   week_over: false,
@@ -205,6 +206,7 @@ export function tempoWeek(pace: 'low' | 'ok' | 'over', day = 18): WeekStatus {
     ...WEEK,
     week_from: iso(today - dow),
     week_to: iso(today - dow + 6),
+    week_day: dow + 1,
     week_spent_minor: wSpent,
     week_over: wSpent > budget,
     week_remaining_minor: budget - wSpent,

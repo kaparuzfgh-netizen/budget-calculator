@@ -345,6 +345,8 @@ export function registerTmaApi(
         currency: p.living_currency,
         week_from: wStart,
         week_to: wEnd.toISOString().slice(0, 10),
+        // день недели «сегодня» 1=пн..7=вс — шкала «дни недели» в гонке
+        week_day: ((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7) + 1,
         week_spent_minor: toMinor(round2(s.weekSpent)),
         week_budget_minor: toMinor(round2(s.weekBudget)),
         week_over: s.weekOver,

@@ -64,6 +64,8 @@ export interface WeekStatus {
   /** Диапазон текущей недели 'YYYY-MM-DD' (пн..вс). */
   week_from: string;
   week_to: string;
+  /** День недели «сегодня»: 1=пн..7=вс — шкала «дни недели» в гонке. */
+  week_day: number;
   week_spent_minor: number;
   week_budget_minor: number;
   week_over: boolean;

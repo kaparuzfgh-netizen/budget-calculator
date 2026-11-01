@@ -302,6 +302,105 @@ function RaceChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: Te
   );
 }
 
+const DOW_NAMES = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'] as const;
+
+/**
+ * «Неделя-гонка» — инструмент дня: «дни недели» (пн–вс, спайк-зона
+ * вечер пятницы → вс) vs «бюджет недели». У каждой шкалы свой финиш
+ * справа; перебор вылезает за край — штриховка и риска за финишем.
+ */
+function WeekRace({ day, budget, spent, proj, rate, effRate, scenario }: {
+  day: number; // 1=пн..7=вс
+  budget: number;
+  spent: number;
+  proj: number;
+  rate: number;
+  effRate: number;
+  scenario: boolean;
+}) {
+  const spentShare = budget > 0 ? spent / budget : 0;
+  const projShare = budget > 0 && proj > 0 ? proj / budget : 0;
+  const tailShare = Math.min(Math.max(projShare, 0), 1.1);
+  const pct = (s: number) => `${(Math.min(s, 1.1) * 100).toFixed(1)}%`;
+  const effC = paceColor(effRate);
+  return (
+    <div class="mt-4 space-y-4 pr-8">
+      <div>
+        <div class="mb-1 flex justify-between text-[11px] text-zinc-500">
+          <span>дни недели</span>
+          <span>
+            {DOW_NAMES[day - 1]} · {day}/7
+          </span>
+        </div>
+        <div class="relative h-3.5 rounded-full bg-zinc-800/80">
+          {/* спайк-зона: вечер пятницы → воскресенье */}
+          <div
+            class="absolute inset-y-0 rounded-r-full bg-amber-200/[0.07]"
+            style={{ left: `${(4 / 7) * 100}%`, width: `${(3 / 7) * 100}%` }}
+          />
+          <div
+            class="absolute inset-y-0 left-0 rounded-full"
+            style={{ width: pct(day / 7), background: 'linear-gradient(90deg,#71717a,#a1a1aa)' }}
+          />
+        </div>
+        <div class="mt-1 grid grid-cols-7 text-center text-[9px] leading-none">
+          {DOW_NAMES.map((d, i) => (
+            <span
+              key={d}
+              class={
+                i === day - 1
+                  ? 'text-zinc-200'
+                  : i >= 5
+                    ? 'text-amber-400/70'
+                    : i === 4
+                      ? 'text-amber-400/40'
+                      : i < day - 1
+                        ? 'text-zinc-500'
+                        : 'text-zinc-700'
+              }
+            >
+              {d}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div class="mb-1 flex justify-between text-[11px] text-zinc-500">
+          <span>бюджет недели</span>
+          <span>{Math.round(spentShare * 100)}%</span>
+        </div>
+        <div class="relative h-3.5 rounded-full bg-zinc-800/80">
+          <div
+            class="absolute inset-y-0 left-0 rounded-full"
+            style={{
+              width: pct(Math.min(spentShare, 1)),
+              background: `linear-gradient(90deg, ${paceFill(rate, 0.3)}, ${paceColor(rate)})`,
+            }}
+          />
+          {/* «Что если»: штриховой хвост до прогноза — за финишем перебор недели */}
+          {projShare > spentShare && scenario && (
+            <div
+              class="absolute inset-y-0"
+              style={{
+                left: pct(Math.min(spentShare, 1)),
+                width: pct(Math.max(tailShare - spentShare, 0)),
+                background: `repeating-linear-gradient(45deg, ${paceFill(effRate, 0.55)} 0 3px, transparent 3px 7px)`,
+              }}
+            />
+          )}
+          {projShare > 1 && <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: '100%' }} />}
+          {proj > 0 && (
+            <div
+              class="absolute -inset-y-1 w-0 -translate-x-1/2 border-r-2 border-dashed"
+              style={{ left: pct(tailShare), borderColor: effC }}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PayRow({ api, item, onPaid }: { api: ScreenProps['api']; item: UpcomingItem; onPaid: () => void }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -450,22 +549,31 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
   const u = up.data;
   const c = o.living_currency;
   // статус бюджета — единый источник (в «Тратах» только журнал)
-  const weekShare = w.week_budget_minor > 0 ? w.week_spent_minor / w.week_budget_minor : 0;
   const spentShare = w.month_cap_minor > 0 ? w.month_spent_minor / w.month_cap_minor : 0;
-  // прогноз итога: факт до сегодня + «эффективный» дневной расход × остаток
-  // дней; «Что если» подменяет дневной расход ползунком. С 3-го дня — раньше шум.
-  const curDailyMinor = w.month_day > 0 ? w.month_spent_minor / w.month_day : 0;
-  const effDailyMinor = whatIfMinor ?? curDailyMinor;
-  const projMinor =
-    w.month_day >= 3
-      ? Math.round(w.month_spent_minor + effDailyMinor * (w.month_days - w.month_day))
-      : 0;
-  // температура будущего участка: дневная норма сценария vs идеал (cap/дней)
+  // ── НЕДЕЛЯ (hero-инструмент): «Что если» — норма на остаток недели ──
+  const weekDay = Math.max(1, Math.min(w.week_day, 7));
+  const weekLeftDays = Math.max(0, 7 - weekDay); // дней после сегодня
+  const weekCurDaily = w.week_spent_minor / weekDay;
+  const effDailyMinor = whatIfMinor ?? weekCurDaily;
+  const projWeekMinor = Math.round(w.week_spent_minor + effDailyMinor * weekLeftDays);
+  // температура недели: доля бюджета vs доля прошедшего времени
+  const weekRate =
+    w.week_budget_minor > 0 ? (w.week_spent_minor / w.week_budget_minor) / (weekDay / 7) : 0;
   const scenario = whatIfMinor !== null;
   const scenarioRatio =
-    w.month_cap_minor > 0 ? (effDailyMinor * w.month_days) / w.month_cap_minor : 0;
+    w.week_budget_minor > 0 ? (effDailyMinor * 7) / w.week_budget_minor : 0;
   const projColor = paceColor(scenarioRatio);
-  const effRate = scenario ? scenarioRatio : w.burn_rate;
+  const effRate = scenario ? scenarioRatio : weekRate;
+  // недельный «лимит»: остаток недели / дней до конца — риска на ползунке
+  const weekAllowance = weekLeftDays > 0 ? Math.max(0, w.week_remaining_minor / weekLeftDays) : 0;
+  // ── МЕСЯЦ (контекст в деталях): пассивный прогноз по текущей норме ──
+  const monthCurDaily = w.month_day > 0 ? w.month_spent_minor / w.month_day : 0;
+  const projMonthMinor =
+    w.month_day >= 3
+      ? Math.round(w.month_spent_minor + monthCurDaily * (w.month_days - w.month_day))
+      : 0;
+  const monthStatus =
+    w.burn_rate <= 1 ? 'в графике' : w.burn_rate <= 1.3 ? 'чуть быстрее' : 'быстрее плана';
   const paidN = u.items.filter((x) => x.paid).length;
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
@@ -533,39 +641,54 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
         <Wallet size={16} strokeWidth={1.5} /> Бюджет
       </h2>
       <div class={`${cardCls} mt-2`}>
-        {/* hero: темп месяца — тап раскрывает детали */}
+        {/* hero: неделя-гонка — инструмент дня; тап раскрывает месяц */}
         <div class="cursor-pointer select-none" onClick={() => setOpenB((v) => !v)}>
           <div class={rowCls}>
             <span class={mutedCls}>
-              Темп месяца
-              <Info title="Темп месяца">{TEMPO_INFO[tempoKind]}</Info>
+              Неделя · {fmtDay(w.week_from)} – {fmtDay(w.week_to)}
+              <Info title="Гонка недели">
+                <p>
+                  Две шкалы наперегонки: «дни недели» — сколько времени прошло
+                  (пн–вс; янтарь — спайк-зона: вечер пятницы и выходные),
+                  «бюджет» — сколько потрачено от лимита недели.
+                </p>
+                <p>
+                  Бюджет бежит впереди дней — перебираете. Пунктирная риска —
+                  итог недели при текущей норме; штриховка до неё — ползунок
+                  «Что если» в деталях.
+                </p>
+                <p>
+                  Недельный лимит — равномерная доля бюджета месяца (×12/52),
+                  задаётся в профиле («Норма трат»).
+                </p>
+              </Info>
+            </span>
+            <span class={`text-[13px] ${w.week_over ? 'text-red-400' : 'text-zinc-400'}`}>
+              {w.week_over
+                ? `перебор ${fmtMinor(-w.week_remaining_minor, c)}`
+                : `осталось ${fmtMinor(w.week_remaining_minor, c)}`}
             </span>
           </div>
-          {w.month_cap_minor > 0 ? (
-            (() => {
-              const t: TempoProps = {
-                daily: w.month_daily_minor,
-                today: w.month_day,
-                dim: w.month_days,
-                cap: w.month_cap_minor,
-                spent: w.month_spent_minor,
-                proj: projMinor,
-                rate: w.burn_rate,
-                effRate,
-                scenario,
-              };
-              return tempoKind === 'race' ? <RaceChart {...t} /> : <TempoChart {...t} />;
-            })()
+          {w.week_budget_minor > 0 ? (
+            <WeekRace
+              day={weekDay}
+              budget={w.week_budget_minor}
+              spent={w.week_spent_minor}
+              proj={projWeekMinor}
+              rate={weekRate}
+              effRate={effRate}
+              scenario={scenario}
+            />
           ) : (
             <p class={`${mutedCls} mt-2`}>
-              Бюджет месяца не задан — потрачено {fmtMinor(w.month_spent_minor, c)}
+              Недельный бюджет не задан — потрачено {fmtMinor(w.week_spent_minor, c)}
             </p>
           )}
           <div class={`${rowCls} mt-1`}>
             <span class={`${mutedCls} text-[12px]`} style={scenario ? { color: projColor } : undefined}>
-              {projMinor > 0
-                ? `${scenario ? 'сценарий' : 'прогноз'} ~${fmtMinor(projMinor, c)} из ${fmtMinor(w.month_cap_minor, c)}`
-                : `день ${w.month_day} из ${w.month_days}`}
+              {weekLeftDays > 0 && w.week_budget_minor > 0
+                ? `${scenario ? 'сценарий' : 'итог недели'} ≈ ${fmtMinor(projWeekMinor, c)} из ${fmtMinor(w.week_budget_minor, c)}`
+                : 'неделя завершена'}
             </span>
             <span class={`${mutedCls} inline-flex items-center gap-0.5 text-[12px]`}>
               детали
@@ -576,11 +699,88 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
               />
             </span>
           </div>
+          {/* месяц — компактный статус; график и цифры — в деталях */}
+          {w.month_cap_minor > 0 && (
+            <p class="mt-1 flex items-center gap-1.5 text-[11px] text-zinc-500">
+              <span
+                class="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: paceColor(w.burn_rate) }}
+              />
+              месяц {monthStatus} · лимит {fmtMinor(w.daily_allowance_minor, c)}/день
+            </p>
+          )}
         </div>
         {openB && (
           <div class="mt-3 border-t border-white/5 pt-3">
+            {/* «Что если» — норма на остаток недели; крутит хвост на гонке выше */}
+            {w.week_budget_minor > 0 && weekLeftDays > 0 && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <div class={rowCls}>
+                  <span class={mutedCls}>
+                    Что если
+                    <Info title="Что если">
+                      Сценарий: если до конца недели ({weekLeftDays} дн.)
+                      тратить по этой норме в день — каким будет итог недели.
+                      Риска «лимит» на ползунке — норма, при которой бюджет
+                      недели закончится ровно в воскресенье.
+                    </Info>
+                  </span>
+                  <span>
+                    {fmtMinor(effDailyMinor, c)}/день
+                    {whatIfMinor !== null && (
+                      <span class={mutedCls}> · сейчас {fmtMinor(weekCurDaily, c)}</span>
+                    )}
+                  </span>
+                </div>
+                {(() => {
+                  const maxDaily = Math.max(100, Math.ceil((w.week_budget_minor / 100 / 7) * 3 / 100) * 100);
+                  const limitPos = Math.min(weekAllowance / 100 / maxDaily, 1) * 100;
+                  return (
+                    <>
+                      <div class="relative">
+                        <input
+                          type="range"
+                          min={0}
+                          max={maxDaily}
+                          step={Math.max(10, Math.round(maxDaily / 60))}
+                          value={Math.min(Math.round(effDailyMinor / 100), maxDaily)}
+                          onInput={(e) => setWhatIfMinor(Number((e.target as HTMLInputElement).value) * 100)}
+                          class="mt-2 w-full"
+                          style={{ accentColor: projColor }}
+                          aria-label="Дневная норма трат на остаток недели"
+                        />
+                        {/* риска «лимита недели»: правее — бюджет не доживёт до вс */}
+                        <div
+                          class="pointer-events-none absolute top-1/2 h-4 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded bg-white/60"
+                          style={{ left: `${limitPos}%` }}
+                        />
+                      </div>
+                      <p class="mt-0.5 text-center text-[10px] text-zinc-600">︱лимит недели</p>
+                    </>
+                  );
+                })()}
+                <div class={`${rowCls} mt-1`}>
+                  <span class={`${mutedCls} text-[12px]`}>
+                    {effDailyMinor !== weekAllowance
+                      ? `${effDailyMinor > weekAllowance ? 'выше' : 'ниже'} лимита на ${fmtMinor(Math.abs(effDailyMinor - weekAllowance), c)}/день · `
+                      : ''}
+                    итог недели ≈ {fmtMinor(projWeekMinor, c)}
+                  </span>
+                  {whatIfMinor !== null && (
+                    <button type="button" class="text-[12px] text-sky-400" onClick={() => setWhatIfMinor(null)}>
+                      сбросить
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            <div class="my-3 border-t border-white/5" />
+            {/* месяц — контекст: график темпа + цифры */}
             <div class={rowCls}>
-              <span class={mutedCls}>вид</span>
+              <span class={mutedCls}>
+                график месяца
+                <Info title="График месяца">{TEMPO_INFO[tempoKind]}</Info>
+              </span>
               <span class="flex flex-wrap gap-1.5">
                 {(Object.keys(TEMPO_LABELS) as TempoKind[]).map((k) => (
                   <button
@@ -603,33 +803,27 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                 ))}
               </span>
             </div>
-            <div class="my-3 border-t border-white/5" />
-            <div class={rowCls}>
-              <span class={mutedCls}>
-                Неделя · {fmtDay(w.week_from)} – {fmtDay(w.week_to)}
-              </span>
-              <b>{fmtMinor(w.week_spent_minor, c)}</b>
-            </div>
-            <BudgetBar share={weekShare} over={w.week_over} />
+            {w.month_cap_minor > 0 ? (
+              (() => {
+                const t: TempoProps = {
+                  daily: w.month_daily_minor,
+                  today: w.month_day,
+                  dim: w.month_days,
+                  cap: w.month_cap_minor,
+                  spent: w.month_spent_minor,
+                  proj: projMonthMinor,
+                  rate: w.burn_rate,
+                  effRate: w.burn_rate,
+                  scenario: false,
+                };
+                return tempoKind === 'race' ? <RaceChart {...t} /> : <TempoChart {...t} />;
+              })()
+            ) : (
+              <p class={`${mutedCls} mt-2`}>
+                Бюджет месяца не задан — потрачено {fmtMinor(w.month_spent_minor, c)}
+              </p>
+            )}
             <div class={`${rowCls} mt-2`}>
-              <span class={mutedCls}>
-                Бюджет недели
-                <Info title="Бюджет недели">
-                  Равномерная доля месячного бюджета: бюджет месяца × 12/52.
-                  Задаётся в профиле («Норма трат»).
-                </Info>
-              </span>
-              <span>{fmtMinor(w.week_budget_minor, c)}</span>
-            </div>
-            <div class={`${rowCls} mt-2`}>
-              <span class={mutedCls}>Остаток</span>
-              <span class={w.week_over ? 'text-red-400' : ''}>
-                {fmtMinor(w.week_remaining_minor, c)}
-                {w.week_over ? ' — перебор' : ''}
-              </span>
-            </div>
-            <div class="my-3 border-t border-white/5" />
-            <div class={rowCls}>
               <span class={mutedCls}>Месяц</span>
               <b>{fmtMinor(w.month_spent_minor, c)}</b>
             </div>
@@ -654,67 +848,6 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                 </p>
               );
             })()}
-            {w.month_cap_minor > 0 && w.month_day >= 3 && (
-              <div onClick={(e) => e.stopPropagation()}>
-                <div class="my-3 border-t border-white/5" />
-                <div class={rowCls}>
-                  <span class={mutedCls}>
-                    Что если
-                    <Info title="Что если">
-                      Сценарий: если до конца месяца тратить по этой норме в
-                      день — каким будет итог. Точка прогноза на графике
-                      двигается живьём.
-                    </Info>
-                  </span>
-                  <span>
-                    {fmtMinor(effDailyMinor, c)}/день
-                    {whatIfMinor !== null && (
-                      <span class={mutedCls}> · сейчас {fmtMinor(curDailyMinor, c)}</span>
-                    )}
-                  </span>
-                </div>
-                {(() => {
-                  const maxDaily = Math.max(100, Math.ceil((w.month_cap_minor / 100 / w.month_days) * 3 / 100) * 100);
-                  const limitPos = Math.min(w.daily_allowance_minor / 100 / maxDaily, 1) * 100;
-                  return (
-                    <>
-                      <div class="relative">
-                        <input
-                          type="range"
-                          min={0}
-                          max={maxDaily}
-                          step={Math.max(10, Math.round(maxDaily / 60))}
-                          value={Math.min(Math.round(effDailyMinor / 100), maxDaily)}
-                          onInput={(e) => setWhatIfMinor(Number((e.target as HTMLInputElement).value) * 100)}
-                          class="mt-2 w-full"
-                          style={{ accentColor: projColor }}
-                          aria-label="Дневная норма трат для сценария «Что если»"
-                        />
-                        {/* риска «лимита»: бегунок правее неё — итог за бюджетом */}
-                        <div
-                          class="pointer-events-none absolute top-1/2 h-4 w-[2px] -translate-x-1/2 -translate-y-1/2 rounded bg-white/60"
-                          style={{ left: `${limitPos}%` }}
-                        />
-                      </div>
-                      <p class="mt-0.5 text-center text-[10px] text-zinc-600">︱лимит</p>
-                    </>
-                  );
-                })()}
-                <div class={`${rowCls} mt-1`}>
-                  <span class={`${mutedCls} text-[12px]`}>
-                    {effDailyMinor !== w.daily_allowance_minor
-                      ? `${effDailyMinor > w.daily_allowance_minor ? 'выше' : 'ниже'} лимита на ${fmtMinor(Math.abs(effDailyMinor - w.daily_allowance_minor), c)}/день · `
-                      : ''}
-                    итог ≈ {fmtMinor(projMinor, c)}
-                  </span>
-                  {whatIfMinor !== null && (
-                    <button type="button" class="text-[12px] text-sky-400" onClick={() => setWhatIfMinor(null)}>
-                      сбросить
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
