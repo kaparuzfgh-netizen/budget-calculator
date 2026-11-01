@@ -120,24 +120,18 @@ const paceFill = (rate: number, a: number): string => `rgba(${paceRGB(rate).join
 
 /** Подписи вариантов для переключателя в «деталях». */
 const TEMPO_LABELS: Record<TempoKind, string> = {
-  gauge: 'шкала',
   race: 'гонка',
   line: 'линия',
-  thermo: 'термометр',
-  heat: 'карта',
 };
 
 /** Пояснения ⓘ к каждому варианту графика темпа. */
 const TEMPO_INFO: Record<TempoKind, string> = {
   line: 'Линия — накопленные траты по дням месяца; пунктир — ровный график бюджета; полая точка — итог при текущем темпе. Цвет — температура: белый — тратите мало, зелёный — в графике, красный — перегрев. В «деталях» ползунок «Что если» крутит прогноз.',
-  thermo: 'Бак — бюджет месяца; уровень — потрачено. Риска «сейчас» — где должен быть уровень по доле месяца; пунктирная — итог при текущем темпе. Уровень правее риски «сейчас» — перебираете. В «деталях» ползунок «Что если» двигает риску прогноза.',
-  gauge: 'Стрелка — темп трат к идеалу: «план» — точно по графику, левее — экономнее, правее — перебор. Зоны температуры: серая — холодно, зелёная — в графике, янтарь и красный — перегрев. Ползунок «Что если» в деталях двигает стрелку.',
-  heat: 'Каждая ячейка — день месяца в цвете «трата/идеал на день»: бледная — мало, зелёная — по норме, янтарь и красный — перебор. Пустые — дни впереди. Видно, какие дни перегрели месяц.',
   race: 'Две шкалы наперегонки: «дни месяца» — сколько времени прошло, «бюджет» — сколько потрачено. Бюджет бежит впереди дней — перебираете. Пунктирная риска — итог при текущем темпе; штриховка до неё — ползунок «Что если» в деталях.',
 };
 
-/** Вариант hero-графика темпа (выбор пока открыт — ?demo=home&chart=…). */
-export type TempoKind = 'line' | 'thermo' | 'gauge' | 'heat' | 'race';
+/** Вариант hero-графика темпа: «гонка» по умолчанию, «линия» — альтернатива. */
+export type TempoKind = 'line' | 'race';
 
 /** Общие данные для всех вариантов графика темпа. */
 interface TempoProps {
@@ -150,7 +144,6 @@ interface TempoProps {
   rate: number;
   effRate: number;
   scenario: boolean;
-  cur: string;
 }
 
 /**
@@ -242,144 +235,6 @@ function TempoChart({ daily, today, dim, cap, proj, rate, effRate, scenario }: T
 }
 
 /**
- * «Термометр»: бак бюджета — уровень = потрачено; риска «сейчас» —
- * где должен быть уровень по доле месяца; пунктирная риска — итог прогноза.
- * Уровень правее риски «сейчас» — тратите быстрее плана.
- */
-function ThermoChart({ today, dim, cap, spent, proj, rate, effRate, scenario, cur }: TempoProps) {
-  const scale = Math.max(1.05, spent / cap, proj / cap) * 1.04;
-  const pct = (v: number) => `${(Math.min(v / cap / scale, 1) * 100).toFixed(2)}%`;
-  const nowPct = `${(((today / dim) / scale) * 100).toFixed(2)}%`;
-  return (
-    <div class="mt-4">
-      <div class="relative h-14 rounded-xl bg-zinc-800/70">
-        {/* уровень = потрачено */}
-        <div
-          class="absolute inset-y-0 left-0 rounded-xl"
-          style={{
-            width: pct(spent),
-            background: `linear-gradient(90deg, ${paceFill(rate, 0.15)}, ${paceColor(rate)})`,
-          }}
-        />
-        <div class="pointer-events-none absolute inset-x-0 top-0 h-3 rounded-t-xl bg-white/5" />
-        {/* прогноз-риска: пунктирная вертикаль итога */}
-        {proj > 0 && (
-          <div
-            class="absolute inset-y-0 w-0 -translate-x-1/2 border-r-2 border-dashed"
-            style={{ left: pct(proj), borderColor: paceColor(effRate), opacity: scenario ? 1 : 0.8 }}
-          />
-        )}
-        {/* риска «сейчас»: идеальный уровень на эту долю месяца */}
-        <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-zinc-200" style={{ left: nowPct }} />
-        {/* край 100% бюджета — виден, когда шкала растянута перебором */}
-        {scale > 1.09 && (
-          <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: pct(cap) }} />
-        )}
-      </div>
-      <div class="relative mt-1 h-4 text-[10px] text-zinc-500">
-        <span class="absolute -translate-x-1/2" style={{ left: nowPct }}>
-          сейчас
-        </span>
-        <span class="absolute -translate-x-1/2" style={{ left: pct(cap) }}>
-          {fmtMinor(cap, cur)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/**
- * «Шкала» (grafana-gauge): полукруг 0→100% и ДВЕ стрелки — «дни» (тонкая
- * светлая) vs «бюджет» (толстая, температурная). Дуга-разрыв между ними
- * окрашена температурой зазора; при «Что если» — призрачная стрелка до
- * прогнозной доли. Бюджет впереди дней — перебор.
- */
-function GaugeChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: TempoProps) {
-  const cx = 160;
-  const cy = 132;
-  const R = 100;
-  const max = 1.15;
-  const a = (s: number) => Math.PI * (1 - Math.min(s, max) / max);
-  const pt = (s: number, rad = R) => [cx + rad * Math.cos(a(s)), cy - rad * Math.sin(a(s))] as const;
-  const dayShare = dim > 0 ? today / dim : 0;
-  const spentShare = cap > 0 ? spent / cap : 0;
-  const projShare = cap > 0 && proj > 0 ? proj / cap : 0;
-  const factC = paceColor(rate);
-  const effC = paceColor(effRate);
-  // дуга-разрыв между стрелками — температура зазора
-  const lo = Math.min(dayShare, spentShare);
-  const hi = Math.max(dayShare, spentShare);
-  const [g0x, g0y] = pt(lo, R - 10);
-  const [g1x, g1y] = pt(hi, R - 10);
-  const [dx, dy] = pt(dayShare, R - 24);
-  const [bx, by] = pt(spentShare, R - 24);
-  const [px_, py] = pt(projShare, R - 24);
-  const ticks = [0, 0.5, 1];
-  return (
-    <>
-      <svg viewBox="0 0 320 156" class="mt-2 block h-32 w-full" aria-hidden>
-        {/* трек дуги 0→115% */}
-        <path
-          d={`M${pt(0)[0]} ${pt(0)[1]} A${R} ${R} 0 0 1 ${pt(max)[0]} ${pt(max)[1]}`}
-          stroke="#3f3f46"
-          strokeWidth="3"
-          fill="none"
-          opacity="0.6"
-        />
-        {/* разрыв «дни vs бюджет» — чем горячее, тем больше отрыв */}
-        <path
-          d={`M${g0x} ${g0y} A${R - 10} ${R - 10} 0 0 1 ${g1x} ${g1y}`}
-          stroke={factC}
-          strokeWidth="10"
-          fill="none"
-          opacity="0.5"
-          strokeLinecap="round"
-        />
-        {ticks.map((t) => {
-          const [tx, ty] = pt(t, R - 3);
-          const [lx, ly] = pt(t, R + 16);
-          const [ox, oy] = pt(t, R + 3);
-          return (
-            <g key={t}>
-              <line x1={ox} y1={oy} x2={tx} y2={ty} stroke="#a1a1aa" strokeWidth="2" />
-              <text x={lx} y={ly + 4} textAnchor="middle" fontSize="10" fill="#71717a">
-                {Math.round(t * 100)}%
-              </text>
-            </g>
-          );
-        })}
-        {/* стрелка бюджета — толстая, температурная */}
-        <line x1={cx} y1={cy} x2={bx} y2={by} stroke={factC} strokeWidth="4.5" strokeLinecap="round" />
-        {/* сценарий — призрачная пунктирная стрелка до прогнозной доли */}
-        {proj > 0 && scenario && (
-          <line x1={cx} y1={cy} x2={px_} y2={py} stroke={effC} strokeWidth="2" strokeDasharray="4 4" strokeLinecap="round" opacity="0.85" />
-        )}
-        {/* стрелка дней — тонкая светлая поверх, чтобы читалась и при совпадении */}
-        <line x1={cx} y1={cy} x2={dx} y2={dy} stroke="#d4d4d8" strokeWidth="2" strokeLinecap="round" />
-        <circle cx={cx} cy={cy} r="6" fill="#18181b" stroke="#a1a1aa" strokeWidth="2" />
-        <text x={cx} y={cy - 34} textAnchor="middle" fontSize="26" fontWeight="600" fill={factC}>
-          {Math.round(spentShare * 100)}%
-        </text>
-        <text x={cx} y={cy - 20} textAnchor="middle" fontSize="10" fill="#71717a">
-          бюджета
-        </text>
-      </svg>
-      <div class="mt-0.5 flex items-center justify-center gap-4 text-[10px] text-zinc-500">
-        <span>
-          <i class="mr-1 inline-block h-[2px] w-4 translate-y-[-2px] bg-zinc-300" />
-          дни
-        </span>
-        <span>
-          <i class="mr-1 inline-block h-[2px] w-4 translate-y-[-2px]" style={{ background: factC }} />
-          бюджет
-        </span>
-        {scenario && <span style={{ color: effC }}>··· сценарий</span>}
-      </div>
-    </>
-  );
-}
-
-/**
  * «Гонка»: две шкалы на общей оси — «дни месяца» vs «бюджет».
  * Бюджет впереди дней — тратите быстрее плана. Пунктирная риска — итог
  * прогноза; при «Что если» к нему штриховка от текущего уровня.
@@ -440,40 +295,6 @@ function RaceChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: Te
           )}
           {over && <div class="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-red-400/80" style={{ left: pct(1) }} />}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * «Карта месяца»: ячейка = день в цвете «трата / идеал на день».
- * Бледная — мало, зелёная — по норме, красная — перебор; пустые — впереди.
- */
-function HeatChart({ daily, today, dim, cap, effRate, scenario }: TempoProps) {
-  const ideal = cap / dim;
-  return (
-    <div class="mt-3">
-      <div class="grid grid-cols-7 gap-1">
-        {Array.from({ length: dim }, (_, i) => {
-          const day = i + 1;
-          const future = day > today;
-          const r = ideal > 0 ? (daily[i] ?? 0) / ideal : 0;
-          return (
-            <div
-              key={day}
-              class="aspect-square rounded-[4px]"
-              style={{
-                background: future ? (scenario ? paceFill(effRate, 0.14) : 'rgba(255,255,255,0.04)') : paceColor(r),
-                boxShadow: day === today ? 'inset 0 0 0 1.5px #e4e4e7' : undefined,
-              }}
-            />
-          );
-        })}
-      </div>
-      <div class="mt-1 flex justify-between text-[10px] text-zinc-600">
-        <span>холоднее</span>
-        <span>сегодня · {today}</span>
-        <span>горячее</span>
       </div>
     </div>
   );
@@ -566,9 +387,9 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
     if (tempo) return tempo;
     try {
       const v = localStorage.getItem('bc.tempoChart') as TempoKind | null;
-      return v && v in TEMPO_LABELS ? v : 'gauge';
+      return v && v in TEMPO_LABELS ? v : 'race';
     } catch {
-      return 'gauge';
+      return 'race';
     }
   });
   const tempoKind = chartKind;
@@ -698,19 +519,8 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                 rate: w.burn_rate,
                 effRate,
                 scenario,
-                cur: c,
               };
-              return tempoKind === 'thermo' ? (
-                <ThermoChart {...t} />
-              ) : tempoKind === 'gauge' ? (
-                <GaugeChart {...t} />
-              ) : tempoKind === 'heat' ? (
-                <HeatChart {...t} />
-              ) : tempoKind === 'race' ? (
-                <RaceChart {...t} />
-              ) : (
-                <TempoChart {...t} />
-              );
+              return tempoKind === 'race' ? <RaceChart {...t} /> : <TempoChart {...t} />;
             })()
           ) : (
             <p class={`${mutedCls} mt-2`}>

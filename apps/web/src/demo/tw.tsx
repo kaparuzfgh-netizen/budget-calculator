@@ -27,10 +27,10 @@ const PACE = ((): keyof typeof PACE_LABELS => {
 })();
 const WEEK = tempoWeek(PACE);
 
-const CHART_LABELS = { line: 'линия', thermo: 'термометр', gauge: 'шкала', heat: 'карта', race: 'гонка' } as const;
+const CHART_LABELS = { race: 'гонка', line: 'линия' } as const;
 const CHART = ((): TempoKind => {
   const p = new URLSearchParams(location.search).get('chart');
-  return p === 'thermo' || p === 'gauge' || p === 'heat' || p === 'race' ? p : 'line';
+  return p === 'line' ? 'line' : 'race';
 })();
 
 // ── stub Api: GET — фикстуры; мутации — правка фикстур в памяти ──
@@ -308,7 +308,7 @@ function DemoApp({ name }: { name: string }) {
             {(Object.keys(PACE_LABELS) as (keyof typeof PACE_LABELS)[]).map((p) => (
               <a
                 key={p}
-                href={`?demo=home&pace=${p}${CHART === 'line' ? '' : `&chart=${CHART}`}`}
+                href={`?demo=home&pace=${p}${CHART === 'race' ? '' : `&chart=${CHART}`}`}
                 class={p === PACE ? 'font-medium text-sky-400' : 'underline'}
               >
                 {PACE_LABELS[p]}
@@ -320,7 +320,7 @@ function DemoApp({ name }: { name: string }) {
             {(Object.keys(CHART_LABELS) as (keyof typeof CHART_LABELS)[]).map((k) => (
               <a
                 key={k}
-                href={`?demo=home&pace=${PACE}${k === 'line' ? '' : `&chart=${k}`}`}
+                href={`?demo=home&pace=${PACE}${k === 'race' ? '' : `&chart=${k}`}`}
                 class={k === CHART ? 'font-medium text-sky-400' : 'underline'}
               >
                 {CHART_LABELS[k]}
