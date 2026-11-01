@@ -392,7 +392,8 @@ function tempoAdvice(w: WeekStatus, c: string): { text: string; tone: string } |
   const top = w.month_top?.[0];
   const topDaily = top ? Math.round(top.spent_minor / w.month_day) : 0;
   if (gap <= 0) {
-    return { text: `В графике: держите траты до ${m(allowance)}/день — запас ${m(-gap)}/день.`, tone: 'text-emerald-300/90' };
+    const topTxt = top ? ` Больше всего уходит на «${top.name}» — ${m(top.spent_minor)} (${Math.round(top.share * 100)}%).` : '';
+    return { text: `В графике: держите траты до ${m(allowance)}/день — запас ${m(-gap)}/день.${topTxt}`, tone: 'text-emerald-300/90' };
   }
   if (!top) {
     return { text: `Чтобы вписаться, сократите траты на ${m(gap)}/день.`, tone: 'text-amber-300/90' };
@@ -646,7 +647,12 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
             {(() => {
               const adv = tempoAdvice(w, c);
               if (!adv) return null;
-              return <p class={`mt-1.5 text-[12px] leading-snug ${adv.tone}`}>{adv.text}</p>;
+              return (
+                <p class="mt-1.5 text-[12px] leading-snug">
+                  <span class={mutedCls}>Совет · </span>
+                  <span class={adv.tone}>{adv.text}</span>
+                </p>
+              );
             })()}
             {w.month_cap_minor > 0 && w.month_day >= 3 && (
               <div onClick={(e) => e.stopPropagation()}>
