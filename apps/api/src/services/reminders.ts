@@ -180,15 +180,15 @@ export async function runReminders(
   let skipped = 0;
   let failed = 0;
 
-  for (const userId of ids) {
+  const processUser = async (userId: number): Promise<void> => {
     const repo = scoped(env.DB, userId);
     // исходящие тексты — через одноразовую миграцию снятия reply-клавиатуры
     const tgU = tgWithKeyboardMigration(repo, tg);
     try {
       const p = await repo.getProfile();
-      if (!p?.onboarded_at) continue;
+      if (!p?.onboarded_at) return;
       const telegramId = await access.getTelegramId(userId); // P2-6: SQL только в repo.ts
-      if (telegramId === null) continue;
+      if (telegramId === null) return;
       const lp = localParts(p.timezone, now);
       const tz = p.timezone;
       // свой час начала окон (0018): NULL → легаси-константы. Конец окна
@@ -403,6 +403,21 @@ export async function runReminders(
     } catch (e) {
       failed++;
       console.error(`reminders: user ${userId} failed (${sanitizeTelegramError(e)})`);
+    }
+  };
+  // Пользователи независимы: обрабатываем пачками — длинный хвост
+  // последовательных await'ов не съедает бюджет времени тика при росте
+  // базы. Пачка ограничена, чтобы не упереться в лимиты Telegram API.
+  const BATCH = 8;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const res = await Promise.allSettled(ids.slice(i, i + BATCH).map(processUser));
+    // Ошибки до входа в per-user try (repo/tg-клиент) — не должны тонуть
+    // в allSettled: считаем и логируем, чтобы алерт владельцу сработал.
+    for (const r of res) {
+      if (r.status === 'rejected') {
+        failed++;
+        console.error(`reminders: user setup failed (${sanitizeTelegramError(r.reason)})`);
+      }
     }
   }
   console.log(`reminders: ${sent} sent, ${skipped} deduped, ${failed} failed`);
