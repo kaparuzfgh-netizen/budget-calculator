@@ -824,6 +824,13 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     return;
   }
 
+  // /start для не-онбоарденного — всегда (пере)запуск мастера с шага 1:
+  // застрял посреди визарда или только что принял приглашение — начинаем чисто.
+  if (!profile?.onboarded_at && START_RE.test(text)) {
+    await applyOnboarding(startOnboarding(), msg, user, deps);
+    return;
+  }
+
   if (conv) {
     if (conv.effects.length) {
       // устаревшее состояние — мягкий рестарт с первого шага
@@ -956,10 +963,12 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
         return;
       }
       await repo.clearConversation();
-    } else {
+    } else if (!text.startsWith('/')) {
       await applyOnboarding(advance(conv.state!, { type: 'text', text }), msg, user, deps, step);
       return;
     }
+    // онбординг-шаги: slash-команды редьюсеру не скармливаем — /help, /id,
+    // /invite обязаны работать посреди мастера; состояние сохраняется.
   }
 
   if (!profile?.onboarded_at) {
@@ -1155,6 +1164,8 @@ export async function handleMessage(msg: IncomingMessage, deps: AccessDeps): Pro
       await repo.audit('owner_bootstrap', uid);
       const stg = tgWithKeyboardMigration(scoped(deps.db, uid), tg);
       await stg.sendMessage(msg.chatId, TEXT.welcomeOwner(msg.firstName));
+      const created = await repo.findUserByTelegramId(msg.fromId);
+      if (created) await applyOnboarding(startOnboarding(), msg, created, { ...deps, telegram: stg });
       return;
     }
     const m = START_RE.exec(msg.text);
@@ -1400,6 +1411,8 @@ async function redeemInvite(msg: IncomingMessage, code: string, deps: AccessDeps
     await repo.audit('invite_redeemed', res.userId);
     const stg = tgWithKeyboardMigration(scoped(deps.db, res.userId), tg);
     await stg.sendMessage(msg.chatId, TEXT.joined(msg.firstName));
+    const created = await repo.findUserByTelegramId(msg.fromId);
+    if (created) await applyOnboarding(startOnboarding(), msg, created, { ...deps, telegram: stg });
     return;
   }
   const reason = await repo.inviteState(codeHash);

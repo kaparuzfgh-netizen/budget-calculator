@@ -147,17 +147,18 @@ describe('формат апдейтов', () => {
   it('дубликат update_id обрабатывается один раз', async () => {
     expect((await post(msg(20, OWNER_TG, 'привет'))).status).toBe(200);
     expect((await post(msg(20, OWNER_TG, 'привет'))).status).toBe(200);
-    // владелец создан один раз: «·» (миграция remove_keyboard) + приветствие
-    expect(sent.length).toBe(2);
+    // владелец создан один раз: «·» (миграция remove_keyboard) + приветствие + 1-й шаг мастера
+    expect(sent.length).toBe(3);
     expect(sent[0]!.text).toBe('·');
-    expect(sent.at(-1)!.text).toContain('владелец');
+    expect(sent[1]!.text).toContain('владелец');
+    expect(sent.at(-1)!.text).toContain('Согласны');
   });
 });
 
 describe('доступ', () => {
   it('владелец бутстрапится любым текстом; повторный /start идемпотентен', async () => {
     await post(msg(30, OWNER_TG, 'любой текст'));
-    expect(sent.at(-1)!.text).toContain('владелец');
+    expect(sent.some((m) => m.text.includes('владелец'))).toBe(true);
     await post(msg(31, OWNER_TG, '/start'));
     const { results } = await env.DB.prepare('SELECT role FROM users').all<{ role: string }>();
     expect(results).toEqual([{ role: 'owner' }]);
@@ -206,7 +207,7 @@ describe('доступ', () => {
     await post(msg(70, OWNER_TG, '/start'));
     const code = await inviteCode();
     await post(msg(72, 777001, `/start ${code}`));
-    expect(sent.at(-1)!.text).toContain('Приглашение принято');
+    expect(sent.some((m) => m.text.includes('Приглашение принято'))).toBe(true);
     expect(await tableText('users')).toContain('"member"');
     // тот же код вторым отправителем → отказ
     await post(msg(73, 777002, `/start ${code}`));
@@ -223,13 +224,31 @@ describe('доступ', () => {
     expect(sent.at(-1)!.text).toContain('недействительно');
   });
 
+  it('приглашение сразу запускает онбординг; /start — рестарт; /help посреди мастера', async () => {
+    await post(msg(76, OWNER_TG, '/start'));
+    const code = await inviteCode();
+    await post(msg(77, 777010, `/start ${code}`));
+    // последним — первый шаг мастера (согласие), беседа открыта
+    expect(sent.at(-1)!.text).toContain('Согласны');
+    const conv = await env.DB.prepare('SELECT step FROM conversation_state').first<{ step: string }>();
+    expect(conv?.step).toBe('terms');
+    // повторный /start — чистый рестарт, а не «Нужно согласие»
+    await post(msg(78, 777010, '/start'));
+    expect(sent.at(-1)!.text).toContain('Согласны');
+    // /help посреди мастера доходит до диспетчера, шаг мастера не сбивается
+    await post(msg(79, 777010, '/help'));
+    expect(sent.at(-1)!.text).toContain('Доступные команды');
+    const conv2 = await env.DB.prepare('SELECT step FROM conversation_state').first<{ step: string }>();
+    expect(conv2?.step).toBe('terms');
+  });
+
   it('гонка: один код для двух sender → один пользователь, один отказ', async () => {
     await post(msg(80, OWNER_TG, '/start'));
     const code = await inviteCode();
     await Promise.all([post(msg(82, 881001, `/start ${code}`)), post(msg(83, 882002, `/start ${code}`))]);
     const { results } = await env.DB.prepare("SELECT telegram_id FROM users WHERE role='member'").all();
     expect(results.length).toBe(1);
-    const texts = sent.slice(-2).map((m) => m.text);
+    const texts = sent.map((m) => m.text);
     expect(texts.filter((t) => t.includes('принято'))).toHaveLength(1);
     expect(texts.filter((t) => t.includes('недействительно'))).toHaveLength(1);
   });
