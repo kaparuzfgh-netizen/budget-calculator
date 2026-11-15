@@ -184,7 +184,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 
 ```mermaid
 flowchart LR
-  DEV["Владелец<br/>npm run release"] -->|"проверки → build web →<br/>миграции D1 → wrangler deploy"| W
+  DEV["Владелец / агент<br/>npm run release"] -->|"проверки → build web →<br/>миграции D1 → wrangler deploy"| W
   subgraph CF["Cloudflare"]
     W["Worker<br/>budget-companion-api"]
     W -->|"run_worker_first:<br/>/api/* /telegram/* /health"| API["fetch() → router.ts"]

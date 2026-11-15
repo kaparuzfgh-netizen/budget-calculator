@@ -49,9 +49,11 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
 6. Zod-схемы на каждом входе; домен в `src/domain/` — чистые функции без I/O
    («сегодня» — параметром; числа-эталоны — `test/domain/golden.legacy.json`,
    фикстура заморожена, генератор удалён вместе с v1).
-7. Деплой/вход в Cloudflare — только владелец (interactive). Агенту
-   достаточно `--dry-run` и `wrangler deploy --dry-run`.
-   Секреты CI (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`)
+7. Деплой выполняет агент сам: `npm run release` (check → web → миграции
+   D1 → deploy → /health) при зелёном `npm run check`, если нет отдельного
+   уточнения пользователя. Интерактивные `wrangler login`/`logout` и
+   `wrangler secret put` — только владелец (браузерная авторизация и
+   прод-секреты). Секреты CI (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`)
    настраивает владелец — docs/v2-development.md.
 8. `node_modules/`, `dist/`, `.wrangler/`, `dist-check/` — не трекаются.
 9. **Mini App API:** `/api/tma/*` — Bearer-JWT, только scoped(user.id), суммы
