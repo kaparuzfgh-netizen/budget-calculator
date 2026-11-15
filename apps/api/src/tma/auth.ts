@@ -130,6 +130,15 @@ export async function verifyJwt(
   if (!token || !secret) return null;
   const parts = token.split('.');
   if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) return null;
+  // A2-10: строгая проверка заголовка — принимаем только HS256/JWT.
+  const hdr = fromB64url(parts[0]);
+  if (!hdr) return null;
+  try {
+    const h = JSON.parse(TD.decode(hdr)) as { alg?: unknown; typ?: unknown };
+    if (h.alg !== 'HS256' || h.typ !== 'JWT') return null;
+  } catch {
+    return null;
+  }
   const data = `${parts[0]}.${parts[1]}`;
   const expected = b64url(await hmacSha256(secret, data));
   if (!(await timingSafeEqualStr(expected, parts[2]))) return null;

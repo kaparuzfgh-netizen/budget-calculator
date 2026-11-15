@@ -16,9 +16,10 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
 ## Команды
 
 - `npm ci` — все зависимости (workspaces: apps/*).
-- `npm run check` — lint + typecheck + тесты API + сборка web.
+- `npm run check` — lint + typecheck + тесты API и web + сборка web.
   **Обязательно перед коммитом.**
-- `npm test` / `npm run test:api` — vitest в рантайме workerd с локальной D1.
+- `npm test` — тесты API (vitest в workerd с локальной D1) + тесты web
+  (`npm run test:api` / `npm run test:web` по отдельности).
 - `npm run typecheck` — `tsc --noEmit` по `apps/*`.
 - `npm run build:web` — сборка `apps/web` → `dist`.
 - `npm run release` — релиз: check → web → миграции D1 → deploy → /health.

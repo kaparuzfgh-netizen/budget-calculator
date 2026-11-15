@@ -36,6 +36,9 @@ jobs:
       - name: Тесты API (vitest в рантайме workerd + локальная D1)
         run: npm run test:api
 
+      - name: Тесты Mini App (unit-тесты api-клиента и fmt)
+        run: npm run test:web
+
       - name: Сборка Mini App v2
         run: npm run build:web
 

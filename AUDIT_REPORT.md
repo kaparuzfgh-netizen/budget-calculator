@@ -129,3 +129,112 @@ Telegram Bot API бесплатен). Риск роста — низкий: пр
 4. **P2-2, P2-3** — лимиты и идемпотентность создания (P2-3 требует миграции).
 5. **P2-8** — документация (`/vibe-docs`).
 6. P3 — по желанию.
+
+---
+
+# Аудит-2 (шесть ролей) — 2026-11-15
+
+Повторный аудит по шести ролям (архитектор, разработчик, AppSec, DevOps, QA,
+продакт). Все находки аудита-1 проверены как исправленные. Блокеров P0 нет.
+`npm audit`: 10 moderate (hono ≤4.13.15 — прод, minimatch — dev-цепочка eslint).
+
+## Находки аудита-2
+
+### [P1 — HIGH]
+
+- [x] **A2-1. Уязвимые версии Hono в проде**
+  - Файл: `apps/api/package.json` — `"hono": "4.13.13"`.
+  - Проблема: 5 moderate-адвизорий, включая обход wildcard-middleware через
+    закодированный перевод строки (GHSA-h7mg-cq63-vhpq). У воркера два
+    `app.use('*', …)` (data-key check, security headers); `tmaAuth` — per-route,
+    поэтому auth не обходится, но гигиена требует обновления.
+  - Решение: `hono` ≥4.13.18 (точный пин, версия ≥7 дней), `npm run check`.
+
+- [x] **A2-2. Нет наблюдаемости сбоев cron/webhook — владелец не узнает о поломке**
+  - Файлы: `apps/api/src/index.ts:21` (`ctx.waitUntil(runReminders)` без catch),
+    `apps/api/src/services/reminders.ts:390` (счётчик `failed` только в лог).
+  - Проблема: сбой тика или массовые ошибки видны только в `wrangler tail`;
+    `runReminders` без `.catch` → rejected waitUntil без уведомления.
+  - Решение: `.catch` на scheduled с best-effort сообщением владельцу
+    (`OWNER_TELEGRAM_ID`); при `failed > 0` в прогоне — короткий алерт.
+
+- [x] **A2-3. Нет DR-плана: потеря DATA_KEY = необратимая потеря данных**
+  - Файлы: `apps/api/src/env.ts:14` (предупреждение есть, процедуры нет),
+    `docs/v2-development.md`.
+  - Проблема: ни резервного хранения DATA_KEY, ни бэкапа/восстановления D1
+    не задокументировано.
+  - Решение: раздел «Disaster Recovery» в docs: где хранить ключ
+    (менеджер паролей), `wrangler d1 export`/Time Travel, порядок восстановления.
+
+- [x] **A2-4. Нулевое тестовое покрытие `apps/web`**
+  - Файлы: `apps/web/src/api.ts` (reauth-дедуп, 403-семантика postRaw) и др.
+  - Проблема: ~8k строк Preact-кода без тестов; рефакторинг вслепую.
+  - Решение: vitest в apps/web + unit-тесты `api.ts` (reauth один раз на
+    пачку 401, postRaw: 403 с кодом ≠ «нет доступа») и `fmt.ts`.
+
+### [P2 — MEDIUM]
+
+- [x] **A2-5. `.dev.vars.example` предлагает невалидный DATA_KEY**
+  - Файл: `apps/api/.dev.vars.example` — `dev-data-key-change-me-32bytes-b64`
+    не декодируется в 32 байта → dev-стенд отвечает 503 без явной причины.
+  - Решение: валидный base64 32 байта (`AAAA…=`) с пометкой «только dev».
+
+- [x] **A2-6. `audit_log` растёт без очистки**
+  - Файл: `apps/api/src/db/repo.ts` (cleanup есть у `processed_updates` и
+    `reminder_log`, у `audit_log` — нет).
+  - Решение: `cleanupAuditLog()` — старше ~400 дней, кроме `id_reply`
+    (гейт «/id один раз»), вызов в cron-чистке.
+
+- [x] **A2-7. Гонка `client_id` в POST /expenses → фиктивный `{id: 0}`**
+  - Файл: `apps/api/src/tma/api.ts:492-495` — `INSERT OR IGNORE` проиграл
+    гонку, `findExpenseByKey` ещё не видит строку → `{id: 0, duplicate: true}`.
+  - Решение: повторное чтение; если и тогда не найдено — 409 `conflict`
+    вместо фиктивного id.
+
+- [x] **A2-8. Нет теста «нет DATA_KEY → 503» (fail-closed)**
+  - Файл: `apps/api/src/http/router.ts:86-99` — самая хрупкая ветка без
+    покрытия.
+  - Решение: тест с пустым DATA_KEY → 503 на `/telegram/webhook` и
+    `/api/tma/auth`, `/health` остаётся доступен.
+
+- [x] **A2-9. Vision-лимит — до 20 `INSERT OR IGNORE` подряд на запрос**
+  - Файлы: `apps/api/src/services/vision.ts:83-94`, `apps/api/src/tma/vision.ts:74-80`.
+  - Проблема: при исчерпанном лимите — 20 лишних записей D1 на каждый запрос.
+  - Решение: один SELECT занятых слотов → свободный claim одной вставкой.
+
+### [P3 — LOW]
+
+- [x] **A2-10. `verifyJwt` не проверяет заголовок `alg`/`typ`**
+  - Файл: `apps/api/src/tma/auth.ts:125-147` — подпись всегда HS256, эксплойта
+    нет; строгая валидация заголовка — стандарт гигиены.
+  - Решение: распарсить header, требовать `alg === 'HS256'`, `typ === 'JWT'`.
+
+- [x] **A2-11. `release.mjs` — fetch `/health` без таймаута**
+  - Файл: `scripts/release.mjs:95-100` — зависшая сеть = вечный релиз.
+  - Решение: `AbortSignal.timeout(10s)` + await промиса.
+
+- [x] **A2-12. Мусор v1 в дереве**
+  - Файлы: `dist/BUNDLE.gs`, `.clasp.json.example`, `.deploy.json.example`.
+  - Решение: удалить (стек v1 удалён шагом 9, примеры мертвы).
+
+- [x] **A2-13. Гейт `format:check` сломан со времён v2-реструктуризации**
+  - Файл: `.prettierignore` — игнорил `apps-script/` и `mini-app/` (каталоги
+    v1), а исходники переехали в `apps/` → `prettier --check .` падал на всём
+    дереве исходников (и в CI, шаг ci.yml).
+  - Решение: игнор `apps/` + `.devin/` (локальный конфиг агента);
+    `deploy-v2.yml` и `release.mjs` приведены к стилю prettier.
+
+### Результат прогона vibe-fix (2026-11-15)
+
+Все пункты P1–P3 закрыты. Проверки: `npm run check` (lint + typecheck +
+test:api 377 + test:web 24 + build:web) — зелёный; `format:check` — зелёный;
+`npm audit` — 9 moderate (все `minimatch` в dev-цепочке eslint; фикс требует
+breaking-обновления typescript-eslint — осознанно не трогаем).
+
+### Отложено (не в скоупе этого прогона)
+
+- Cron: последовательный перебор пользователей — пачки `Promise.allSettled`
+  при росте базы.
+- `/delete_me` в Mini App (сейчас только в боте), светлая тема,
+  `users.display_name` plaintext, корневой `.env` вне загрузки скриптов,
+  `APP_VERSION` хардкод, стейджинг-окружение.

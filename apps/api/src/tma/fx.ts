@@ -16,6 +16,7 @@ import { todayInTz } from '../bot/parse';
 import { buildAnalysis, fxPairDefs, histOf, localStamp } from '../services/fx';
 import {
   bad,
+  dupResult,
   err,
   fail,
   fxGet,
@@ -162,7 +163,7 @@ export function registerTmaFx(
       if (r.meta.changes === 0) {
         // гонка: вставку проглотил UNIQUE — отдаём существующую строку
         const dup = await repo.findExchangeByKey(key);
-        return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+        return dupResult(c, dup);
       }
       return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
     }),

@@ -30,6 +30,7 @@ import {
   bad,
   CCY_RE,
   dayInRange,
+  dupResult,
   err,
   fail,
   fxGet,
@@ -491,7 +492,7 @@ export function registerTmaApi(
     });
     if (r.meta.changes === 0) {
       const dup = b.client_id ? await repo.findExpenseByKey(key) : null;
-      return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+      return dupResult(c, dup);
     }
     return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
   });
@@ -720,7 +721,7 @@ export function registerTmaApi(
     });
     if (r.meta.changes === 0) {
       const dup = b.client_id ? await repo.findIncomeByKey(key) : null;
-      return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+      return dupResult(c, dup);
     }
     return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
   });
@@ -987,7 +988,7 @@ export function registerTmaApi(
     });
     if (r.meta.changes === 0) {
       const dup = b.client_id ? await repo.findCommitmentPaymentByKey(key) : null;
-      return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+      return dupResult(c, dup);
     }
     return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
   });

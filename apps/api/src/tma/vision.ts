@@ -70,15 +70,7 @@ export function registerTmaVision(
     }
     // дневной лимит — тот же claim-бакет, что у бота ('vision', '<today>:<n>')
     const today = todayInTz(p.timezone, new Date());
-    let claimed = false;
-    for (let n = 1; n <= VISION_DAILY_LIMIT; n++) {
-      const r = await repo.claimReminder('vision', `${today}:${n}`);
-      if (r.meta.changes === 1) {
-        claimed = true;
-        break;
-      }
-    }
-    if (!claimed) {
+    if (!(await repo.claimVisionSlot(today, VISION_DAILY_LIMIT))) {
       return c.json(err('limit', 'Лимит: 20 скриншотов в день — попробуйте завтра', 429).body, 429);
     }
     try {

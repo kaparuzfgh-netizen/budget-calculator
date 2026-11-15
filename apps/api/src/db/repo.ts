@@ -644,6 +644,28 @@ export function scoped(db: Env['DB'], userId: number) {
         .bind(userId, kind, key)
         .run();
     },
+    /**
+     * Дневной лимит vision-скриншотов (A2-9): занятые слоты — одним SELECT,
+     * свободный — одним claim (ключ '<YYYY-MM-DD>:<n>', n = 1..limit).
+     * Было: до `limit` INSERT подряд на запрос. true — слот наш.
+     */
+    async claimVisionSlot(dayIso: string, limit: number): Promise<boolean> {
+      const taken = await db
+        .prepare("SELECT key FROM reminder_log WHERE user_id = ? AND kind = 'vision' AND key LIKE ?")
+        .bind(userId, `${dayIso}:%`)
+        .all<{ key: string }>();
+      const used = new Set(taken.results.map((r) => r.key));
+      for (let n = 1; n <= limit; n++) {
+        if (used.has(`${dayIso}:${n}`)) continue;
+        const r = await db
+          .prepare("INSERT OR IGNORE INTO reminder_log (user_id, kind, key) VALUES (?, 'vision', ?)")
+          .bind(userId, `${dayIso}:${n}`)
+          .run();
+        if (r.meta.changes === 1) return true;
+        used.add(`${dayIso}:${n}`); // гонка: слот занял другой запрос — следующий
+      }
+      return false;
+    },
     /** /export — только собственные строки пользователя, без секретов/хэшей. */
     async exportUserData() {
       const [profile, commitments, commitPays, expenses, income, debts, debtEvents, loans, loanEvents, exchanges, categories] =
@@ -1391,6 +1413,15 @@ export function accessRepo(db: Env['DB']) {
     cleanupReminderLog() {
       return db
         .prepare("DELETE FROM reminder_log WHERE sent_at < datetime('now','-400 days') AND kind != 'kb_removed'")
+        .run();
+    },
+    /**
+     * audit_log старше 400 дней, кроме 'id_reply' — этот action гейтит
+     * «/id отвечаем один раз» (при unset owner), удаление сломало бы его.
+     */
+    cleanupAuditLog() {
+      return db
+        .prepare("DELETE FROM audit_log WHERE created_at < datetime('now','-400 days') AND action != 'id_reply'")
         .run();
     },
 

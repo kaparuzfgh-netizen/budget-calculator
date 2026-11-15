@@ -1,4 +1,0 @@
-{
-  "_comment": "Скопируйте в .deploy.json (он в .gitignore) и впишите id развёртывания — тогда npm run deploy будет обновлять его, а не создавать новое. Id виден в `npx clasp deployments` и в URL веб-приложения: https://script.google.com/macros/s/<deploymentId>/exec",
-  "deploymentId": "AKfycb..."
-}

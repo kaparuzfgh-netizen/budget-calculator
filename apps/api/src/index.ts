@@ -1,7 +1,8 @@
 import { createRouter } from './http/router';
 import { configureDataKey, hasDataKey } from './db/crypto';
 import { runEncryptionBackfill } from './services/encryption';
-import { runReminders } from './services/reminders';
+import { notifyOwner, runReminders } from './services/reminders';
+import { sanitizeTelegramError } from './telegram/client';
 import type { Env } from './env';
 
 const app = createRouter();
@@ -18,6 +19,12 @@ export default {
     }
     // Backfill до напоминаний; ошибка не должна блокировать напоминания.
     ctx.waitUntil(runEncryptionBackfill(env.DB).catch((e) => console.error('encryptBackfill:', e)));
-    ctx.waitUntil(runReminders(env, new Date()));
+    // A2-2: тик целиком упал (до/вне по-пользовательского catch) —
+    // без алерта поломку видно только в tail. Сообщаем владельцу.
+    ctx.waitUntil(
+      runReminders(env, new Date()).catch((e) =>
+        notifyOwner(env, undefined, `⚠️ Cron-тик напоминаний упал (${sanitizeTelegramError(e)})`),
+      ),
+    );
   },
 } satisfies ExportedHandler<Env>;

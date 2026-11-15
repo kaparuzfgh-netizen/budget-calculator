@@ -82,6 +82,14 @@ export const idOf = (c: TmaContext): number | null => {
 
 export const okJson = (c: TmaContext, body: unknown, status = 200) => c.json(body, status as 200);
 
+/**
+ * Дедуп по source_key после INSERT OR IGNORE (A2-7): строка найдена →
+ * {id, duplicate}; проигранная гонка без видимой строки → честный 409
+ * (клиент повторит), а не фиктивный id: 0.
+ */
+export const dupResult = (c: TmaContext, dup: { id: number } | null) =>
+  dup ? okJson(c, { id: dup.id, duplicate: true }) : c.json(err('conflict', 'Конфликт записи — повторите запрос', 409).body, 409);
+
 /** FX-резолвер как в боте (кэш D1 → провайдер). */
 export const fxGet = (c: TmaContext, fx: FxProvider) => (ccys: string[]) =>
   getFxRates(c.env.DB, fx, ccys, new Date());

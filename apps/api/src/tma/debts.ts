@@ -18,6 +18,7 @@ import { buildDebtCtx, debtView, type DebtView } from '../services/debts';
 import { buildLoanCtx, loanView, type LoanView } from '../services/loans';
 import {
   bad,
+  dupResult,
   err,
   fail,
   fxGet,
@@ -221,7 +222,7 @@ export function registerTmaDebts(
       if (r.meta.changes === 0) {
         // гонка: вставку проглотил UNIQUE — отдаём существующую строку
         const dup = key ? await repo.findDebtByKey(key) : null;
-        return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+        return dupResult(c, dup);
       }
       return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
     }),
@@ -329,7 +330,7 @@ export function registerTmaDebts(
       });
       if (r.meta.changes === 0) {
         const dup = b.client_id ? await repo.findDebtEventByKey(key) : null;
-        return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+        return dupResult(c, dup);
       }
       return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
     }),
@@ -434,7 +435,7 @@ export function registerTmaDebts(
       });
       if (r.meta.changes === 0) {
         const dup = key ? await repo.findLoanByKey(key) : null;
-        return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+        return dupResult(c, dup);
       }
       return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
     }),
@@ -512,7 +513,7 @@ export function registerTmaDebts(
       });
       if (r.meta.changes === 0) {
         const dup = b.client_id ? await repo.findLoanEventByKey(key) : null;
-        return okJson(c, { id: dup?.id ?? 0, duplicate: true });
+        return dupResult(c, dup);
       }
       return okJson(c, { id: Number(r.meta.last_row_id) }, 201);
     }),

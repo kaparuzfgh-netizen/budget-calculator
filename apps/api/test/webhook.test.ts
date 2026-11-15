@@ -8,6 +8,7 @@ import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
 import { timingSafeEqualStr, verifyWebhookSecret } from '../src/http/security';
+import { configureDataKey } from '../src/db/crypto';
 import type { TelegramClient } from '../src/telegram/client';
 import { buildSetWebhookPayload, maskUrl, redact } from '../../../scripts/webhook-utils.mjs';
 
@@ -308,6 +309,43 @@ describe('доступ', () => {
       expect(logs).not.toContain(leak);
     }
     spy.mockRestore();
+  });
+});
+
+describe('fail-closed DATA_KEY (A2-8)', () => {
+  const req = (path: string, body: unknown, headers: Record<string, string>) =>
+    new Request(`https://test.local${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+
+  it('без DATA_KEY → 503 на /telegram/* и /api/tma/*; /health и битый ключ — тоже контролируемо', async () => {
+    try {
+      const noKey = testEnv({ DATA_KEY: '' });
+      const w = await app.fetch(
+        req('/telegram/webhook', msg(200, 1, '/start'), {
+          'X-Telegram-Bot-Api-Secret-Token': SECRET,
+          'Content-Type': 'application/json',
+        }),
+        noKey,
+      );
+      expect(w.status).toBe(503);
+      const a = await app.fetch(
+        req('/api/tma/auth', { initData: 'x=1' }, { 'Content-Type': 'application/json' }),
+        noKey,
+      );
+      expect(a.status).toBe(503);
+      // невалидный ключ (не base64/не 32 байта) — тот же fail-closed
+      const badKey = await app.fetch(
+        req('/api/tma/auth', { initData: 'x=1' }, { 'Content-Type': 'application/json' }),
+        testEnv({ DATA_KEY: 'not-valid-base64!!!' }),
+      );
+      expect(badKey.status).toBe(503);
+      // /health жив и без ключа — мониторинг не должен зависеть от DATA_KEY
+      const h = await app.fetch(new Request('https://test.local/health'), noKey);
+      expect(h.status).toBe(200);
+      expect(((await h.json()) as { ok: boolean }).ok).toBe(true);
+    } finally {
+      // master-ключ — модульное состояние: возвращаем рабочий для других тестов
+      configureDataKey(env.DATA_KEY as string);
+    }
   });
 });
 

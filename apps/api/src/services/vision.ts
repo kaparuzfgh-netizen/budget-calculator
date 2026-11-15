@@ -79,16 +79,9 @@ export async function handleVisionPhoto(
   }
   const now = deps.now ?? new Date();
   const today = todayInTz(profile.timezone, now);
-  // 3) дневной лимит 20 — claim INSERT OR IGNORE (редоставка webhook не жжёт квоту)
-  let claimed = false;
-  for (let n = 1; n <= VISION_DAILY_LIMIT; n++) {
-    const c = await repo.claimReminder('vision', `${today}:${n}`);
-    if (c.meta.changes === 1) {
-      claimed = true;
-      break;
-    }
-  }
-  if (!claimed) {
+  // 3) дневной лимит 20 — claim-слоты в reminder_log (редоставка webhook
+  // не жжёт квоту); A2-9: один SELECT + один claim вместо цикла INSERT.
+  if (!(await repo.claimVisionSlot(today, VISION_DAILY_LIMIT))) {
     await say(VISION_DAILY_LIMIT_TEXT);
     return;
   }

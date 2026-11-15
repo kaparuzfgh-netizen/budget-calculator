@@ -11,7 +11,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "npm run test:api",
+    "test": "npm run test:api && npm run test:web",
     "wrangler": "npm exec -w apps/api -- wrangler",
     "lint": "eslint scripts apps",
     "lint:sh": "node scripts/lint-sh.js",
@@ -24,8 +24,9 @@
     "webhook:info": "node scripts/telegram-webhook.mjs info",
     "webhook:delete": "node scripts/telegram-webhook.mjs delete",
     "test:api": "npm run test -w apps/api",
+    "test:web": "npm run test -w apps/web",
     "build:web": "npm run build -w apps/web",
-    "check": "npm run lint && npm run typecheck && npm run test:api && npm run build:web",
+    "check": "npm run lint && npm run typecheck && npm run test:api && npm run test:web && npm run build:web",
     "prepare": "node scripts/install-hooks.js"
   },
   "devDependencies": {

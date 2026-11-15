@@ -140,6 +140,23 @@ function nextDue(dueDay: number, lp: LocalParts): { y: number; m: number; d: num
   return dd;
 }
 
+/**
+ * Best-effort алерт владельцу (A2-2): при сбоях cron — иначе поломку
+ * видно только в `wrangler tail`, куда никто не смотрит. Молчит без
+ * OWNER_TELEGRAM_ID; ошибка отправки глотается — алерт не роняет тик.
+ */
+export async function notifyOwner(env: Env, tg: TelegramClient | undefined, text: string): Promise<void> {
+  const ownerId = (env.OWNER_TELEGRAM_ID ?? '').trim();
+  if (!ownerId || !/^\d+$/.test(ownerId)) return;
+  const client = tg ?? (env.TELEGRAM_BOT_TOKEN ? createTelegramClient({ token: env.TELEGRAM_BOT_TOKEN }) : undefined);
+  if (!client) return;
+  try {
+    await client.sendMessage(ownerId, text);
+  } catch {
+    /* алерт best-effort: сбой отправки не должен ломать тик */
+  }
+}
+
 export async function runReminders(
   env: Env,
   now: Date,
@@ -154,6 +171,7 @@ export async function runReminders(
   try {
     await access.cleanupProcessedUpdates();
     await access.cleanupReminderLog();
+    await access.cleanupAuditLog();
   } catch (e) {
     console.warn(`reminders: cleanup failed (${sanitizeTelegramError(e)})`);
   }
@@ -388,6 +406,10 @@ export async function runReminders(
     }
   }
   console.log(`reminders: ${sent} sent, ${skipped} deduped, ${failed} failed`);
+  // A2-2: были пользователи с ошибкой — предупреждаем владельца.
+  if (failed > 0) {
+    await notifyOwner(env, tg, `⚠️ Напоминания: ошибка у ${failed} из ${ids.length} пользователей — см. логи воркера`);
+  }
 }
 
 /** День и месяц дедлайна для текста. */
