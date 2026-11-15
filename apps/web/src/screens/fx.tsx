@@ -97,7 +97,7 @@ export function FxScreen({ api, nav, onFatal }: ScreenProps) {
       </h2>
       <div class={`${listCardCls} mt-2`}>
         {d.exchanges.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {d.exchanges.map((x) => (
               <ExchangeRow
                 key={x.id}

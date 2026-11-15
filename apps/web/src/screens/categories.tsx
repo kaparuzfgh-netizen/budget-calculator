@@ -62,7 +62,7 @@ function CatRow({
       {edit ? (
         <div class="flex items-center gap-2">
           <input
-            class="w-full min-w-0 flex-1 rounded-lg border border-white/10 bg-zinc-950 px-2.5 py-1.5 text-[15px] text-zinc-100 outline-none focus:ring-2 focus:ring-sky-500/60"
+            class="w-full min-w-0 flex-1 rounded-lg border border-line bg-zinc-950 px-2.5 py-1.5 text-[15px] text-zinc-100 outline-none focus:ring-2 focus:ring-sky-500/60"
             value={name}
             maxLength={32}
             onInput={(e) => setName((e.target as HTMLInputElement).value)}
@@ -218,7 +218,7 @@ export function CategoriesScreen({ api, nav, onFatal }: ScreenProps) {
 
       <div class={`${listCardCls} mt-4`}>
         {active.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {active.map((x) => (
               <CatRow key={x.id} api={api} cat={x} onDone={(m) => { nav.flash(m); q.reload(); }} onFlash={nav.flash} />
             ))}
@@ -233,7 +233,7 @@ export function CategoriesScreen({ api, nav, onFatal }: ScreenProps) {
             <Archive size={16} strokeWidth={1.5} /> Архив
           </h2>
           <div class={`${listCardCls} mt-2`}>
-            <ul class="divide-y divide-white/5">
+            <ul class="divide-y divide-line-soft">
               {archived.map((x) => (
                 <CatRow key={x.id} api={api} cat={x} onDone={(m) => { nav.flash(m); q.reload(); }} onFlash={nav.flash} />
               ))}

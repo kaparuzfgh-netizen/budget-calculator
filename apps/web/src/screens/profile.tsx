@@ -5,7 +5,8 @@
  *   Секции: ДОХОД (валюта + «Базовый доход» под «Ещё ▸»; 0 — вычисляется),
  *   БЮДЖЕТ (living_cap+living_currency+expense_currency — сервер пересчитает
  *   недельный бюджет ×12/52), ЧАСОВОЙ ПОЯС, НАПОМИНАНИЯ (4 переключателя),
- *   ДАННЫЕ (экспорт JSON через getBlob; удаление — в боте).
+ *   ВНЕШНИЙ ВИД (тема — клиентская, localStorage), ДАННЫЕ (экспорт JSON
+ *   через getBlob; удаление — в боте).
  * Регулярные платежи — commitments.tsx, редактор каденса — cadence.tsx.
  * После мутации — reload/возврат на экран-источник со свежими данными.
  */
@@ -23,6 +24,7 @@ import {
   Plus,
   Receipt,
   Settings,
+  SunMoon,
   TrendingUp,
   Upload,
   Wallet,
@@ -33,6 +35,7 @@ import type { Api, CommitmentsList, Profile } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import type { SelectOption } from '../ui';
 import { amountError, currencyError, fmtMinor, parseAmount, timezoneError, todayIso } from '../fmt';
+import { getTheme, setTheme } from '../theme';
 import {
   cardCls,
   CcySelect,
@@ -183,10 +186,10 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
       </div>
       <div class={`${listCardCls} mt-2`}>
         {com.data.commitments.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {com.data.commitments.map((x) => (
               <li
-                class={`${liCls} cursor-pointer transition hover:bg-white/5${x.active ? '' : ' opacity-50'}`}
+                class={`${liCls} cursor-pointer transition hover:bg-fill${x.active ? '' : ' opacity-50'}`}
                 onClick={() => nav.push({ id: 'commitment', commitmentId: x.id })}
               >
                 <div class={rowCls}>
@@ -273,7 +276,7 @@ function Switch({
           disabled={busy}
           onChange={() => onToggle()}
         />
-        <span class="absolute inset-0 rounded-full bg-white/15 transition peer-checked:bg-sky-500 peer-disabled:opacity-50" />
+        <span class="absolute inset-0 rounded-full bg-fill-3 transition peer-checked:bg-sky-500 peer-disabled:opacity-50" />
         <span class="absolute left-[3px] top-[3px] h-[21px] w-[21px] rounded-full bg-white transition peer-checked:translate-x-[19px]" />
       </span>
     </div>
@@ -374,6 +377,9 @@ function ProfileForms({
   // экспорт
   const [expBusy, setExpBusy] = useState(false);
   const [expErr, setExpErr] = useState<string | null>(null);
+
+  // тема — клиентская настройка (localStorage), применяется мгновенно
+  const [light, setLight] = useState(() => getTheme() === 'light');
 
   const saveIncome = async (ev: Event) => {
     ev.preventDefault();
@@ -663,7 +669,7 @@ function ProfileForms({
         <Bell size={16} strokeWidth={1.5} /> Напоминания
       </h2>
       <div class={`${listCardCls} mt-2`}>
-        <ul class="divide-y divide-white/5">
+        <ul class="divide-y divide-line-soft">
           {REMINDERS.map((r) => (
             <li key={r.key}>
               <Switch
@@ -719,7 +725,7 @@ function ProfileForms({
         <Zap size={16} strokeWidth={1.5} /> Возможности
       </h2>
       <div class={`${listCardCls} mt-2`}>
-        <ul class="divide-y divide-white/5">
+        <ul class="divide-y divide-line-soft">
           {FEATURES.map((f) => (
             <li key={f.key}>
               <Switch
@@ -734,6 +740,24 @@ function ProfileForms({
           ))}
         </ul>
         {featErr && <p class="px-4 pb-3 text-sm text-red-400">{featErr}</p>}
+      </div>
+
+      <h2 class={`${headCls} mt-6`}>
+        <SunMoon size={16} strokeWidth={1.5} /> Внешний вид
+      </h2>
+      <div class={`${listCardCls} mt-2`}>
+        <Switch
+          icon={<SunMoon size={17} strokeWidth={1.5} class="flex-none text-zinc-400" />}
+          label="Светлая тема"
+          hint="по умолчанию — как в Telegram"
+          checked={light}
+          busy={false}
+          onToggle={() => {
+            const t = light ? 'dark' : 'light';
+            setTheme(t);
+            setLight(t === 'light');
+          }}
+        />
       </div>
 
       <h2 class={`${headCls} mt-6`}>

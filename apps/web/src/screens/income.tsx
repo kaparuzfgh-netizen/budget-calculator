@@ -74,7 +74,7 @@ export function IncomeScreen({ api, nav, onFatal }: ScreenProps) {
       <h2 class={`${headCls} mt-6`}>Записи месяца</h2>
       <div class={`${listCardCls} mt-2`}>
         {d.entries.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {d.entries.map((e) => (
               <li class="px-4 py-3">
                 <div class={rowCls}>

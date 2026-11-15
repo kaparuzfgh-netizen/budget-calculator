@@ -67,7 +67,7 @@ const saveCustomCcys = (xs: readonly string[]) => {
 };
 
 const chipCls =
-  'rounded-full border border-white/10 bg-zinc-900 px-3.5 py-2 text-[13px] text-zinc-300 transition hover:border-white/20';
+  'rounded-full border border-line bg-zinc-900 px-3.5 py-2 text-[13px] text-zinc-300 transition hover:border-line-strong';
 const chipOnCls =
   'rounded-full border border-sky-500/60 bg-sky-500/15 px-3.5 py-2 text-[13px] text-sky-300';
 
@@ -149,7 +149,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
       <h1 class={h1Cls}>
         <ChartColumn size={20} strokeWidth={1.5} class="text-sky-400" /> Отчёты
       </h1>
-      <div class="mb-3 flex gap-1 rounded-xl border border-white/10 bg-zinc-900 p-1">
+      <div class="mb-3 flex gap-1 rounded-xl border border-line bg-zinc-900 p-1">
         {PERIODS.map((x) => (
           <button
             type="button"
@@ -248,7 +248,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
       <div class="mb-4 flex items-center justify-center gap-3">
         <button
           type="button"
-          class="rounded-lg p-2 text-zinc-400 transition hover:bg-white/5 hover:text-zinc-200"
+          class="rounded-lg p-2 text-zinc-400 transition hover:bg-fill hover:text-zinc-200"
           onClick={() => setOffset((o) => Math.max(-60, o - 1))}
         >
           <ChevronLeft size={18} strokeWidth={1.5} />
@@ -256,7 +256,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
         <b class="min-w-24 text-center text-[15px]">{r?.label ?? '…'}</b>
         <button
           type="button"
-          class="rounded-lg p-2 text-zinc-400 transition hover:bg-white/5 hover:text-zinc-200 disabled:opacity-30"
+          class="rounded-lg p-2 text-zinc-400 transition hover:bg-fill hover:text-zinc-200 disabled:opacity-30"
           disabled={offset >= 0}
           onClick={() => setOffset((o) => Math.min(0, o + 1))}
         >
@@ -274,19 +274,19 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
       {!rep.loading && r && (
         <>
           <div class="grid grid-cols-3 gap-2.5">
-            <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
+            <div class="min-w-0 rounded-2xl border border-line bg-zinc-900/80 p-3 text-center shadow-lg shadow-shade">
               <div class="whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums text-emerald-400">
                 {fmtMinorAuto(r.received.total, c)}
               </div>
               <div class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-400">Получено</div>
             </div>
-            <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
+            <div class="min-w-0 rounded-2xl border border-line bg-zinc-900/80 p-3 text-center shadow-lg shadow-shade">
               <div class="whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums">
                 {fmtMinorAuto(r.spent.total, c)}
               </div>
               <div class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-400">Потрачено</div>
             </div>
-            <div class="min-w-0 rounded-2xl border border-white/10 bg-zinc-900/80 p-3 text-center shadow-lg shadow-black/30">
+            <div class="min-w-0 rounded-2xl border border-line bg-zinc-900/80 p-3 text-center shadow-lg shadow-shade">
               <div
                 class={`whitespace-nowrap text-[clamp(11px,3.6vw,15px)] font-semibold tabular-nums ${r.net >= 0 ? 'text-emerald-400' : 'text-red-400'}`}
               >
@@ -336,7 +336,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                 {Math.round(r.living_limit.used_pct * 100)}% (из {fmtMinorAuto(r.living_limit.cap, c)})
               </span>
             </div>
-            <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
+            <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-fill-2">
               <i
                 class={`block h-full rounded-full ${r.living_limit.used_pct > 1 ? 'bg-red-400' : 'bg-sky-500'}`}
                 style={{ width: `${Math.min(100, Math.round(r.living_limit.used_pct * 100))}%` }}
@@ -361,7 +361,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                         {fmtMinorAuto(x.amount, c)} · {Math.round(x.share * 100)}%
                       </span>
                     </div>
-                    <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-fill-2">
                       <i class="block h-full rounded-full bg-sky-500" style={{ width: `${Math.round(x.share * 100)}%` }} />
                     </div>
                   </div>
@@ -428,7 +428,7 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
               )}
             </div>
             {selBucket && (
-              <p class="mt-2 rounded-lg bg-white/5 px-3 py-2 text-center text-[12px] text-zinc-300">
+              <p class="mt-2 rounded-lg bg-fill px-3 py-2 text-center text-[12px] text-zinc-300">
                 <b>{selBucket.key.length > 7 ? fmtDay(selBucket.key) : selBucket.label}</b>
                 {' · '}
                 {fmtMinorAuto(selBucket.living + selBucket.other, c)} потрачено
@@ -451,10 +451,10 @@ export function ReportScreen({ api, nav, onFatal }: ScreenProps) {
                 </Info>
               </h2>
               <div class={`${listCardCls} mt-2`}>
-                <ul class="divide-y divide-white/5">
+                <ul class="divide-y divide-line-soft">
                   {r.top_expenses.map((e) => (
                     <li
-                      class={`${liCls} cursor-pointer transition hover:bg-white/5`}
+                      class={`${liCls} cursor-pointer transition hover:bg-fill`}
                       onClick={() => nav.push({ id: 'expense', expenseId: e.id })}
                     >
                       <div class={rowCls}>

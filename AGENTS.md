@@ -104,6 +104,10 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     (`setChatMenuButton`, `web_app` → `MINI_APP_URL` из `[vars]`): ставится
     в `npm run setup` или `node scripts/telegram-webhook.mjs menu <url>`.
     Inline-кнопки «📱 Приложение» в экранах бота нет.
+    Темы dark/light — CSS-переменные палитры (`html.light` в index.css):
+    полупрозрачные оверлеи — только через токены line/fill/scrim/shade
+    (@theme), literal `white|black/<alpha>` в классах запрещён
+    (`text-white` на акцентных кнопках — исключение).
 16. **Vision (шаг 7):** `profiles.vision_enabled` — opt-in (DEFAULT 0);
     без флага фото провайдеру не уходит. Провайдеры: Gemini (`GEMINI_API_KEY`,
     модель `GEMINI_MODEL`, дефолт `gemini-3.5-flash-lite`) → резерв Groq

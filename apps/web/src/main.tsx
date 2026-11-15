@@ -2,8 +2,9 @@
  * main.tsx — точка входа Mini App (веха G: экраны на Preact).
  *
  * Флоу: Telegram.WebApp.initData → POST /api/tma/auth → JWT в памяти
- * (не в localStorage) → <App/> со стеком экранов. Тема — фиксированная
- * тёмная (slate-950), хром вебвью подгоняется в applyTheme.
+ * (не в localStorage) → <App/> со стеком экранов. Тема — из theme.ts:
+ * выбор пользователя ?? Telegram colorScheme (см. переключатель в
+ * профиле), хром вебвью подгоняется в applyTheme.
  * Сохранены экраны: «откройте через бота», «нет доступа» (401/403),
  * сетевая ошибка + кнопка «Повторить».
  */
@@ -14,6 +15,7 @@ import { ApiError, createApi } from './api';
 import type { Api, AuthResponse } from './api';
 import { App } from './app';
 import { applyTheme } from './tg';
+import { applyNow, getTheme, initTheme } from './theme';
 import { ErrorView, Loading } from './ui';
 
 const wa = window.Telegram?.WebApp;
@@ -99,12 +101,19 @@ function Root() {
   }
 }
 
+// тема до первого рендера — иначе вспышка дефолтной
+initTheme();
+
 // ── вход ──
 // ?demo=<экран> — визуальный предпросмотр РЕАЛЬНЫХ экранов в обычном
 // браузере: мок-данные (demo/mock.ts), без Telegram и auth;
 // code-split — в прод-бандл не попадает. Список экранов — в demo/tw.tsx.
-const demo = new URLSearchParams(location.search).get('demo');
+// &theme=dark|light — принудительная тема для превью (без сохранения).
+const params = new URLSearchParams(location.search);
+const demo = params.get('demo');
 if (demo !== null) {
+  const t = params.get('theme');
+  if (t === 'light' || t === 'dark') applyNow(t);
   void import('./demo/tw').then((m) => m.mountDemo(demo, rootEl));
 } else if (!wa) {
   render(
@@ -115,7 +124,7 @@ if (demo !== null) {
     rootEl,
   );
 } else {
-  applyTheme(wa);
+  applyTheme(wa, getTheme());
   if (!wa.initData) {
     render(
       <ErrorView

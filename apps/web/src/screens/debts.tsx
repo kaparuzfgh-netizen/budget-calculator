@@ -83,7 +83,7 @@ const apiErr = (e: unknown, fallback: string) =>
 
 /** Кнопка-режим операции в карточке кредита/займа (grid .menu). */
 const actionTileCls =
-  'flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-zinc-900/80 py-3 text-[14px] font-medium text-zinc-100 transition hover:bg-zinc-800/80';
+  'flex items-center justify-center gap-1.5 rounded-xl border border-line bg-zinc-900/80 py-3 text-[14px] font-medium text-zinc-100 transition hover:bg-zinc-800/80';
 const actionTileOnCls =
   'flex items-center justify-center gap-1.5 rounded-xl border border-sky-500/60 bg-sky-500/15 py-3 text-[14px] font-medium text-sky-300';
 
@@ -110,10 +110,10 @@ export function DebtsScreen({ api, nav, onFatal }: ScreenProps) {
       </div>
       <div class={listCardCls}>
         {d.debts.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {d.debts.map((x) => (
               <li
-                class={`${liCls} cursor-pointer transition hover:bg-white/5`}
+                class={`${liCls} cursor-pointer transition hover:bg-fill`}
                 onClick={() => nav.push({ id: 'debt', debtId: x.id })}
               >
                 <div class={rowCls}>
@@ -226,7 +226,7 @@ export function DebtScreen({ api, nav, onFatal, debtId }: ScreenProps & { debtId
       </h2>
       <div class={`${listCardCls} mt-2`}>
         {v.events.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {[...v.events].reverse().map((e) => (
               <EventRow
                 key={e.id}
@@ -373,7 +373,7 @@ function PrepayForm({ api, debt, done }: FormProps) {
         </button>
       </form>
       {preview && (
-        <div class="mt-3 border-t border-white/10 pt-3">
+        <div class="mt-3 border-t border-line pt-3">
           <div class={rowCls}>
             <span>Остаток</span>
             <span>

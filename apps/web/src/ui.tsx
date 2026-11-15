@@ -24,16 +24,16 @@ import { CCY_LIST } from './fmt';
 
 /** Поле ввода/селект. */
 export const inputCls =
-  'w-full rounded-xl border border-white/10 bg-zinc-950 px-3 py-2.5 text-[15px] text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:ring-2 focus:ring-sky-500/60';
+  'w-full rounded-xl border border-line bg-zinc-950 px-3 py-2.5 text-[15px] text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:ring-2 focus:ring-sky-500/60';
 /** Компактное поле — для плотных списков (строки разбора скриншота и т.п.). */
 export const smInputCls =
-  'w-full rounded-lg border border-white/10 bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:ring-2 focus:ring-sky-500/60';
+  'w-full rounded-lg border border-line bg-zinc-950 px-2.5 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:ring-2 focus:ring-sky-500/60';
 /** Карточка с контентом (padding у самой карточки). */
 export const cardCls =
-  'rounded-2xl border border-white/10 bg-zinc-900/80 p-4 shadow-lg shadow-black/30';
+  'rounded-2xl border border-line bg-zinc-900/80 p-4 shadow-lg shadow-shade';
 /** Карточка-список: та же обводка, без отступов — у li свой padding. */
 export const listCardCls =
-  'rounded-2xl border border-white/10 bg-zinc-900/80 shadow-lg shadow-black/30';
+  'rounded-2xl border border-line bg-zinc-900/80 shadow-lg shadow-shade';
 /** Элемент списка в карточке-списке. */
 export const liCls = 'px-4 py-3';
 /** Заголовок секции (uppercase, с lucide-иконкой). */
@@ -50,16 +50,16 @@ export const primaryBtnCls =
   'flex w-full items-center justify-center gap-2 rounded-xl bg-sky-600 py-3 font-medium text-white transition hover:bg-sky-500 disabled:opacity-50 disabled:hover:bg-sky-600';
 /** Вторичная кнопка (обводка, белый текст) — экспорт и т.п. */
 export const secondaryBtnCls =
-  'flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 py-3 font-medium text-zinc-100 transition hover:bg-white/10 disabled:opacity-50';
+  'flex w-full items-center justify-center gap-2 rounded-xl border border-line bg-fill py-3 font-medium text-zinc-100 transition hover:bg-fill-2 disabled:opacity-50';
 /** Ghost-кнопка — только текст/иконка sky. */
 export const ghostBtnCls =
-  'flex w-full items-center justify-center gap-2 rounded-xl py-2.5 font-medium text-sky-400 transition hover:bg-white/5 disabled:opacity-50';
+  'flex w-full items-center justify-center gap-2 rounded-xl py-2.5 font-medium text-sky-400 transition hover:bg-fill disabled:opacity-50';
 /** Деструктивная кнопка. */
 export const dangerBtnCls =
   'flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 py-3 font-medium text-red-400 transition hover:bg-red-500/20 disabled:opacity-50';
 /** Компактная кнопка («+ Добавить», действия в строках). */
 export const smBtnCls =
-  'inline-flex items-center gap-1 rounded-lg bg-white/5 px-2.5 py-1.5 text-[13px] text-sky-400 transition hover:bg-white/10 disabled:opacity-50';
+  'inline-flex items-center gap-1 rounded-lg bg-fill px-2.5 py-1.5 text-[13px] text-sky-400 transition hover:bg-fill-2 disabled:opacity-50';
 /** Компактная деструктивная. */
 export const smDangerBtnCls =
   'inline-flex items-center gap-1 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[13px] text-red-400 transition hover:bg-red-500/20 disabled:opacity-50';
@@ -71,23 +71,23 @@ export const smDangerFillBtnCls =
   'inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-2 text-sm font-medium text-red-400 transition hover:bg-red-500/20 disabled:opacity-50';
 /** Компактный ghost — «Отмена»/«Нет» рядом с danger. */
 export const smGhostBtnCls =
-  'inline-flex flex-1 items-center justify-center gap-1 rounded-lg px-2.5 py-2 text-sm font-medium text-sky-400 transition hover:bg-white/5 disabled:opacity-50';
+  'inline-flex flex-1 items-center justify-center gap-1 rounded-lg px-2.5 py-2 text-sm font-medium text-sky-400 transition hover:bg-fill disabled:opacity-50';
 /** Плашка подтверждения деструктивного действия. */
 export const confirmCls = 'mt-2 rounded-xl border border-red-500/40 bg-red-500/10 p-3';
 /** Плашка подтверждения обычного действия (оплата и т.п.). */
-export const confirmNeutralCls = 'mt-2 rounded-xl border border-white/10 bg-white/5 p-3';
+export const confirmNeutralCls = 'mt-2 rounded-xl border border-line bg-fill p-3';
 /** Раскрытая инлайн-правка события журнала. */
-export const evEditCls = 'mt-2 rounded-xl border border-white/10 bg-zinc-950/60 p-3';
+export const evEditCls = 'mt-2 rounded-xl border border-line bg-zinc-950/60 p-3';
 /** Иконка-действие в строке списка. */
 export const rowBtnCls = 'p-1.5 text-zinc-500 transition hover:text-zinc-200 disabled:opacity-50';
 /** Одноразовое сообщение после мутации. */
 export const flashCls =
-  'sticky top-2 z-40 mb-3 flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-black/30';
+  'sticky top-2 z-40 mb-3 flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-3 text-sm font-medium text-white shadow-lg shadow-shade';
 
 /** Верхняя панель вложенных экранов (показывается при глубине ≥ 1). */
 export function TopBar({ onBack, onHome }: { onBack: () => void; onHome: () => void }) {
   const btn =
-    'flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-sky-400 transition hover:bg-white/5';
+    'flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-sky-400 transition hover:bg-fill';
   return (
     <div class="mb-4 flex items-center justify-between">
       <button type="button" class={btn} onClick={onBack}>
@@ -227,13 +227,13 @@ export function Info({ title, children }: { title: string; children: ComponentCh
       {open &&
         createPortal(
           <div
-            class="fixed inset-0 z-50 flex items-end justify-center bg-black/60"
+            class="fixed inset-0 z-50 flex items-end justify-center bg-scrim"
             onClick={() => setOpen(false)}
           >
             <div
               role="dialog"
               aria-modal="true"
-              class="w-full max-w-md rounded-t-2xl border-t border-white/10 bg-zinc-900 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
+              class="w-full max-w-md rounded-t-2xl border-t border-line bg-zinc-900 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div class="flex items-center justify-between">
@@ -241,7 +241,7 @@ export function Info({ title, children }: { title: string; children: ComponentCh
                 <button
                   type="button"
                   aria-label="Закрыть"
-                  class="rounded-full bg-white/10 p-1.5 text-zinc-400 transition hover:bg-white/20"
+                  class="rounded-full bg-fill-2 p-1.5 text-zinc-400 transition hover:bg-fill-4"
                   onClick={() => setOpen(false)}
                 >
                   <X size={14} strokeWidth={1.5} />
@@ -263,7 +263,7 @@ export function FormError({ msg }: { msg: string | null }) {
 /** Тонкая полоска «потрачено/бюджет» — нагляднее, чем «X из Y». */
 export function BudgetBar({ share, over }: { share: number; over?: boolean }) {
   return (
-    <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10">
+    <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-fill-2">
       <div
         class={`h-full rounded-full ${over ? 'bg-red-400' : 'bg-sky-500'}`}
         style={{ width: `${Math.min(100, Math.round(share * 100))}%` }}
@@ -287,7 +287,7 @@ export function PaceBar({
   return (
     <div class="flex items-center gap-2">
       <span class="w-12 flex-none text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
-      <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+      <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-fill-2">
         <div class={`h-full rounded-full ${fillCls}`} style={{ width: `${Math.min(100, Math.round(share * 100))}%` }} />
       </div>
       <span class="w-12 flex-none text-right text-[10px] tabular-nums text-zinc-500">{right}</span>
@@ -378,12 +378,12 @@ export function Select({
         <ChevronDown size={compact ? 14 : 16} strokeWidth={1.5} class="flex-none text-zinc-400" />
       </button>
       {open && (
-        <div class="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-xl border border-white/10 bg-zinc-900 shadow-xl shadow-black/40">
+        <div class="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-auto rounded-xl border border-line bg-zinc-900 shadow-xl shadow-shade">
           {searchable && (
-            <div class="sticky top-0 border-b border-white/10 bg-zinc-900 p-1.5">
+            <div class="sticky top-0 border-b border-line bg-zinc-900 p-1.5">
               <input
                 autoFocus
-                class="w-full rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 text-[14px] text-zinc-100 placeholder-zinc-500 outline-none focus:ring-2 focus:ring-sky-500/60"
+                class="w-full rounded-lg border border-line bg-zinc-950 px-3 py-2 text-[14px] text-zinc-100 placeholder-zinc-500 outline-none focus:ring-2 focus:ring-sky-500/60"
                 placeholder="Поиск…"
                 value={q}
                 onInput={(e) => setQ((e.target as HTMLInputElement).value)}
@@ -398,7 +398,7 @@ export function Select({
             <button
               key={o.value}
               type="button"
-              class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-[15px] text-zinc-100 transition hover:bg-white/5"
+              class="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-[15px] text-zinc-100 transition hover:bg-fill"
               onClick={() => {
                 onChange(o.value);
                 setOpen(false);

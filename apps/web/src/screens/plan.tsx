@@ -129,7 +129,7 @@ function CushionCard({
           {c.months} из {c.goal_months} мес
         </span>
       </div>
-      <div class="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+      <div class="mt-2 h-2 overflow-hidden rounded-full bg-fill-2">
         <div
           class={`h-full rounded-full transition-all ${done ? 'bg-emerald-400' : 'bg-sky-400'}`}
           style={{ width: `${Math.max(pct, c.minor ? 4 : 0)}%` }}
@@ -241,7 +241,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
       </h2>
       <div class={`${listCardCls} mt-2`}>
         {up.data.items.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {up.data.items.map((x) => (
               <CalendarRow key={`${x.kind}-${x.id}`} x={x} today={p.today} />
             ))}
@@ -282,7 +282,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
       </h2>
       <div class={`${listCardCls} mt-2`}>
         {p.commitments.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {p.commitments.map((x) => (
               <li class="px-4 py-3">
                 <div class={rowCls}>
@@ -298,7 +298,7 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
         ) : (
           <p class={`${mutedCls} px-4 py-3`}>Нет регулярных платежей.</p>
         )}
-        <div class={`${rowCls} border-t border-white/5 px-4 py-3`}>
+        <div class={`${rowCls} border-t border-line-soft px-4 py-3`}>
           <span>Итого</span>
           <b>{fmtMinor(p.mandatory_usd_minor, usd)}</b>
         </div>

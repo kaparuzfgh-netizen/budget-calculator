@@ -252,7 +252,7 @@ function CommitmentCard({
       </h2>
       <div class={`${listCardCls} mt-2`}>
         {payments.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {[...payments].reverse().map((e) => (
               <PaymentRow
                 key={e.id}

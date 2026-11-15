@@ -53,7 +53,7 @@ import {
 import { ShotButton } from './vision';
 
 const chipCls =
-  'inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-zinc-900 px-3.5 py-2 text-[13px] text-zinc-300 transition hover:border-white/20';
+  'inline-flex items-center gap-1.5 rounded-full border border-line bg-zinc-900 px-3.5 py-2 text-[13px] text-zinc-300 transition hover:border-line-strong';
 const chipOnCls =
   'inline-flex items-center gap-1.5 rounded-full border border-sky-500/60 bg-sky-500/15 px-3.5 py-2 text-[13px] text-sky-300';
 
@@ -106,10 +106,10 @@ export function WeekScreen({ api, nav, onFatal }: ScreenProps) {
       </div>
       <div class={`${listCardCls} mt-2`}>
         {ex.data.expenses.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {ex.data.expenses.map((e) => (
               <li
-                class={`${liCls} cursor-pointer transition hover:bg-white/5`}
+                class={`${liCls} cursor-pointer transition hover:bg-fill`}
                 onClick={() => nav.push({ id: 'expense', expenseId: e.id })}
               >
                 <div class={rowCls}>

@@ -1,7 +1,63 @@
 /* index.css — Tailwind v4 + базовые стили Mini App.
-   Фиксированная тёмная тема (slate-950/zinc), без Telegram themeParams —
-   дизайн-язык прототипа src/demo/tw.tsx перенесён на всё приложение. */
+   Темы: тёмная (дефолт) и светлая (html.light) — тот же дизайн-язык
+   прототипа src/demo/tw.tsx с инвертированной палитрой. Переключение —
+   чисто на CSS-переменных: вся палитра v4 это var(--color-*), поэтому
+   разметка не трогается; переопределяются только используемые оттенки. */
 @import "tailwindcss";
+
+/* Семантические оверлеи. Белый/чёрный с альфой нельзя инвертировать
+   через палитру — text-white на акцентных кнопках обязан остаться
+   белым, — поэтому полупрозрачные линии/заливки/скрим/тень и фон
+   страницы вынесены в токены. */
+@theme {
+  --color-line: rgb(255 255 255 / 0.10);
+  --color-line-soft: rgb(255 255 255 / 0.05);
+  --color-line-strong: rgb(255 255 255 / 0.20);
+  --color-fill: rgb(255 255 255 / 0.05);
+  --color-fill-2: rgb(255 255 255 / 0.10);
+  --color-fill-3: rgb(255 255 255 / 0.15);
+  --color-fill-4: rgb(255 255 255 / 0.20);
+  --color-scrim: rgb(0 0 0 / 0.60);
+  --color-shade: rgb(0 0 0 / 0.30);
+  --color-page: #020617;
+}
+
+/* Светлая тема: нейтрали перевёрнуты по шкале (950↔50, 900↔white…),
+   акценты затемнены до оттенков 600–700 — на белом нужен контраст;
+   оверлеи — из белого в чёрный, тень мягче. */
+html.light {
+  color-scheme: light;
+  --color-page: #f8fafc;
+  --color-zinc-950: #fafafa;
+  --color-zinc-900: #ffffff;
+  --color-zinc-800: #f4f4f5;
+  --color-zinc-700: #e4e4e7;
+  --color-zinc-600: #a1a1aa;
+  --color-zinc-500: #71717a;
+  --color-zinc-400: #52525b;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-200: #27272a;
+  --color-zinc-100: #18181b;
+  --color-sky-200: #075985;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #0284c7;
+  --color-red-300: #b91c1c;
+  --color-red-400: #dc2626;
+  --color-emerald-300: #059669;
+  --color-emerald-400: #059669;
+  --color-amber-200: #f59e0b;
+  --color-amber-300: #b45309;
+  --color-amber-400: #d97706;
+  --color-line: rgb(0 0 0 / 0.10);
+  --color-line-soft: rgb(0 0 0 / 0.05);
+  --color-line-strong: rgb(0 0 0 / 0.20);
+  --color-fill: rgb(0 0 0 / 0.05);
+  --color-fill-2: rgb(0 0 0 / 0.10);
+  --color-fill-3: rgb(0 0 0 / 0.15);
+  --color-fill-4: rgb(0 0 0 / 0.20);
+  --color-scrim: rgb(0 0 0 / 0.45);
+  --color-shade: rgb(0 0 0 / 0.12);
+}
 
 @layer base {
   html {
@@ -9,8 +65,8 @@
   }
   body {
     margin: 0;
-    background: #020617; /* slate-950 */
-    color: #f4f4f5; /* zinc-100 */
+    background: var(--color-page);
+    color: var(--color-zinc-100);
     font-family:
       -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     font-size: 15px;

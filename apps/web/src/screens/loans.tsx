@@ -56,7 +56,7 @@ const apiErr = (e: unknown, fallback: string) =>
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const actionTileCls =
-  'flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-zinc-900/80 py-3 text-[14px] font-medium text-zinc-100 transition hover:bg-zinc-800/80';
+  'flex items-center justify-center gap-1.5 rounded-xl border border-line bg-zinc-900/80 py-3 text-[14px] font-medium text-zinc-100 transition hover:bg-zinc-800/80';
 const actionTileOnCls =
   'flex items-center justify-center gap-1.5 rounded-xl border border-sky-500/60 bg-sky-500/15 py-3 text-[14px] font-medium text-sky-300';
 
@@ -77,10 +77,10 @@ export function LoansScreen({ api, nav, onFatal }: ScreenProps) {
       <h2 class={`${headCls} mt-6`}>{title}</h2>
       <div class={`${listCardCls} mt-2`}>
         {items.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {items.map((x) => (
               <li
-                class={`${liCls} cursor-pointer transition hover:bg-white/5${x.closed ? ' opacity-50' : ''}`}
+                class={`${liCls} cursor-pointer transition hover:bg-fill${x.closed ? ' opacity-50' : ''}`}
                 onClick={() => nav.push({ id: 'loan', loanId: x.id })}
               >
                 <div class={rowCls}>
@@ -210,7 +210,7 @@ export function LoanScreen({ api, nav, onFatal, loanId }: ScreenProps & { loanId
       </h2>
       <div class={`${listCardCls} mt-2`}>
         {v.events.length ? (
-          <ul class="divide-y divide-white/5">
+          <ul class="divide-y divide-line-soft">
             {[...v.events].reverse().map((e) => (
               <LoanEventRow
                 key={e.id}

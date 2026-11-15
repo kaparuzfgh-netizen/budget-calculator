@@ -317,11 +317,11 @@ function ReviewSheet({
   ];
 
   return createPortal(
-    <div class="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-scrim" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
-        class="flex max-h-[85vh] w-full max-w-md flex-col rounded-t-2xl border-t border-white/10 bg-zinc-900 shadow-2xl"
+        class="flex max-h-[85vh] w-full max-w-md flex-col rounded-t-2xl border-t border-line bg-zinc-900 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between p-5 pb-3">
@@ -329,7 +329,7 @@ function ReviewSheet({
           <button
             type="button"
             aria-label="Закрыть"
-            class="rounded-full bg-white/10 p-1.5 text-zinc-400 transition hover:bg-white/20"
+            class="rounded-full bg-fill-2 p-1.5 text-zinc-400 transition hover:bg-fill-4"
             onClick={onClose}
           >
             <X size={14} strokeWidth={1.5} />
@@ -346,7 +346,7 @@ function ReviewSheet({
           </div>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto px-5">
-          <ul class="divide-y divide-white/5 pb-2">
+          <ul class="divide-y divide-line-soft pb-2">
             {rows.map((r, i) => (
               <li key={i} class={`py-2.5 first:pt-0${r.on ? '' : ' opacity-50'}`}>
                 <div class="flex items-center gap-2">
@@ -393,7 +393,7 @@ function ReviewSheet({
             ))}
           </ul>
         </div>
-        <div class="border-t border-white/10 p-5 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]">
+        <div class="border-t border-line p-5 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]">
           <FormError msg={err} />
           <button type="button" class={primaryBtnCls} disabled={busy || !checked.length} onClick={() => void submit()}>
             {busy
@@ -414,11 +414,11 @@ function ReviewSheet({
 
 function InfoSheet({ title, text, onClose }: { title: string; text: string; onClose: () => void }) {
   return createPortal(
-    <div class="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onClose}>
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-scrim" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
-        class="w-full max-w-md rounded-t-2xl border-t border-white/10 bg-zinc-900 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
+        class="w-full max-w-md rounded-t-2xl border-t border-line bg-zinc-900 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between">
@@ -428,7 +428,7 @@ function InfoSheet({ title, text, onClose }: { title: string; text: string; onCl
           <button
             type="button"
             aria-label="Закрыть"
-            class="rounded-full bg-white/10 p-1.5 text-zinc-400 transition hover:bg-white/20"
+            class="rounded-full bg-fill-2 p-1.5 text-zinc-400 transition hover:bg-fill-4"
             onClick={onClose}
           >
             <X size={14} strokeWidth={1.5} />
@@ -448,11 +448,11 @@ function InfoSheet({ title, text, onClose }: { title: string; text: string; onCl
 
 function DupSheet({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   return createPortal(
-    <div class="fixed inset-0 z-50 flex items-end justify-center bg-black/60" onClick={onCancel}>
+    <div class="fixed inset-0 z-50 flex items-end justify-center bg-scrim" onClick={onCancel}>
       <div
         role="dialog"
         aria-modal="true"
-        class="w-full max-w-md rounded-t-2xl border-t border-white/10 bg-zinc-900 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
+        class="w-full max-w-md rounded-t-2xl border-t border-line bg-zinc-900 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <b class="text-base font-semibold text-zinc-100">Этот файл уже разбирали</b>

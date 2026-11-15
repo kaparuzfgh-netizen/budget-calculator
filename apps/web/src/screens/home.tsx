@@ -174,7 +174,6 @@ function TempoChart({ daily, today, dim, cap, proj, rate, effRate, scenario }: T
   const line = smoothPath(px, py);
   const area = `${line}L${x(today).toFixed(1)},${yBase.toFixed(1)}L${px[0]!.toFixed(1)},${yBase.toFixed(1)}Z`;
   const projY = y(Math.min(proj, yMax * 0.97));
-  const gridCls = '#3f3f46';
   return (
     <>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" class="mt-1 block h-36 w-full" aria-hidden>
@@ -190,13 +189,13 @@ function TempoChart({ daily, today, dim, cap, proj, rate, effRate, scenario }: T
         </linearGradient>
       </defs>
       {/* сетка: половина и потолок бюджета + нулевая ось */}
-      {cap > 0 && <line x1={padL} y1={y(cap / 2)} x2={W - padR} y2={y(cap / 2)} stroke={gridCls} strokeWidth="0.7" strokeDasharray="2 4" opacity="0.5" />}
-      {cap > 0 && <line x1={padL} y1={y(cap)} x2={W - padR} y2={y(cap)} stroke={gridCls} strokeWidth="0.9" strokeDasharray="4 3" opacity="0.8" />}
-      <line x1={padL} y1={yBase} x2={W - padR} y2={yBase} stroke="#52525b" strokeWidth="1" />
+      {cap > 0 && <line x1={padL} y1={y(cap / 2)} x2={W - padR} y2={y(cap / 2)} class="stroke-zinc-700" strokeWidth="0.7" strokeDasharray="2 4" opacity="0.5" />}
+      {cap > 0 && <line x1={padL} y1={y(cap)} x2={W - padR} y2={y(cap)} class="stroke-zinc-700" strokeWidth="0.9" strokeDasharray="4 3" opacity="0.8" />}
+      <line x1={padL} y1={yBase} x2={W - padR} y2={yBase} class="stroke-zinc-600" strokeWidth="1" />
       {/* вертикаль «сейчас» — как now-line в Grafana */}
-      <line x1={x(today)} y1={padT} x2={x(today)} y2={yBase} stroke="#71717a" strokeWidth="0.9" opacity="0.45" />
+      <line x1={x(today)} y1={padT} x2={x(today)} y2={yBase} class="stroke-zinc-500" strokeWidth="0.9" opacity="0.45" />
       {/* идеал: ровный график «бюджет/день × день» */}
-      <line x1={x(1)} y1={yBase} x2={x(dim)} y2={y(cap)} stroke="#a1a1aa" strokeWidth="1.1" strokeDasharray="5 3" opacity="0.75" />
+      <line x1={x(1)} y1={yBase} x2={x(dim)} y2={y(cap)} class="stroke-zinc-400" strokeWidth="1.1" strokeDasharray="5 3" opacity="0.75" />
       <path d={area} fill="url(#tempoFill)" />
       {/* свечение + сама линия факта */}
       <path d={line} fill="none" stroke={color} strokeWidth="6" strokeLinejoin="round" strokeLinecap="round" opacity="0.18" />
@@ -221,8 +220,8 @@ function TempoChart({ daily, today, dim, cap, proj, rate, effRate, scenario }: T
       )}
       {/* точка «сегодня» с ореолом + кольцо прогноза */}
       <circle cx={x(today)} cy={y(cumToday)} r="6" fill={color} opacity="0.2" />
-      <circle cx={x(today)} cy={y(cumToday)} r="3.2" fill={color} stroke="#18181b" strokeWidth="1" />
-      {proj > 0 && <circle cx={x(dim)} cy={projY} r="4" fill="#18181b" stroke={projColor} strokeWidth="1.6" />}
+      <circle cx={x(today)} cy={y(cumToday)} r="3.2" fill={color} class="stroke-zinc-900" strokeWidth="1" />
+      {proj > 0 && <circle cx={x(dim)} cy={projY} r="4" class="fill-zinc-900" stroke={projColor} strokeWidth="1.6" />}
       </svg>
       <div class="flex items-center justify-between text-[10px] text-zinc-600">
         <span>1</span>
@@ -258,7 +257,7 @@ function RaceChart({ today, dim, cap, spent, proj, rate, effRate, scenario }: Te
         <div class="relative h-3.5 rounded-full bg-zinc-800/80">
           <div
             class="absolute inset-y-0 left-0 rounded-full"
-            style={{ width: pct(Math.min(dayShare, 1)), background: 'linear-gradient(90deg,#71717a,#a1a1aa)' }}
+            style={{ width: pct(Math.min(dayShare, 1)), background: 'linear-gradient(90deg,var(--color-zinc-500),var(--color-zinc-400))' }}
           />
         </div>
       </div>
@@ -339,7 +338,7 @@ function WeekRace({ day, budget, spent, proj, rate, effRate, scenario }: {
           />
           <div
             class="absolute inset-y-0 left-0 rounded-full"
-            style={{ width: pct(day / 7), background: 'linear-gradient(90deg,#71717a,#a1a1aa)' }}
+            style={{ width: pct(day / 7), background: 'linear-gradient(90deg,var(--color-zinc-500),var(--color-zinc-400))' }}
           />
         </div>
         <div class="mt-1 grid grid-cols-7 text-center text-[9px] leading-none">
@@ -577,9 +576,9 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
   const monthWord = MONTHS[Number(u.month.slice(5, 7)) - 1]!;
 
   const quickCls =
-    'flex flex-col items-center gap-1.5 rounded-2xl border border-white/10 bg-zinc-900/80 py-3.5 text-[13px] text-zinc-100 shadow-lg shadow-black/30 transition hover:bg-zinc-800/80';
+    'flex flex-col items-center gap-1.5 rounded-2xl border border-line bg-zinc-900/80 py-3.5 text-[13px] text-zinc-100 shadow-lg shadow-shade transition hover:bg-zinc-800/80';
   const tileCls =
-    'flex items-center gap-2.5 rounded-2xl border border-white/10 bg-zinc-900/80 px-4 py-3.5 text-[15px] text-zinc-100 shadow-lg shadow-black/30 transition hover:bg-zinc-800/80';
+    'flex items-center gap-2.5 rounded-2xl border border-line bg-zinc-900/80 px-4 py-3.5 text-[15px] text-zinc-100 shadow-lg shadow-shade transition hover:bg-zinc-800/80';
   const iconCls = 'text-sky-400';
 
   return (
@@ -588,7 +587,7 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
         <h1 class="text-xl font-semibold tracking-tight">Обзор{name ? ` · ${name}` : ''}</h1>
         <button
           type="button"
-          class="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-zinc-800 text-base font-semibold text-zinc-100 transition hover:bg-zinc-700"
+          class="flex h-11 w-11 items-center justify-center rounded-full border border-line bg-zinc-800 text-base font-semibold text-zinc-100 transition hover:bg-zinc-700"
           onClick={() => nav.push({ id: 'profile' })}
           title="Профиль"
         >
@@ -624,12 +623,12 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
             </Info>
           </h2>
           <div class={`${listCardCls} mt-2`}>
-            <ul class="divide-y divide-white/5">
+            <ul class="divide-y divide-line-soft">
               {u.items.map((x) => (
                 <PayRow key={`${x.kind}:${x.id}:${x.due_on}`} api={api} item={x} onPaid={() => { nav.flash(`Оплачено: ${x.name}`); up.reload(); ov.reload(); }} />
               ))}
             </ul>
-            <p class="border-t border-white/5 px-4 py-2.5 text-[13px] text-zinc-500">
+            <p class="border-t border-line-soft px-4 py-2.5 text-[13px] text-zinc-500">
               Оплачено {paidN} из {u.items.length}
             </p>
           </div>
@@ -710,7 +709,7 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
           )}
         </div>
         {openB && (
-          <div class="mt-3 border-t border-white/5 pt-3">
+          <div class="mt-3 border-t border-line-soft pt-3">
             {/* «Что если» — норма на остаток недели; крутит хвост на гонке выше */}
             {w.week_budget_minor > 0 && weekLeftDays > 0 && (
               <div onClick={(e) => e.stopPropagation()}>
@@ -773,7 +772,7 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                 </div>
               </div>
             )}
-            <div class="my-3 border-t border-white/5" />
+            <div class="my-3 border-t border-line-soft" />
             {/* месяц — контекст: график темпа + цифры */}
             <div class={rowCls}>
               <span class={mutedCls}>
@@ -794,7 +793,7 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
                       }
                     }}
                     class={`rounded-full px-2.5 py-1 text-[11px] ${
-                      k === tempoKind ? 'bg-zinc-700 text-white' : 'text-zinc-500'
+                      k === tempoKind ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500'
                     }`}
                   >
                     {TEMPO_LABELS[k]}
