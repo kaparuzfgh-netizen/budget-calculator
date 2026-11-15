@@ -7,6 +7,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
+import { accessRepo } from '../src/db/repo';
 import { timingSafeEqualStr, verifyWebhookSecret } from '../src/http/security';
 import { configureDataKey } from '../src/db/crypto';
 import type { TelegramClient } from '../src/telegram/client';
@@ -273,6 +274,26 @@ describe('доступ', () => {
     sent.length = 0;
     await post(msg(123, 771001, '/help'));
     expect(sent).toEqual([]);
+  });
+
+  it('refresh-on-change: смена first_name переписывает display_name (в БД — enc1:)', async () => {
+    await post(msg(150, OWNER_TG, 'привет')); // bootstrap с first_name 'User111'
+    const renamed = msg(151, OWNER_TG, '/id');
+    (renamed.message.from as { first_name: string }).first_name = 'Новое Имя';
+    await post(renamed);
+    const raw = await env.DB
+      .prepare('SELECT display_name FROM users WHERE telegram_id = ?')
+      .bind(OWNER_TG)
+      .first<{ display_name: string }>();
+    expect(raw!.display_name).toMatch(/^enc1:/);
+    expect(raw!.display_name).not.toContain('Новое');
+    const u = await accessRepo(env.DB).findUserByTelegramId(OWNER_TG);
+    expect(u!.display_name).toBe('Новое Имя');
+    // то же имя повторно — апдейт не порождает лишней записи (имя не меняется)
+    const again = msg(152, OWNER_TG, '/id');
+    (again.message.from as { first_name: string }).first_name = 'Новое Имя';
+    await post(again);
+    expect((await accessRepo(env.DB).findUserByTelegramId(OWNER_TG))!.display_name).toBe('Новое Имя');
   });
 
   it('имена пользователей экранируются для HTML', async () => {

@@ -116,3 +116,6 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     спек `FIELDS`). Работа с ними — только через хелперы crypto.ts внутри repo.ts;
     сырые запросы по ним не писать и в WHERE не использовать. Новая пользовательская
     текстовая/amount-колонка ОБЯЗАТЕЛЬНО добавляется в `FIELDS`.
+    `users.display_name` — тоже `enc1:`, но uid там = `users.id`
+    (колонки `user_id` нет); имя обновляется refresh-on-change на вебхуке
+    и в `/api/tma/auth` (`accessRepo.refreshDisplayName`).

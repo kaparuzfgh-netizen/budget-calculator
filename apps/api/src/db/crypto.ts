@@ -125,13 +125,15 @@ export const FIELDS: FieldsSpec = {
   exchanges: { amount_from_minor: 'num', amount_to_minor: 'num', rate: 'num', note: 'str' },
   conversation_state: { data: 'str' },
   categories: { name: 'str', emoji: 'str' },
+  // uid для users — PK id (колонки user_id нет): decRow берёт id, backfill — WHERE id=?
+  users: { display_name: 'str' },
 };
 
 /** Дешифровать строку по FIELDS-спеку (null → null). */
 export async function decRow<T>(table: keyof typeof FIELDS & string, row: T | null | undefined): Promise<T | null> {
   if (!row) return row ?? null;
   const r = row as Record<string, unknown>;
-  const userId = Number(r.user_id);
+  const userId = Number(r.user_id ?? r.id); // users: uid = PK id, колонки user_id нет
   for (const [col, kind] of Object.entries(FIELDS[table] ?? {})) {
     if (r[col] === null || r[col] === undefined) continue;
     r[col] = kind === 'num' ? await decNum(userId, table, col, r[col]) : await decStr(userId, table, col, r[col]);

@@ -17,7 +17,7 @@ beforeEach(async () => {
   for (const t of [
     'conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'loan_events', 'loans',
     'exchanges', 'debt_events', 'debts', 'commitment_payments', 'commitments',
-    'profiles', 'consents', 'reminder_log', 'audit_log', 'users',
+    'profiles', 'consents', 'reminder_log', 'audit_log', 'invites', 'users',
   ])
     await d1().prepare(`DELETE FROM ${t}`).run();
 });
@@ -71,6 +71,51 @@ describe('encryption at rest', () => {
     await d1().prepare("INSERT INTO weekly_expenses (user_id, spent_on, amount_minor, currency, source) VALUES (?, '2026-10-01', 9, 'RUB', 'manual')").bind(u).run();
     expect(await encryptBackfill(d1())).toBe(1);
     expect((await scoped(d1(), u).listExpenses()).results[0]!.amount_minor).toBe(9);
+  });
+
+  it('users.display_name: round-trip через repo; raw SELECT — enc1:, без plaintext', async () => {
+    await accessRepo(env.DB).createUser(50, 'Алиса', 'member');
+    const u = (await accessRepo(env.DB).findUserByTelegramId(50))!;
+    expect(u.display_name).toBe('Алиса');
+    const raw = await d1()
+      .prepare('SELECT display_name FROM users WHERE id = ?')
+      .bind(u.id)
+      .first<{ display_name: string }>();
+    expect(raw!.display_name).toMatch(/^enc1:/);
+    expect(raw!.display_name).not.toContain('Алиса');
+    // null-имя — остаётся NULL, шифровать нечего
+    await accessRepo(env.DB).createUser(55, null, 'member');
+    const rawNull = await d1().prepare('SELECT display_name FROM users WHERE telegram_id = 55').first();
+    expect(rawNull!.display_name).toBeNull();
+  });
+
+  it('users.display_name: legacy plaintext читается; backfill шифрует по WHERE id=?', async () => {
+    await d1().prepare("INSERT INTO users (telegram_id, display_name, role) VALUES (?, 'Легаси', 'member')").bind(51).run();
+    expect((await accessRepo(env.DB).findUserByTelegramId(51))!.display_name).toBe('Легаси'); // tolerant read
+    expect(await encryptBackfill(d1())).toBe(1);
+    const raw = await d1().prepare('SELECT display_name FROM users WHERE telegram_id = 51').first<{ display_name: string }>();
+    expect(raw!.display_name).toMatch(/^enc1:/);
+    expect(await encryptBackfill(d1())).toBe(0); // no-op
+    expect((await accessRepo(env.DB).findUserByTelegramId(51))!.display_name).toBe('Легаси'); // дешифруется
+  });
+
+  it('redeemInvite пишет display_name зашифрованным; refreshDisplayName — только при расхождении', async () => {
+    const owner = await uid(60);
+    const hash = 'a'.repeat(64);
+    await accessRepo(env.DB).createInvite(hash, owner, '2999-01-01T00:00:00.000Z');
+    const r = await accessRepo(env.DB).redeemInvite(hash, 61, 'Гость', new Date().toISOString());
+    expect(r.redeemed).toBe(true);
+    const raw = await d1().prepare('SELECT display_name FROM users WHERE telegram_id = 61').first<{ display_name: string }>();
+    expect(raw!.display_name).toMatch(/^enc1:/);
+    const u = (await accessRepo(env.DB).findUserByTelegramId(61))!;
+    expect(u.display_name).toBe('Гость');
+    // совпадение и «нет данных» — no-op; расхождение — запись + in-place
+    await accessRepo(env.DB).refreshDisplayName(u, 'Гость');
+    await accessRepo(env.DB).refreshDisplayName(u, null);
+    expect((await accessRepo(env.DB).findUserByTelegramId(61))!.display_name).toBe('Гость');
+    await accessRepo(env.DB).refreshDisplayName(u, 'Новый Гость');
+    expect(u.display_name).toBe('Новый Гость');
+    expect((await accessRepo(env.DB).findUserByTelegramId(61))!.display_name).toBe('Новый Гость');
   });
 
   it('export возвращает расшифрованные значения', async () => {

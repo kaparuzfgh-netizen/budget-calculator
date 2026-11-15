@@ -264,17 +264,15 @@ breaking-обновления typescript-eslint — осознанно не тр
   продукта зафиксирован в UI: необратимое действие намеренно в боте,
   где требует явной команды и подтверждения. Формально удаление есть,
   путь описан.
-- **`users.display_name` plaintext — принят план, в работе:**
-  имя меняется в Telegram, но пишется один раз и `display_name` имеет
-  приоритет над свежим `initData.first_name` (router.ts) — дефект,
-  существующий независимо от шифрования. План: (1) `FIELDS += users
-  .display_name`, `decRow` fallback `user_id ?? id`, backfill-режим
-  `WHERE id=?`; (2) `createUser` ×2 → insert + encrypted UPDATE по
-  `last_rowid` (uid=users.id неизвестен до вставки); (3) refresh-on-change
-  на вебхуке (`from.first_name`) и TMA-auth — compare + encrypted UPDATE;
-  (4) router.ts — приоритет `initData.first_name` над БД; (5) тесты
-  refresh + round-trip. Бонус при вместимости: branded types
-  `UserId`/`TelegramId` (swap-баги tg↔id сейчас компилируются молча).
+- [x] **`users.display_name` plaintext — сделано:** `FIELDS += users
+  .display_name` (uid = `users.id`, колонки `user_id` нет: `decRow`
+  fallback `user_id ?? id`, backfill — `WHERE id=?`); `createUser` и
+  `redeemInvite` — insert NULL + encrypted UPDATE по `last_rowid`;
+  refresh-on-change — вебхук (message + callback) и `/api/tma/auth`
+  (compare + encrypted UPDATE, `accessRepo.refreshDisplayName`); в ответе
+  auth приоритет `initData.first_name` над БД — дефект «имя пишется
+  один раз» закрыт. Branded types `UserId`/`TelegramId` не вошли —
+  сотни call-sites на plain number, diff-взрыв без срочной выгоды.
 - **Риск (гипотетический, зафиксирован): перебор `users.id`.** Сейчас
   неэксплуатируемо — `user.id` не является клиентским входом нигде
   (выводится сервером из подписанного апдейта / HS256-JWT), защита —

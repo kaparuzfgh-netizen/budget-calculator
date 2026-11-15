@@ -554,6 +554,7 @@ export async function handleMessage(msg: IncomingMessage, deps: AccessDeps): Pro
     }
     return; // незнакомец без кода — тишина
   }
+  await repo.refreshDisplayName(user, msg.firstName); // имя в TG меняется — refresh-on-change
   await knownUser(msg, user, deps);
 }
 
@@ -575,6 +576,7 @@ export async function handleCallback(
   const user = await repo.findUserByTelegramId(cb.fromId);
   await deps.telegram.answerCallbackQuery(cb.id);
   if (!user) return; // незнакомец — молча
+  await repo.refreshDisplayName(user, cb.firstName);
   const r = scoped(deps.db, user.id);
   // исходящие тексты из callback-ветки — тоже через kb-миграцию
   deps = { ...deps, telegram: tgWithKeyboardMigration(r, deps.telegram) };

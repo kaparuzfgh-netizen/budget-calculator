@@ -13,7 +13,7 @@ import { applyD1Migrations, SELF } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
 import type { FxProvider } from '../src/fx/provider';
-import { scoped } from '../src/db/repo';
+import { accessRepo, scoped } from '../src/db/repo';
 import { monthInTz, todayInTz, weekStartInTz } from '../src/bot/parse';
 import { buildOverview } from '../src/tma/overview';
 import { signJwt, verifyJwt } from '../src/tma/auth';
@@ -143,13 +143,26 @@ beforeEach(cleanDb);
 describe('POST /api/tma/auth — верификация initData', () => {
   it('валидная подпись → 200 {token, user.name}', async () => {
     await addUser(601, 'Alice');
-    const r = await authPost(await makeInitData(601));
+    const r = await authPost(await makeInitData(601, { user: { id: 601, first_name: 'Alice' } }));
     expect(r.status).toBe(200);
     const j = (await r.json()) as { ok: boolean; token: string; user: { name: string } };
     expect(j.ok).toBe(true);
     expect(j.token.split('.')).toHaveLength(3);
     expect(j.user.name).toBe('Alice');
     expect((await verifyJwt(j.token, JWT_SECRET))?.tg_id).toBe(601);
+  });
+
+  it('refresh-on-change: свежий first_name из initData переписывает display_name и отдаётся в ответе', async () => {
+    await addUser(640, 'Старое Имя');
+    const r = await authPost(await makeInitData(640, { user: { id: 640, first_name: 'Свежее Имя' } }));
+    expect(r.status).toBe(200);
+    const j = (await r.json()) as { user: { name: string } };
+    expect(j.user.name).toBe('Свежее Имя'); // initData приоритетнее БД
+    const raw = await env.DB
+      .prepare('SELECT display_name FROM users WHERE telegram_id = 640')
+      .first<{ display_name: string }>();
+    expect(raw!.display_name).toMatch(/^enc1:/);
+    expect((await accessRepo(env.DB).findUserByTelegramId(640))!.display_name).toBe('Свежее Имя');
   });
 
   it('подделанный hash / чужой токен → 401', async () => {

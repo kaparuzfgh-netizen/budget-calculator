@@ -152,13 +152,16 @@ export function createRouter(deps: RouterDeps = {}) {
       console.error(`tma/auth: initData отклонён (${v.reason})`);
       return c.json({ ok: false, error: 'invalid initData' }, 401);
     }
-    const user = await accessRepo(c.env.DB).findUserByTelegramId(v.user.id);
+    const access = accessRepo(c.env.DB);
+    const user = await access.findUserByTelegramId(v.user.id);
     // одинаковый текст: не раскрываем «нет пользователя» vs «не онбоарден»
     if (!user) return c.json({ ok: false, error: 'forbidden' }, 403);
+    await access.refreshDisplayName(user, v.user.first_name); // refresh-on-change
     const profile = await scoped(c.env.DB, user.id).getProfile();
     if (!profile?.onboarded_at) return c.json({ ok: false, error: 'forbidden' }, 403);
     const token = await signJwt({ tg_id: user.telegram_id }, c.env.JWT_SECRET, TMA_JWT_TTL_SEC);
-    return c.json({ ok: true, token, user: { name: user.display_name ?? v.user.first_name ?? null } });
+    // свежее имя из подписанного initData приоритетнее сохранённого
+    return c.json({ ok: true, token, user: { name: v.user.first_name ?? user.display_name ?? null } });
   });
 
   /** Bearer-JWT → tmaUser в контексте. Любой запрос без валидного JWT → 401. */

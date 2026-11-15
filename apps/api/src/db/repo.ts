@@ -1299,6 +1299,12 @@ export type AuditAction =
 
 /** Глобальные таблицы доступа — user-data здесь нет (S5 применяется к scoped). */
 export function accessRepo(db: Env['DB']) {
+  /** display_name — enc1:; uid = users.id до вставки неизвестен → всегда UPDATE. */
+  const setDisplayName = async (userId: number, name: string) =>
+    db
+      .prepare('UPDATE users SET display_name = ? WHERE id = ?')
+      .bind(await encStr(userId, 'users', 'display_name', name), userId)
+      .run();
   return {
     /** user_id онбоарденных с включёнными напоминаниями — только для cron-сервиса. */
     async listReminderCandidates(): Promise<number[]> {
@@ -1315,7 +1321,7 @@ export function accessRepo(db: Env['DB']) {
         .prepare('SELECT * FROM users WHERE telegram_id = ? AND deleted_at IS NULL')
         .bind(tgId)
         .first<UserRow>();
-      return r ?? undefined;
+      return (await decRow('users', r)) ?? undefined;
     },
     /** Telegram ID активного пользователя по user_id (cron-рассылка); null — удалён/нет. */
     async getTelegramId(userId: number): Promise<number | null> {
@@ -1326,11 +1332,25 @@ export function accessRepo(db: Env['DB']) {
       return r?.telegram_id ?? null;
     },
 
-    createUser(tgId: number, displayName: string | null, role: 'owner' | 'member') {
-      return db
-        .prepare('INSERT INTO users (telegram_id, display_name, role) VALUES (?, ?, ?)')
-        .bind(tgId, displayName, role)
+    async createUser(tgId: number, displayName: string | null, role: 'owner' | 'member') {
+      // uid (=users.id) — ключ шифрования и до вставки неизвестен → insert + UPDATE
+      const r = await db
+        .prepare('INSERT INTO users (telegram_id, display_name, role) VALUES (?, NULL, ?)')
+        .bind(tgId, role)
         .run();
+      if (displayName !== null) await setDisplayName(Number(r.meta.last_row_id), displayName);
+      return r;
+    },
+
+    /**
+     * Refresh-on-change: имя в Telegram меняется — свежий first_name при
+     * расхождении пишем зашифрованно (и в объект). null/undefined — данных о
+     * новом имени нет, не трогаем (first_name в Telegram обязателен).
+     */
+    async refreshDisplayName(user: UserRow, fresh: string | null | undefined): Promise<void> {
+      if (fresh == null || fresh === user.display_name) return;
+      await setDisplayName(user.id, fresh);
+      user.display_name = fresh;
     },
 
     /** Одноразовый инвайт: пишется ТОЛЬКО SHA-256 хэш кода. */
@@ -1373,8 +1393,8 @@ export function accessRepo(db: Env['DB']) {
      */
     async redeemInvite(codeHash: string, tgId: number, displayName: string | null, nowIso: string) {
       const ins = db
-        .prepare("INSERT INTO users (telegram_id, display_name, role) VALUES (?, ?, 'member')")
-        .bind(tgId, displayName);
+        .prepare("INSERT INTO users (telegram_id, display_name, role) VALUES (?, NULL, 'member')")
+        .bind(tgId);
       // user_id вставленной строки доступен через last_insert_rowid()
       const upd = db
         .prepare(
@@ -1390,7 +1410,11 @@ export function accessRepo(db: Env['DB']) {
         .bind();
       const [i, u] = await db.batch([ins, upd, del]);
       if (!i || !u) throw new Error('redeemInvite: пустой результат batch');
-      return { redeemed: u.meta.changes === 1, userId: Number(i.meta.last_row_id) };
+      const userId = Number(i.meta.last_row_id);
+      // имя — отдельным UPDATE: uid=users.id неизвестен до вставки; при сбое
+      // допишет следующий апдейт со свежим first_name (refresh-on-change)
+      if (u.meta.changes === 1 && displayName !== null) await setDisplayName(userId, displayName);
+      return { redeemed: u.meta.changes === 1, userId };
     },
 
     /** Идемпотентность webhook: true → update новый, false → дубликат. */
@@ -1481,14 +1505,16 @@ export async function encryptBackfill(db: Env['DB'], limitPerTable = 200): Promi
   for (const [table, cols] of Object.entries(FIELDS)) {
     const colNames = Object.keys(cols);
     const unenc = (c: string) => `(${c} IS NOT NULL AND (typeof(${c}) != 'text' OR ${c} NOT LIKE 'enc1:%'))`;
-    const userKeyed = table === 'conversation_state' || table === 'profiles'; // PK = user_id, колонки id нет
-    const keyCols = userKeyed ? 'user_id' : 'id, user_id';
+    // PK-варианты: user_id (profiles/conversation_state) / id=uid (users) / id+user_id (остальные)
+    const userKeyed = table === 'conversation_state' || table === 'profiles';
+    const selfKeyed = table === 'users';
+    const keyCols = userKeyed ? 'user_id' : selfKeyed ? 'id' : 'id, user_id';
     const rows = await db
       .prepare(`SELECT ${keyCols}, ${colNames.join(', ')} FROM ${table} WHERE ${colNames.map(unenc).join(' OR ')} LIMIT ?`)
       .bind(limitPerTable)
       .all<Record<string, unknown>>();
     for (const row of rows.results) {
-      const uid = Number(row.user_id);
+      const uid = Number(selfKeyed ? row.id : row.user_id);
       const sets: string[] = [];
       const binds: (string | number | null)[] = [];
       const cas: string[] = [];
@@ -1503,8 +1529,8 @@ export async function encryptBackfill(db: Env['DB'], limitPerTable = 200): Promi
         casBinds.push(v as string | number);
       }
       if (!sets.length) continue;
-      const where = userKeyed ? 'WHERE user_id = ?' : 'WHERE id = ? AND user_id = ?';
-      const keyBinds = userKeyed ? [uid] : [row.id, uid];
+      const where = userKeyed ? 'WHERE user_id = ?' : selfKeyed ? 'WHERE id = ?' : 'WHERE id = ? AND user_id = ?';
+      const keyBinds = userKeyed || selfKeyed ? [uid] : [row.id, uid];
       const r = await db
         .prepare(`UPDATE ${table} SET ${sets.join(', ')} ${where} AND ${cas.join(' AND ')}`)
         .bind(...binds, ...(keyBinds as (string | number)[]), ...casBinds)
