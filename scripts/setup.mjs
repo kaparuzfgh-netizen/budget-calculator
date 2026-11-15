@@ -8,6 +8,7 @@
  *
  * Флаги: --dry-run (план без вызовов), --skip-deploy, --rotate (JWT_SECRET тоже).
  */
+import './env.mjs'; // корневой .env → process.env (только недостающие ключи)
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';

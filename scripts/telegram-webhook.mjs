@@ -12,6 +12,7 @@
  * спрашиваются интерактивно со СКРЫТЫМ вводом (без эха). Значения никогда
  * не печатаются, не пишутся на диск и не попадают в историю шелла.
  */
+import './env.mjs'; // корневой .env → process.env (только недостающие ключи)
 import { askHidden } from './ask-hidden.mjs';
 import { buildSetWebhookPayload, maskUrl, redact } from './webhook-utils.mjs';
 

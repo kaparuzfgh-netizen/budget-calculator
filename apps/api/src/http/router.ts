@@ -24,8 +24,7 @@ import { registerTmaProfile } from '../tma/profile';
 import { registerTmaDebts } from '../tma/debts';
 import { registerTmaFx } from '../tma/fx';
 import { registerTmaVision } from '../tma/vision';
-
-const APP_VERSION = '0.1.0';
+import { version as APP_VERSION } from '../../package.json';
 
 // Тело POST /api/tma/auth — только initData (S12).
 const tmaAuthSchema = z.object({ initData: z.string().min(1).max(8192) });

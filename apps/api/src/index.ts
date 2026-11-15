@@ -7,6 +7,11 @@ import type { Env } from './env';
 
 const app = createRouter();
 
+// Backfill завершён — в стабильном состоянии нечего шифровать, пропускаем
+// скан (12 SELECT/тик). Модульный флаг живёт на срок изолята: холодный
+// старт прогонит backfill ещё раз (идемпотентно, убытка нет).
+let backfillSettled = false;
+
 export default {
   fetch: app.fetch,
 
@@ -18,7 +23,15 @@ export default {
       return;
     }
     // Backfill до напоминаний; ошибка не должна блокировать напоминания.
-    ctx.waitUntil(runEncryptionBackfill(env.DB).catch((e) => console.error('encryptBackfill:', e)));
+    if (!backfillSettled) {
+      ctx.waitUntil(
+        runEncryptionBackfill(env.DB)
+          .then((n) => {
+            if (n === 0) backfillSettled = true;
+          })
+          .catch((e) => console.error('encryptBackfill:', e)),
+      );
+    }
     // A2-2: тик целиком упал (до/вне по-пользовательского catch) —
     // без алерта поломку видно только в tail. Сообщаем владельцу.
     ctx.waitUntil(
