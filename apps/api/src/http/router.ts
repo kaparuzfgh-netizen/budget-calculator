@@ -18,6 +18,9 @@ const sha256HexStr = async (s: string): Promise<string> =>
     .join('');
 import { buildOverview } from '../tma/overview';
 import { registerTmaApi } from '../tma/api';
+import { registerTmaCommitments } from '../tma/commitments';
+import { registerTmaExpenses } from '../tma/expenses';
+import { registerTmaProfile } from '../tma/profile';
 import { registerTmaDebts } from '../tma/debts';
 import { registerTmaFx } from '../tma/fx';
 import { registerTmaVision } from '../tma/vision';
@@ -191,6 +194,9 @@ export function createRouter(deps: RouterDeps = {}) {
   // REST API Mini App — паритет бота (веха E) + кредиты/займы (H3).
   const fxProvider = deps.fx ?? createFrankfurter();
   registerTmaApi(app, tmaAuth, fxProvider);
+  registerTmaExpenses(app, tmaAuth);
+  registerTmaProfile(app, tmaAuth, fxProvider);
+  registerTmaCommitments(app, tmaAuth);
   registerTmaDebts(app, tmaAuth, fxProvider);
   registerTmaFx(app, tmaAuth, fxProvider);
   // Скриншот банка из Mini App — те же ключи/фетч, что и у бота

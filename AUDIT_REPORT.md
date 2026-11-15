@@ -231,6 +231,28 @@ test:api 377 + test:web 24 + build:web) — зелёный; `format:check` — �
 `npm audit` — 9 moderate (все `minimatch` в dev-цепочке eslint; фикс требует
 breaking-обновления typescript-eslint — осознанно не трогаем).
 
+### Тир 2 — god-objects (2026-11-15)
+
+- [x] **A2-14. `services/access.ts` — четыре копипаста-мастера**
+  - Было: 1421 строка; CAS-запись диалога, /cancel, текстовый ввод, callback,
+    nv:-рендер и вход в хаб продублированы ×3–4 (pf/debt/loan/fx).
+  - Сделано: каркас `services/flows.ts` — интерфейс `Flow` (шаги, текстовые
+    шаги, ctx, редьюсер, рендер, цель отмены, эффекты), реестр
+    `PF/DEBT/LOAN/FX_FLOW` и общие `applyFlow`/`showScreen`/`cancelFlow`/`openHub`.
+    `access.ts` — только маршрутизация (751 строка). Новый мастер = одна
+    запись в реестре. Контракт реестра — `test/flows.test.ts`.
+- [x] **A2-15. `tma/api.ts` — 1017 строк роутов**
+  - Сделано: разнесено по доменам — `tma/expenses.ts` (траты, категории),
+    `tma/profile.ts` (доход, профиль, экспорт), `tma/commitments.ts`
+    (платежи, журнал оплат); в `api.ts` — plan/week/report/upcoming (314 строк).
+    Набор из 28 маршрутов сверен до/после — идентичен.
+- [x] **A2-16. `web/screens/profile.tsx` — 1523 строки**
+  - Сделано: `profile.tsx` (экран профиля, 760), `commitments.tsx`
+    (карточка и добавление платежа, 512), `cadence.tsx` (общий редактор
+    каденса, 267). Код перенесён без изменений логики.
+- Проверки: `npm run check` — api 381 тест (+4 контракт реестра), web 24,
+  сборка; `format:check` — зелёный.
+
 ### Отложено (не в скоупе этого прогона)
 
 - Cron: последовательный перебор пользователей — пачки `Promise.allSettled`

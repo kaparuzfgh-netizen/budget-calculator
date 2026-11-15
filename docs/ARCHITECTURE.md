@@ -32,7 +32,7 @@ flowchart TD
       LOAN["bot/loans.ts + services/loans.ts<br/>займы: возврат/закрытие"]
       PROF["bot/profile.ts<br/>профиль: платежи/напоминания/данные"]
       REM["services/reminders.ts<br/>cron: итоги недели, дедлайны,<br/>автопроводка"]
-      TMA["tma/api.ts + tma/debts.ts + tma/overview.ts<br/>REST /api/tma/* за Bearer-JWT"]
+      TMA["tma/api.ts + expenses/profile/commitments/debts/fx/vision/overview<br/>REST /api/tma/* за Bearer-JWT"]
     end
     REPO["db/repo.ts<br/>scoped(env.DB, user_id) — каждый запрос<br/>с WHERE user_id = ?"]
     FX["fx/service.ts → fx/frankfurter.ts<br/>getFxRates: кэш D1 (fx_rates, 6ч)"]

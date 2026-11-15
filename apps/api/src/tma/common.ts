@@ -93,3 +93,15 @@ export const dupResult = (c: TmaContext, dup: { id: number } | null) =>
 /** FX-резолвер как в боте (кэш D1 → провайдер). */
 export const fxGet = (c: TmaContext, fx: FxProvider) => (ccys: string[]) =>
   getFxRates(c.env.DB, fx, ccys, new Date());
+
+/** Сумма+валюта+заметка — общая схема POST трат и дохода. */
+export const moneySchema = z.object({
+  amount: zAmount,
+  currency: zCcy.optional(),
+  note: zNote,
+  client_id: zClientId,
+  category_id: z.number().int().positive().nullable().optional(),
+  /** 'YYYY-MM-DD' — spent_on для расходов, received_on для доходов (ниже по коду). */
+  spent_on: zIso.optional(),
+  received_on: zIso.optional(),
+});

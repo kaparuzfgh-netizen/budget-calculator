@@ -65,7 +65,10 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
 11. **Деньги:** в D1 — INTEGER minor units (копейки); домен — float,
     конвертация `toMinor/fromMinor` на границе repo. Курсы — только через
     `getFxRates` (D1-кэш 6ч + provider). Онбординг — чистый редьюсер
-    `bot/onboarding.ts` (эффекты исполняет services/access.ts).
+    `bot/onboarding.ts` (эффекты исполняет services/access.ts). Мастера бота
+    (pf/debt/loan/fx) — реестр `services/flows.ts` (`Flow`: шаги, текстовые
+    шаги, редьюсер, рендер, эффекты); новый мастер — новая запись реестра,
+    маршрутизация в access.ts не дублируется.
 12. **Навигация бота:** источник истины — `docs/ux/navigation.md` +
     `src/bot/nav/screens.json` (zod-реестр). Любое изменение экранов
     сначала вносится в оба; нав-ряды только через `navRow()` (R1–R4),
