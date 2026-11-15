@@ -6,7 +6,9 @@
  * автоматизировано. Повторный запуск безопасен (идемпотентно; при этом
  * TELEGRAM_WEBHOOK_SECRET генерируется заново — его нельзя прочитать обратно).
  *
- * Флаги: --dry-run (план без вызовов), --skip-deploy, --rotate (JWT_SECRET тоже).
+ * Флаги: --dry-run (план без вызовов), --skip-deploy, --rotate (JWT_SECRET тоже),
+ * --env <name> — стейджинг-окружение wrangler ([env.<name>] в wrangler.toml:
+ * свой воркер, D1 и секреты; `npm run setup:staging`).
  */
 import './env.mjs'; // корневой .env → process.env (только недостающие ключи)
 import { execFileSync } from 'node:child_process';
@@ -20,6 +22,7 @@ import { askHidden } from './ask-hidden.mjs';
 import { buildSetWebhookPayload, maskUrl, redact } from './webhook-utils.mjs';
 import {
   deriveWorkerUrl,
+  envSection,
   getTomlVar,
   isValidBotToken,
   parseDatabaseId,
@@ -44,6 +47,16 @@ const args = process.argv.slice(2);
 const DRY = args.includes('--dry-run');
 const SKIP_DEPLOY = args.includes('--skip-deploy');
 const ROTATE = args.includes('--rotate');
+// --env <name> | --env=<name> — wrangler-окружение (стейджинг)
+const envIdx = args.findIndex((a) => a === '--env' || a.startsWith('--env='));
+const ENV_NAME =
+  envIdx === -1 ? null : (args[envIdx].split('=')[1] ?? args[envIdx + 1] ?? null);
+if (envIdx !== -1 && !ENV_NAME) {
+  // --env без значения молча ушёл бы в прод — отказ до любых вызовов
+  console.error('⛔ --env требует имя окружения: --env staging');
+  process.exit(2);
+}
+const envArgs = ENV_NAME ? ['--env', ENV_NAME] : [];
 
 let step = 0;
 const TOTAL = 9;
@@ -102,7 +115,7 @@ async function tg(token, method, payload) {
 
 // ── секреты через stdin, никогда через argv ──
 function secretPut(name, value) {
-  const r = wrangler(['secret', 'put', name], { input: value });
+  const r = wrangler(['secret', 'put', name, ...envArgs], { input: value });
   if (!r.ok) die(`wrangler secret put ${name}: ${r.out}`);
   p(`   ✓ секрет ${name} загружен`);
 }
@@ -115,14 +128,19 @@ process.on('SIGINT', () => {
 });
 
 async function main() {
-  p('Мастер настройки бота v2 · budget-companion-api' + (DRY ? '  (--dry-run: только план)' : ''));
+  p(
+    'Мастер настройки бота v2 · budget-companion-api' +
+      (ENV_NAME ? ` [env: ${ENV_NAME}]` : '') +
+      (DRY ? '  (--dry-run: только план)' : ''),
+  );
+  if (ENV_NAME && !/^[\w-]+$/.test(ENV_NAME)) die(`--env: некорректное имя окружения "${ENV_NAME}"`);
 
   if (DRY) {
     p(`
-План (${TOTAL} шагов):
+План (${TOTAL} шагов)${ENV_NAME ? ` — окружение "${ENV_NAME}" (wrangler --env)` : ''}:
 [1] Проверки: Node ≥20, wrangler whoami, database_id в wrangler.toml
 [2] Токен @BotFather (скрытый ввод или env TELEGRAM_BOT_TOKEN) → getMe
-[3] TELEGRAM_BOT_USERNAME → wrangler.toml [vars]
+[3] TELEGRAM_BOT_USERNAME → wrangler.toml ${ENV_NAME ? `[env.${ENV_NAME}.vars]` : '[vars]'}
 [4] wrangler d1 migrations apply DB --remote + wrangler deploy${SKIP_DEPLOY ? ' (пропущено)' : ''}
 [5] Секреты: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET (новый каждый раз), JWT_SECRET${ROTATE ? ' (перегенерация)' : ' (если отсутствует)'}, DATA_KEY (если отсутствует; --rotate НЕ трогает)
 [6] Поиск владельца: deleteWebhook → getUpdates → подтверждение → OWNER_TELEGRAM_ID
@@ -139,10 +157,13 @@ async function main() {
   if (!who.ok) die('wrangler не авторизован. Выполните: npm run wrangler -- login');
   p(`   ✓ Cloudflare: вошли (${who.out.match(/[\w.+-]+@[\w.-]+/)?.[0] ?? 'аккаунт ок'})`);
   const toml = fs.readFileSync(tomlPath, 'utf8');
-  if ((parseDatabaseId(toml) ?? 'PLACEHOLDER') === 'PLACEHOLDER_SET_BY_OWNER') {
+  // env-режим: имя воркера/database_id/vars читаем из блока [env.<name>]
+  const tomlScope = ENV_NAME ? envSection(toml, ENV_NAME) : toml;
+  if (ENV_NAME && !tomlScope) die(`wrangler.toml: блок [env.${ENV_NAME}] не найден — добавьте окружение в apps/api/wrangler.toml.`);
+  if (!parseDatabaseId(tomlScope) || parseDatabaseId(tomlScope) === 'PLACEHOLDER_SET_BY_OWNER') {
     die(
-      'wrangler.toml: database_id = PLACEHOLDER_SET_BY_OWNER.\n' +
-        '   Создайте БД: npm run wrangler -- d1 create budget-companion\n' +
+      `wrangler.toml: database_id не задан${ENV_NAME ? ` ([env.${ENV_NAME}])` : ''}.\n` +
+        '   Создайте БД: npm run wrangler -- d1 create <database_name>\n' +
         '   и впишите выданный database_id в apps/api/wrangler.toml.',
     );
   }
@@ -170,19 +191,22 @@ async function main() {
 
   // ── 3. wrangler.toml ──
   stepLog('Username бота в wrangler.toml');
-  fs.writeFileSync(tomlPath, setTomlVar(toml, 'TELEGRAM_BOT_USERNAME', me.username));
+  fs.writeFileSync(
+    tomlPath,
+    setTomlVar(toml, 'TELEGRAM_BOT_USERNAME', me.username, ENV_NAME ? `env.${ENV_NAME}.vars` : 'vars'),
+  );
   p(`   ✓ TELEGRAM_BOT_USERNAME = "${me.username}"`);
 
   // ── 4. Миграции + деплой ──
   stepLog('Миграции D1 и деплой');
-  const mig = wrangler(['d1', 'migrations', 'apply', 'DB', '--remote']);
+  const mig = wrangler(['d1', 'migrations', 'apply', 'DB', '--remote', ...envArgs]);
   if (!mig.ok) die(`миграции: ${mig.out}`);
   p('   ✓ миграции применены');
   let deployOut = '';
   if (SKIP_DEPLOY) {
     p('   ⊘ деплой пропущен (--skip-deploy)');
   } else {
-    const dep = wrangler(['deploy']);
+    const dep = wrangler(['deploy', ...envArgs]);
     if (!dep.ok) die(`deploy: ${dep.out}`);
     deployOut = dep.out;
     p('   ✓ воркер задеплоен');
@@ -190,7 +214,7 @@ async function main() {
 
   // ── 5. Секреты ──
   stepLog('Секреты воркера');
-  const listR = wrangler(['secret', 'list']);
+  const listR = wrangler(['secret', 'list', ...envArgs]);
   const existing = listR.ok ? parseSecretList(listR.out) : new Set();
   const webhookSecret = crypto.randomBytes(32).toString('hex');
   secretsToRedact.push(webhookSecret);
@@ -262,7 +286,7 @@ async function main() {
 
   // ── 7. Webhook ──
   stepLog('Регистрация webhook');
-  let workerUrl = deriveWorkerUrl({ deployOutput: deployOut, workerName: parseWorkerName(toml), subdomain: null });
+  let workerUrl = deriveWorkerUrl({ deployOutput: deployOut, workerName: parseWorkerName(tomlScope), subdomain: null });
   if (!workerUrl) {
     workerUrl = await ask('   URL воркера (https://<name>.<sub>.workers.dev): ');
     if (!/^https:\/\/[\w.-]+\.workers\.dev/.test(workerUrl)) die('Некорректный URL воркера.');
@@ -277,7 +301,7 @@ async function main() {
 
   // ── 8. Menu Button — голубая кнопка Mini App у поля ввода ──
   stepLog('Menu Button (кнопка приложения у поля ввода)');
-  const appUrl = getTomlVar(toml, 'MINI_APP_URL') ?? workerUrl;
+  const appUrl = getTomlVar(tomlScope, 'MINI_APP_URL') ?? workerUrl;
   await tg(token, 'setChatMenuButton', {
     menu_button: { type: 'web_app', text: '💰 Бюджет', web_app: { url: appUrl } },
   });

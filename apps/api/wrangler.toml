@@ -41,3 +41,28 @@ crons = ["0 * * * *"]
 # CLOUDFLARE_* секреты GitHub):
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET, JWT_SECRET,
 #   OWNER_TELEGRAM_ID, DATA_KEY
+
+# ── Стейджинг (wrangler env) ────────────────────────────────────
+# Отдельный воркер + D1 + секреты; бот — ОТДЕЛЬНЫЙ тестовый (у
+# Telegram один webhook на бота, продовым пользоваться нельзя).
+# Первичная настройка: `npm run setup:staging` (токен тест-бота из
+# @BotFather, секреты и DATA_KEY генерируются заново), дальнейшие
+# деплои — `npm run release:staging`.
+# ВАЖНО: блок env остаётся последним в файле — envSection() в
+# scripts/setup-utils.mjs режет по следующему top-level заголовку.
+[env.staging]
+name = "budget-companion-api-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "budget-companion-staging"
+database_id = "5ddf32aa-bad1-4435-9197-6d3722378f6d"
+migrations_dir = "migrations"
+
+# cron на стейджинге выключен — напоминания шлёт только прод
+[env.staging.triggers]
+crons = []
+
+[env.staging.vars]
+TELEGRAM_BOT_USERNAME = "PENDING_SETUP_STAGING_BOT" # заменит npm run setup:staging
+MINI_APP_URL = "https://budget-companion-api-staging.fool-undef.workers.dev"

@@ -122,6 +122,38 @@ My Profile → API Tokens → Create Custom Token. Минимальные пра
 
 Без секретов workflow деплоя пропускается без ошибки (notice в логе).
 
+## Стейджинг-окружение (`--env staging`)
+
+Отдельное окружение для проверки кода на живом Cloudflare, не трогая прод:
+свой воркер `budget-companion-api-staging`, своя D1 `budget-companion-staging`
+(уже создана и вписана в `apps/api/wrangler.toml`), свои секреты и **свой бот** —
+у Telegram один webhook на бота, поэтому продовый для стейджинга не подходит.
+Cron на стейджинге выключен (`[env.staging.triggers] crons = []` — напоминания
+шлёт только прод).
+
+**Первичная настройка (владелец, один раз):**
+
+1. В @BotFather → `/newbot` — создать тест-бота (например `budget_dev_bot`), взять токен.
+2. Запустить мастер — всё то же, что `npm run setup`, но против `[env.staging]`:
+   ```
+   npm run setup:staging
+   ```
+   Просит токен тест-бота; дальше сам: `TELEGRAM_BOT_USERNAME` →
+   `[env.staging.vars]`, миграции на staging-D1, деплой staging-воркера,
+   секреты `TELEGRAM_BOT_TOKEN`/`TELEGRAM_WEBHOOK_SECRET`/`JWT_SECRET`/`DATA_KEY`
+   (генерируются заново — у стейджинга СВОЙ DATA_KEY, не продовый),
+   `OWNER_TELEGRAM_ID` через сообщение тест-боту, webhook + menu-button.
+   `MINI_APP_URL` в `[env.staging.vars]` уже указывает на staging-воркер.
+
+**Дальнейшие деплои в стейджинг:** `npm run release:staging` — тот же конвейер
+(check → сборка web → миграции → deploy → /health), все wrangler-вызовы с
+`--env staging`. Прод релизится как раньше — `npm run release`.
+
+Ограничения: `[env.staging]` должен оставаться последним блоком wrangler.toml
+(`envSection()` в setup-utils режет по следующему top-level заголовку);
+CI деплоит только прод; стейджинг-данные тестовые — потерю его DATA_KEY
+можно пережить (в отличие от продового, см. DR).
+
 ## Подключение бота (веха B — webhook, владелец, инвайты)
 
 Webhook живёт на `POST /telegram/webhook`. Основной путь — одна команда:

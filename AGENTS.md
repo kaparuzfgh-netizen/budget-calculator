@@ -24,7 +24,9 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
 - `npm run build:web` — сборка `apps/web` → `dist`.
 - `npm run release` — релиз: check → web → миграции D1 → deploy → /health.
 - `npm run setup` — мастер подключения бота (токен BotFather один раз,
-  дальше всё само; `--dry-run` печатает план).
+  дальше всё само; `--dry-run` печатает план). Суффикс `:staging` —
+  то же для стейджинг-окружения (`--env staging`, свой воркер/D1/бот;
+  docs/v2-development.md «Стейджинг-окружение`).
 - `npm run dev -w apps/api` — wrangler dev (локальный воркер + D1).
 - `npm run wrangler -- <команда>` — wrangler workspace apps/api.
 - `npm run wrangler -- login` — только пользователь (браузер).

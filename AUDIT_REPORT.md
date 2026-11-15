@@ -281,4 +281,10 @@ breaking-обновления typescript-eslint — осознанно не тр
   параметром (админка, шеринг), перебор станет тривиальным IDOR —
   там обязателен предикат + тест, либо непрозрачные ссылки (UUID).
   См. AGENTS.md правило 3.
-- Светлая тема (нужен макет), стейджинг-окружение.
+- Светлая тема (нужен макет).
+- [x] ~~Стейджинг-окружение~~ — `[env.staging]` в wrangler.toml
+  (воркер + отдельная D1 `budget-companion-staging`, cron выключен),
+  `--env` в setup.mjs/release.mjs, `envSection` + секционный setTomlVar
+  в setup-utils, `npm run setup:staging`/`release:staging`. Владельцу
+  осталось: создать тест-бота у @BotFather и прогнать `npm run
+  setup:staging` — docs/v2-development.md «Стейджинг-окружение».

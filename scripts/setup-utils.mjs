@@ -9,21 +9,43 @@ export function isValidBotToken(token) {
 }
 
 /**
- * Записать/обновить ключ в [vars] wrangler.toml.
- * Сохраняет остальной файл и стиль переводов строк (CRLF/LF);
- * создаёт секцию [vars] в конце, если её нет.
+ * Срез wrangler.toml: содержимое блока [env.<name>] — от заголовка до
+ * следующего top-level table вне env.<name>.* (или EOF). Договорённость:
+ * env-блоки держим последними в файле. Пустая строка — env не найден.
  */
-export function setTomlVar(tomlText, key, value) {
+export function envSection(tomlText, env) {
+  const lines = tomlText.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim() === `[env.${env}]`);
+  if (start === -1) return '';
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    // конец env-блока — следующий top-level table вне env.<name>.*
+    if (/^\[(?!\[)/.test(t) && !t.startsWith(`[env.${env}.`)) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join('\n');
+}
+
+/**
+ * Записать/обновить ключ в секции [section] wrangler.toml (по умолчанию
+ * [vars]; для env — 'env.<name>.vars'). Сохраняет остальной файл и стиль
+ * переводов строк (CRLF/LF); создаёт секцию в конце, если её нет.
+ */
+export function setTomlVar(tomlText, key, value, section = 'vars') {
   const nl = tomlText.includes('\r\n') ? '\r\n' : '\n';
   const lines = tomlText.split(/\r?\n/);
   const entry = `${key} = ${JSON.stringify(value)}`;
+  const header = `[${section}]`;
 
-  // границы секции [vars]
+  // границы секции
   let varsStart = -1;
   let varsEnd = lines.length;
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
-    if (/^\[vars\]\s*$/.test(t)) varsStart = i;
+    if (t === header) varsStart = i;
     else if (varsStart >= 0 && /^\[/.test(t) && !/^\[\[/.test(t)) {
       varsEnd = i;
       break;
@@ -34,7 +56,7 @@ export function setTomlVar(tomlText, key, value) {
     // секции нет — добавляем в конец
     const out = [...lines];
     if (out.length && out[out.length - 1].trim() !== '') out.push('');
-    out.push('[vars]', entry);
+    out.push(header, entry);
     return out.join(nl);
   }
   // ключ уже есть в [vars] — заменяем

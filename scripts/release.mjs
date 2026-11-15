@@ -4,14 +4,15 @@
  * миграции → deploy → /health.
  * Порядок важен: деплой НЕ выполняется при неприменённых миграциях, а
  * apps/web собирается ДО wrangler deploy — иначе assets уедут устаревшие.
- * Флаги: --dry-run (только план), --skip-checks.
+ * Флаги: --dry-run (только план), --skip-checks,
+ * --env <name> — окружение wrangler (стейджинг: `npm run release:staging`).
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { deriveWorkerUrl, parseWorkerName } from './setup-utils.mjs';
+import { deriveWorkerUrl, envSection, parseWorkerName } from './setup-utils.mjs';
 import { maskUrl, redact } from './webhook-utils.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,6 +27,16 @@ const wranglerBin = path.join(
 const args = process.argv.slice(2);
 const DRY = args.includes('--dry-run');
 const SKIP = args.includes('--skip-checks');
+// --env <name> | --env=<name> — wrangler-окружение (стейджинг)
+const envIdx = args.findIndex((a) => a === '--env' || a.startsWith('--env='));
+const ENV_NAME =
+  envIdx === -1 ? null : (args[envIdx].split('=')[1] ?? args[envIdx + 1] ?? null);
+if (envIdx !== -1 && !ENV_NAME) {
+  // --env без значения молча ушёл бы в прод — отказ до любых вызовов
+  console.error('⛔ --env требует имя окружения: --env staging');
+  process.exit(2);
+}
+const envArgs = ENV_NAME ? ['--env', ENV_NAME] : [];
 const secrets = [];
 
 const p = (s = '') => console.log(s);
@@ -65,10 +76,10 @@ export function classifyReleaseError(output) {
 }
 
 async function main() {
-  p('Релиз budget-companion-api' + (DRY ? ' (--dry-run: только план)' : ''));
+  p('Релиз budget-companion-api' + (ENV_NAME ? ` [env: ${ENV_NAME}]` : '') + (DRY ? ' (--dry-run: только план)' : ''));
   if (DRY) {
     p(
-      '\nПлан:\n[1] typecheck + test:api' +
+      `\nПлан${ENV_NAME ? ` — окружение "${ENV_NAME}" (wrangler --env)` : ''}:\n[1] typecheck + test:api` +
         (SKIP ? ' (пропущены)' : '') +
         '\n[2] wrangler whoami\n[3] сборка Mini App (npm run build -w apps/web) — assets воркера\n[4] d1 migrations apply DB --remote (при провале — АБОРТ, деплой не выполняется)\n[5] wrangler deploy\n[6] GET /health\n',
     );
@@ -94,7 +105,7 @@ async function main() {
     die(`wrangler не авторизован: ${who.out}\nВыполните: npm run wrangler -- login`);
   }
   p('   ✓ вошли');
-  const sl = wrangler(['secret', 'list']);
+  const sl = wrangler(['secret', 'list', ...envArgs]);
   if (sl.ok && !sl.out.includes('DATA_KEY'))
     die(
       'DATA_KEY отсутствует в секретах воркера — данные будут fail-closed (503).\n' +
@@ -111,15 +122,16 @@ async function main() {
     die(`сборка web упала — релиз отменён\n${String(e.stdout ?? e.message).slice(-2000)}`);
   }
   p('[4/6] Миграции D1 (remote)');
-  const mig = wrangler(['d1', 'migrations', 'apply', 'DB', '--remote']);
+  const mig = wrangler(['d1', 'migrations', 'apply', 'DB', '--remote', ...envArgs]);
   if (!mig.ok) die(`миграции не применены — ДЕПЛОЙ ОТМЕНЁН\n${mig.out}`);
   p('   ✓ миграции применены');
   p('[5/6] Деплой воркера (+ статика Mini App из apps/web/dist)');
-  const dep = wrangler(['deploy']);
+  const dep = wrangler(['deploy', ...envArgs]);
   if (!dep.ok) die(`deploy: ${dep.out}`);
+  const toml = fs.readFileSync(path.join(apiDir, 'wrangler.toml'), 'utf8');
   const url = deriveWorkerUrl({
     deployOutput: dep.out,
-    workerName: parseWorkerName(fs.readFileSync(path.join(apiDir, 'wrangler.toml'), 'utf8')),
+    workerName: parseWorkerName(ENV_NAME ? envSection(toml, ENV_NAME) : toml),
     subdomain: null,
   });
   p(`   ✓ задеплоен${url ? ` (${maskUrl(url)})` : ''}`);

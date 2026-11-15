@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   deriveWorkerUrl,
+  envSection,
   isValidBotToken,
   nextOffset,
   parseDatabaseId,
@@ -64,6 +65,49 @@ describe('setTomlVar', () => {
     // FOO в [other] не меняется — в [vars] добавляется новый
     expect(out).toContain('[other]\nFOO = "old"');
     expect(out.indexOf('FOO = "new"')).toBeGreaterThan(out.indexOf('[vars]'));
+  });
+
+  it('env-режим: пишет в [env.staging.vars], верхний [vars] не трогает', () => {
+    const t =
+      'name = "api"\n\n[vars]\nTELEGRAM_BOT_USERNAME = "prod_bot"\n\n' +
+      '[env.staging]\nname = "api-staging"\n\n' +
+      '[[env.staging.d1_databases]]\ndatabase_id = "x"\n\n' +
+      '[env.staging.vars]\nTELEGRAM_BOT_USERNAME = "pending"\n';
+    const out = setTomlVar(t, 'TELEGRAM_BOT_USERNAME', 'stage_bot', 'env.staging.vars');
+    expect(out).toContain('TELEGRAM_BOT_USERNAME = "stage_bot"');
+    expect(out).toContain('[vars]\nTELEGRAM_BOT_USERNAME = "prod_bot"'); // прод-username цел
+    expect(out).toContain('database_id = "x"');
+  });
+});
+
+describe('envSection', () => {
+  const toml =
+    'name = "api"\n\n[vars]\nMINI_APP_URL = "https://prod"\n\n' +
+    '[env.staging]\nname = "api-staging"\n\n' +
+    '[[env.staging.d1_databases]]\ndatabase_id = "st-1"\n\n' +
+    '[env.staging.triggers]\ncrons = []\n\n' +
+    '[env.staging.vars]\nMINI_APP_URL = "https://stage"\n';
+
+  it('режет блок [env.<name>] с подтаблицами до следующего чужого top-level', () => {
+    const s = envSection(toml, 'staging');
+    expect(s).toContain('name = "api-staging"');
+    expect(s).toContain('database_id = "st-1"');
+    expect(s).toContain('MINI_APP_URL = "https://stage"');
+    expect(s).not.toContain('"api"'); // верхний name не попал
+    expect(s).not.toContain('https://prod');
+    // парсеры работают по срезу как по целому файлу
+    expect(parseWorkerName(s)).toBe('api-staging');
+    expect(parseDatabaseId(s)).toBe('st-1');
+  });
+
+  it('env-блок не обязан быть последним: обрезает по чужому top-level заголовку', () => {
+    const t = envSection(toml + '\n[env.prod]\nname = "api-prod"\n', 'staging');
+    expect(t).toContain('api-staging');
+    expect(t).not.toContain('api-prod');
+  });
+
+  it('нет такого env → пустая строка', () => {
+    expect(envSection(toml, 'qa')).toBe('');
   });
 });
 

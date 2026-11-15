@@ -1,5 +1,6 @@
 export function isValidBotToken(token: string): boolean;
-export function setTomlVar(tomlText: string, key: string, value: string): string;
+export function envSection(tomlText: string, env: string): string;
+export function setTomlVar(tomlText: string, key: string, value: string, section?: string): string;
 export function parseSecretList(jsonText: string): Set<string>;
 export function pickPrivateSender(
   updates: unknown[] | undefined,
