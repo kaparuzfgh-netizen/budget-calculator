@@ -42,5 +42,10 @@
     "@cloudflare/vitest-plugin": {
       "zod": "4.6.7"
     }
+  },
+  "allowScripts": {
+    "workerd@1.20261110.1": true,
+    "workerd@1.20261019.1": true,
+    "esbuild@0.28.2": true
   }
 }
