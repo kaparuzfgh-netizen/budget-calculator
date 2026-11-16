@@ -11,7 +11,7 @@ import type { Period } from '../domain/report';
 import { buildUserReport } from '../services/report';
 import { baselineIncome } from '../services/baseline';
 import type { FxResult } from '../fx/service';
-import type { CategoryRow, CommitmentRow, ExpenseRow, IncomeEntryRow } from '../db/repo';
+import type { CategoryRow, CommitmentRow, DebtRow, ExpenseRow, IncomeEntryRow } from '../db/repo';
 import type { ReplyMarkup, TelegramClient } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
 import { fmtMoney, fmtPct } from './format';
@@ -167,9 +167,17 @@ export async function runPlan(
     inc.count > 0 ? `<i>Доход за ${month}: ${inc.count} записей</i>` : '',
   ].filter(Boolean);
   if (p.bonus_prepay_share + p.bonus_dca_share > 0 && w.bonusDeltaUsd > 0) {
+    // целевая досрочка — активный кредит с максимальной ставкой
+    const target =
+      w.toPrepayUsd > 0
+        ? (await repo.listDebts()).results.reduce<DebtRow | null>(
+            (m, d) => (d.rate > 0 && (m === null || d.rate > m.rate) ? d : m),
+            null,
+          )
+        : null;
     lines.push(
       `🎁 Дельта бонуса: +${fmtMoney(round2(w.bonusDeltaUsd), 'USD')}` +
-        ` → досрочка ${fmtMoney(round2(w.toPrepayUsd), 'USD')} · DCA ${fmtMoney(round2(w.toDcaUsd), 'USD')}`,
+        ` → досрочка ${fmtMoney(round2(w.toPrepayUsd), 'USD')}${target ? ` («${escapeHtml(target.name)}»)` : ''} · DCA ${fmtMoney(round2(w.toDcaUsd), 'USD')}`,
     );
   }
   lines.push(

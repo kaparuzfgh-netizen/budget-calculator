@@ -97,7 +97,12 @@ export interface PlanData {
   mandatory_usd_minor: number;
   living_usd_minor: number;
   surplus_usd_minor: number;
-  bonus: { delta_usd_minor: number; prepay_usd_minor: number; dca_usd_minor: number } | null;
+  bonus: {
+    delta_usd_minor: number;
+    prepay_usd_minor: number;
+    dca_usd_minor: number;
+    prepay_target: string | null;
+  } | null;
   /** Подушка: остаток в валюте бюджета + покрытие «обязательные+повседневные» в мес. */
   cushion: { minor: number; currency: string; months: number; goal_months: number };
   commitments: OverviewCommitment[];
@@ -155,6 +160,10 @@ export interface Profile {
   vision_enabled?: number;
   /** Подушка безопасности в living_currency (миграция 0019); null — не задана. */
   cushion_minor?: number | null;
+  /** Каскад бонуса: доля дельты дохода → досрочка (0..1); 0/0 — выкл. */
+  bonus_prepay_share?: number;
+  /** Каскад бонуса: доля → накопления/DCA (0..1); сумма долей ≤ 1. */
+  bonus_dca_share?: number;
 }
 
 export type CommitmentFrequency = 'monthly' | 'interval_days' | 'yearly';

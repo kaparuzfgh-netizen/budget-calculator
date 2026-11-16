@@ -742,6 +742,8 @@ export function scoped(db: Env['DB'], userId: number) {
       vision_enabled?: number;
       fx_alerts_enabled?: number;
       cushion_minor?: number;
+      bonus_prepay_share?: number;
+      bonus_dca_share?: number;
     }) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string | null)[] = [];
@@ -759,6 +761,8 @@ export function scoped(db: Env['DB'], userId: number) {
         'vision_enabled',
         'fx_alerts_enabled',
         'cushion_minor',
+        'bonus_prepay_share',
+        'bonus_dca_share',
       ] as const;
       for (const f of FIELDS) {
         if (patch[f] !== undefined) {

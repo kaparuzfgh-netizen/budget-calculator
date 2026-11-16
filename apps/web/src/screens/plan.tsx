@@ -320,7 +320,9 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
         </div>
         {p.bonus && (
           <div class={`${rowCls} mt-2`}>
-            <span class={mutedCls}>Бонус (препей/DCA)</span>
+            <span class={mutedCls}>
+              Бонус (препей{p.bonus.prepay_target ? ` → «${p.bonus.prepay_target}»` : ''}/DCA)
+            </span>
             <span>
               {fmtMinor(p.bonus.prepay_usd_minor, usd)} / {fmtMinor(p.bonus.dca_usd_minor, usd)}
             </span>

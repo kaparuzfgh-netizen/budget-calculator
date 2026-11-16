@@ -392,6 +392,12 @@ function ProfileForms({
   // тема — клиентская настройка (localStorage), применяется мгновенно
   const [light, setLight] = useState(() => getTheme() === 'light');
 
+  // каскад бонуса: доли дельты дохода → досрочка/накопления (проценты 0–100)
+  const [bnPrepay, setBnPrepay] = useState(String(Math.round((p.bonus_prepay_share ?? 0) * 100) || ''));
+  const [bnDca, setBnDca] = useState(String(Math.round((p.bonus_dca_share ?? 0) * 100) || ''));
+  const [bnErr, setBnErr] = useState<string | null>(null);
+  const [bnBusy, setBnBusy] = useState(false);
+
   const saveIncome = async (ev: Event) => {
     ev.preventDefault();
     const n = parseAmount(inc);
@@ -495,6 +501,28 @@ function ProfileForms({
     } finally {
       setRemBusy(false);
     }
+  };
+
+  // доли каскада: проценты 0–100, сумма ≤ 100 (0/0 — каскад выкл)
+  const saveBonus = async (ev: Event) => {
+    ev.preventDefault();
+    const a = bnPrepay.trim() === '' ? 0 : Number(bnPrepay.replace(',', '.'));
+    const d = bnDca.trim() === '' ? 0 : Number(bnDca.replace(',', '.'));
+    if (!Number.isFinite(a) || !Number.isFinite(d) || a < 0 || d < 0 || a > 100 || d > 100)
+      return setBnErr('Доли — числа от 0 до 100');
+    if (a + d > 100) return setBnErr('Сумма долей больше 100% — остаток должен остаться свободным');
+    setBnBusy(true);
+    setBnErr(null);
+    try {
+      await api.patch('/api/tma/profile', { bonus_prepay_share: a / 100, bonus_dca_share: d / 100 });
+      nav.flash('Каскад бонуса сохранён');
+      reload();
+    } catch (e) {
+      setBnErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
+    } finally {
+      setBnBusy(false);
+    }
+    return undefined;
   };
 
   const doExport = async () => {
@@ -643,6 +671,49 @@ function ProfileForms({
           ) : null}
           <FormError msg={incErr} />
           <button type="submit" class={primaryBtnCls} disabled={incBusy}>
+            Сохранить
+          </button>
+        </form>
+      </div>
+
+      <h2 class={`${headCls} mt-6`}>
+        <TrendingUp size={16} strokeWidth={1.5} /> Каскад бонуса
+        <Info title="Каскад бонуса">
+          <p>
+            Если доход месяца выше базового — разница («дельта») распределяется:
+            доля на досрочное погашение кредита с максимальной ставкой и доля
+            на накопления. Остаток остаётся свободными деньгами.
+          </p>
+          <p>
+            Рекомендация видна в плане месяца («/plan» и экран «План»).
+            Оба нуля — каскад выключен.
+          </p>
+        </Info>
+      </h2>
+      <div class={`${cardCls} mt-2`}>
+        <form onSubmit={saveBonus}>
+          <div class="flex gap-3">
+            <Field label="На досрочку, %">
+              <input
+                class={inputCls}
+                inputMode="decimal"
+                placeholder="0"
+                value={bnPrepay}
+                onInput={(e) => setBnPrepay((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+            <Field label="На накопления, %">
+              <input
+                class={inputCls}
+                inputMode="decimal"
+                placeholder="0"
+                value={bnDca}
+                onInput={(e) => setBnDca((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+          </div>
+          <FormError msg={bnErr} />
+          <button type="submit" class={primaryBtnCls} disabled={bnBusy}>
             Сохранить
           </button>
         </form>

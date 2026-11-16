@@ -51,6 +51,9 @@ const profilePatchSchema = z.object({
   reminder_hour: z.number().int().min(0).max(23).nullable().optional(),
   /** «Подушка безопасности» в валюте бюджета (major); 0 — сброс. */
   cushion: z.number().finite().min(0).max(LIMITS.maxAmount).optional(),
+  /** Каскад бонуса: доли дельты дохода → досрочка / DCA (0..1, сумма ≤ 1). */
+  bonus_prepay_share: z.number().finite().min(0).max(1).optional(),
+  bonus_dca_share: z.number().finite().min(0).max(1).optional(),
 });
 
 export function registerTmaProfile(
@@ -170,6 +173,8 @@ export function registerTmaProfile(
       fx_alerts_enabled: p.fx_alerts_enabled,
       vision_enabled: p.vision_enabled,
       cushion_minor: p.cushion_minor,
+      bonus_prepay_share: p.bonus_prepay_share,
+      bonus_dca_share: p.bonus_dca_share,
     });
   });
   app.patch('/api/tma/profile', tmaAuth, async (c) => {
@@ -198,6 +203,11 @@ export function registerTmaProfile(
     if (b.fx_alerts_enabled !== undefined) patch.fx_alerts_enabled = b.fx_alerts_enabled ? 1 : 0;
     if (b.vision_enabled !== undefined) patch.vision_enabled = b.vision_enabled ? 1 : 0;
     if (b.cushion !== undefined) patch.cushion_minor = toMinor(b.cushion);
+    if (b.bonus_prepay_share !== undefined) patch.bonus_prepay_share = b.bonus_prepay_share;
+    if (b.bonus_dca_share !== undefined) patch.bonus_dca_share = b.bonus_dca_share;
+    // сумма долей каскада ≤ 1 — по слитым с текущими значениям
+    const preSum = (patch.bonus_prepay_share ?? p0.bonus_prepay_share) + (patch.bonus_dca_share ?? p0.bonus_dca_share);
+    if (preSum > 1 + 1e-9) return c.json(bad('сумма долей каскада больше 100%').body, 400);
     if (!Object.keys(patch).length) return c.json(bad('нет полей для изменения').body, 400);
     await repo.patchProfile(patch);
     const np = await repo.getProfile();

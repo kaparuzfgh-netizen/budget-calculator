@@ -98,6 +98,14 @@ export function registerTmaApi(
       const needUsd = mandatoryUsd + w.livingUsd;
       const cushionMinor = p.cushion_minor ?? 0;
       const cushionUsd = usd(cushionMinor / 100, p.living_currency, fxr.perUsd);
+      // целевая досрочка каскада — активный кредит с макс. ставкой
+      const prepayTarget =
+        p.bonus_prepay_share + p.bonus_dca_share > 0 && w.bonusDeltaUsd > 0 && w.toPrepayUsd > 0
+          ? (await repo.listDebts()).results.reduce<{ name: string; rate: number } | null>(
+              (m, d) => (d.rate > 0 && (m === null || d.rate > m.rate) ? d : m),
+              null,
+            )?.name ?? null
+          : null;
       return okJson(c, {
         month,
         today: todayInTz(p.timezone, now),
@@ -116,7 +124,12 @@ export function registerTmaApi(
         },
         bonus:
           p.bonus_prepay_share + p.bonus_dca_share > 0 && w.bonusDeltaUsd > 0
-            ? { delta_usd_minor: toMinor(round2(w.bonusDeltaUsd)), prepay_usd_minor: toMinor(round2(w.toPrepayUsd)), dca_usd_minor: toMinor(round2(w.toDcaUsd)) }
+            ? {
+                delta_usd_minor: toMinor(round2(w.bonusDeltaUsd)),
+                prepay_usd_minor: toMinor(round2(w.toPrepayUsd)),
+                dca_usd_minor: toMinor(round2(w.toDcaUsd)),
+                prepay_target: prepayTarget,
+              }
             : null,
         commitments: commits.map((x) => ({
           name: x.name,

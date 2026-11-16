@@ -124,6 +124,43 @@ describe('/api/tma/* — контракт', () => {
     expect(p3.cushion.goal_months).toBe(3);
   });
 
+  it('каскад бонуса: PATCH долей → GET отражает; сумма >1 → 400; план показывает цель досрочки', async () => {
+    const { uid, token } = await user(900150);
+    // валидация: границы и слитая сумма ≤ 1
+    expect((await api('/api/tma/profile', { method: 'PATCH', token, body: { bonus_prepay_share: 1.5 } })).status).toBe(400);
+    expect((await api('/api/tma/profile', { method: 'PATCH', token, body: { bonus_prepay_share: -0.1 } })).status).toBe(400);
+    expect(
+      (await api('/api/tma/profile', { method: 'PATCH', token, body: { bonus_prepay_share: 0.7, bonus_dca_share: 0.4 } })).status,
+    ).toBe(400);
+    // 0.6/0.3 — ок; частичный PATCH не может превысить сумму с учётом хранимого
+    expect((await api('/api/tma/profile', { method: 'PATCH', token, body: { bonus_prepay_share: 0.6, bonus_dca_share: 0.3 } })).status).toBe(200);
+    expect((await api('/api/tma/profile', { method: 'PATCH', token, body: { bonus_dca_share: 0.5 } })).status).toBe(400); // 0.6+0.5
+    const prof = (await (await api('/api/tma/profile', { token })).json()) as {
+      bonus_prepay_share: number;
+      bonus_dca_share: number;
+    };
+    expect(prof.bonus_prepay_share).toBe(0.6);
+    expect(prof.bonus_dca_share).toBe(0.3);
+    // два кредита — цель досрочки = макс. ставка
+    await scoped(env.DB, uid).addDebt({
+      name: 'Ипотека', currency: 'USD', rate: 0.12, frequency: 'monthly',
+      initial_balance_minor: 9000000, initial_payment_minor: 90000, epoch: '2024-01-05', due_day: 5,
+    });
+    await scoped(env.DB, uid).addDebt({
+      name: 'Рассрочка', currency: 'USD', rate: 0.03, frequency: 'monthly',
+      initial_balance_minor: 300000, initial_payment_minor: 30000, epoch: '2024-02-05', due_day: 5,
+    });
+    // доход override 5000 > база 1000 → дельта 4000: 2400 досрочка / 1200 DCA
+    const plan = (await (await api('/api/tma/plan?income=5000&currency=USD', { token })).json()) as {
+      bonus: { delta_usd_minor: number; prepay_usd_minor: number; dca_usd_minor: number; prepay_target: string | null } | null;
+    };
+    expect(plan.bonus).not.toBeNull();
+    expect(plan.bonus!.delta_usd_minor).toBe(400000);
+    expect(plan.bonus!.prepay_usd_minor).toBe(240000);
+    expect(plan.bonus!.dca_usd_minor).toBe(120000);
+    expect(plan.bonus!.prepay_target).toBe('Ипотека');
+  });
+
   it('expenses CRUD + client_id идемпотентность + изоляция', async () => {
     const A = await user(900003);
     const B = await user(900004);
