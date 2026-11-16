@@ -36,6 +36,12 @@ npm run setup                   # --dry-run — только план
 `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET`, `OWNER_TELEGRAM_ID`) → регистрация
 webhook → menu-button «💰 Бюджет».
 
+> **Корневой `.env` (необязательно).** Скрипты `setup`, `webhook:*` читают
+> `.env` в корне (шаблон — `.env.example`: `TELEGRAM_BOT_TOKEN`,
+> `TELEGRAM_WEBHOOK_SECRET`), чтобы не вводить токен каждый раз. Файл в
+> `.gitignore`; секреты воркера — `wrangler secret put`, локально —
+> `apps/api/.dev.vars`.
+
 ## Шаг 5 · 1 мин — проверка
 
 - Напишите боту `/start` → онбординг профиля (доход, валюты, лимит).

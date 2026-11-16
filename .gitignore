@@ -4,6 +4,7 @@ secrets.local.json
 secrets.*.local.json
 .env
 .env.*
+!.env.example
 
 # ── clasp (реальные креды/ID проекта) ─────────────────────────
 .clasp.json
