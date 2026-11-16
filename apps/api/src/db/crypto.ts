@@ -127,6 +127,8 @@ export const FIELDS: FieldsSpec = {
   categories: { name: 'str', emoji: 'str' },
   // uid для users — PK id (колонки user_id нет): decRow берёт id, backfill — WHERE id=?
   users: { display_name: 'str' },
+  // uid для households — тоже PK id (общий бюджет пары): ключ от household.id
+  households: { living_cap_minor: 'num', weekly_budget_minor: 'num' },
 };
 
 /** Дешифровать строку по FIELDS-спеку (null → null). */

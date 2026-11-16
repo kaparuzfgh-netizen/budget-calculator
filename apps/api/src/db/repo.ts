@@ -1294,8 +1294,34 @@ export interface UserRow {
   deleted_at: string | null;
 }
 
+export interface HouseholdRow {
+  id: number;
+  living_cap_minor: number;
+  living_currency: string;
+  weekly_budget_minor: number;
+  created_by: number;
+  created_at: string;
+}
+
+export interface HouseholdMemberRow {
+  user_id: number;
+  role: 'owner' | 'member';
+  joined_at: string;
+  display_name: string | null;
+  telegram_id: number;
+}
+
 export type AuditAction =
-  'owner_bootstrap' | 'invite_created' | 'invite_redeemed' | 'invite_redeem_failed' | 'id_reply';
+  | 'owner_bootstrap'
+  | 'invite_created'
+  | 'invite_redeemed'
+  | 'invite_redeem_failed'
+  | 'id_reply'
+  | 'household_created'
+  | 'household_invite_created'
+  | 'household_joined'
+  | 'household_join_failed'
+  | 'household_left';
 
 /** Глобальные таблицы доступа — user-data здесь нет (S5 применяется к scoped). */
 export function accessRepo(db: Env['DB']) {
@@ -1417,6 +1443,187 @@ export function accessRepo(db: Env['DB']) {
       return { redeemed: u.meta.changes === 1, userId };
     },
 
+    // ── households: общий бюджет пары (access-контур, как users/invites) ──
+
+    /** Household пользователя или null (row — с дешифрованными enc1-полями). */
+    async householdFor(userId: number): Promise<HouseholdRow | null> {
+      const r = await db
+        .prepare(
+          'SELECT h.* FROM households h JOIN household_members m ON m.household_id = h.id WHERE m.user_id = ?',
+        )
+        .bind(userId)
+        .first<HouseholdRow>();
+      return decRow('households', r);
+    },
+
+    /** Члены пары: user_id + роль + имя/tg из users (имя дешифруется per-user). */
+    async householdMembers(householdId: number): Promise<HouseholdMemberRow[]> {
+      const r = await db
+        .prepare(
+          'SELECT m.user_id, m.role, m.joined_at, u.display_name, u.telegram_id ' +
+            'FROM household_members m JOIN users u ON u.id = m.user_id ' +
+            'WHERE m.household_id = ? ORDER BY m.joined_at',
+        )
+        .bind(householdId)
+        .all<HouseholdMemberRow>();
+      await Promise.all(r.results.map((x) => decRow('users', x)));
+      return r.results;
+    },
+
+    /**
+     * Создать household (лимит enc1: ключ — id, как у users → insert + UPDATE)
+     * и вписать создателя owner'ом. Возвращает id household.
+     */
+    async createHousehold(createdBy: number, capMinor: number, ccy: string, weeklyMinor: number): Promise<number> {
+      const r = await db
+        .prepare('INSERT INTO households (living_cap_minor, living_currency, weekly_budget_minor, created_by) VALUES (0, ?, 0, ?)')
+        .bind(ccy, createdBy)
+        .run();
+      const id = Number(r.meta.last_row_id);
+      await db
+        .prepare('UPDATE households SET living_cap_minor = ?, weekly_budget_minor = ? WHERE id = ?')
+        .bind(
+          await encNum(id, 'households', 'living_cap_minor', capMinor),
+          await encNum(id, 'households', 'weekly_budget_minor', weeklyMinor),
+          id,
+        )
+        .run();
+      await db
+        .prepare("INSERT INTO household_members (household_id, user_id, role) VALUES (?, ?, 'owner')")
+        .bind(id, createdBy)
+        .run();
+      return id;
+    },
+
+    /**
+     * Вступить: атомарно — место < 2 и юзер ещё не в household
+     * (страховка поверх UNIQUE: гонка двух инвайтов одного юзера).
+     */
+    async joinHousehold(householdId: number, userId: number, nowIso: string): Promise<boolean> {
+      const r = await db
+        .prepare(
+          'INSERT INTO household_members (household_id, user_id, role, joined_at) ' +
+            'SELECT ?, ?, ?, ? ' +
+            'WHERE (SELECT COUNT(*) FROM household_members WHERE household_id = ?) < 2 ' +
+            'AND NOT EXISTS (SELECT 1 FROM household_members WHERE user_id = ?)',
+        )
+        .bind(householdId, userId, 'member', nowIso, householdId, userId)
+        .run();
+      return r.meta.changes === 1;
+    },
+
+    /**
+     * Выйти из пары: один batch — удалить членство, затем снести опустевший
+     * household (ON DELETE CASCADE добьёт его членство — члена уже нет).
+     * Возвращает id покинутого household или null (не был в паре).
+     */
+    async leaveHousehold(userId: number): Promise<number | null> {
+      const mine = await db
+        .prepare('SELECT household_id FROM household_members WHERE user_id = ?')
+        .bind(userId)
+        .first<{ household_id: number }>();
+      if (!mine) return null;
+      await db.batch([
+        db.prepare('DELETE FROM household_members WHERE user_id = ?').bind(userId),
+        // invites.household_id — FK на удаляемый household: зануляем (строка-история остаётся)
+        db.prepare('UPDATE invites SET household_id = NULL WHERE household_id = ?').bind(mine.household_id),
+        // только ЕГО опустевший household — чужую новую пару без членов не сносим
+        db
+          .prepare('DELETE FROM households WHERE id = ? AND NOT EXISTS (SELECT 1 FROM household_members WHERE household_id = ?)')
+          .bind(mine.household_id, mine.household_id),
+      ]);
+      return mine.household_id;
+    },
+
+    /** Общий лимит пары (enc1: по household.id) — вызывающий проверил членство. */
+    async updateHouseholdCap(householdId: number, capMinor: number, ccy: string, weeklyMinor: number) {
+      return db
+        .prepare('UPDATE households SET living_cap_minor = ?, living_currency = ?, weekly_budget_minor = ? WHERE id = ?')
+        .bind(
+          await encNum(householdId, 'households', 'living_cap_minor', capMinor),
+          ccy,
+          await encNum(householdId, 'households', 'weekly_budget_minor', weeklyMinor),
+          householdId,
+        )
+        .run();
+    },
+
+    createHouseholdInvite(codeHash: string, createdBy: number, householdId: number, expiresAtIso: string) {
+      return db
+        .prepare("INSERT INTO invites (code_hash, created_by, expires_at, kind, household_id) VALUES (?, ?, ?, 'household', ?)")
+        .bind(codeHash, createdBy, expiresAtIso, householdId)
+        .run();
+    },
+
+    /**
+     * Погасить household-инвайт — batch из двух условных шагов:
+     *   1. INSERT члена — только если инвайт kind='household', не использован,
+     *      не истёк, в паре есть место и юзер ещё ни в одной паре;
+     *   2. UPDATE инвайта — только если член реально появился (инвайт не
+     *      сгорает при отказе «место занято»/«уже в паре»).
+     * redeemed = членство создано.
+     */
+    async redeemHouseholdInvite(codeHash: string, userId: number, nowIso: string) {
+      const ins = db
+        .prepare(
+          'INSERT INTO household_members (household_id, user_id, role, joined_at) ' +
+            "SELECT i.household_id, ?, 'member', ? FROM invites i " +
+            "WHERE i.code_hash = ? AND i.kind = 'household' AND i.used_at IS NULL AND i.expires_at > ? " +
+            'AND (SELECT COUNT(*) FROM household_members m WHERE m.household_id = i.household_id) < 2 ' +
+            'AND NOT EXISTS (SELECT 1 FROM household_members m WHERE m.user_id = ?)',
+        )
+        .bind(userId, nowIso, codeHash, nowIso, userId);
+      const upd = db
+        .prepare(
+          'UPDATE invites SET used_by = ?, used_at = ? WHERE code_hash = ? AND used_at IS NULL ' +
+            'AND EXISTS (SELECT 1 FROM household_members m WHERE m.user_id = ? AND m.household_id = invites.household_id)',
+        )
+        .bind(userId, nowIso, codeHash, userId);
+      const [i] = await db.batch([ins, upd]);
+      if (!i) throw new Error('redeemHouseholdInvite: пустой результат batch');
+      return { redeemed: i.meta.changes === 1 };
+    },
+
+    /**
+     * Погасить household-инвайт НОВЫМ пользователем — atomic batch, как
+     * redeemInvite: юзер создаётся, членство и погашение — только если
+     * инвайт валиден и есть место; сирота-юзер удаляется при отказе.
+     */
+    async redeemHouseholdInviteNewUser(codeHash: string, tgId: number, displayName: string | null, nowIso: string) {
+      const insUser = db
+        .prepare("INSERT INTO users (telegram_id, display_name, role) VALUES (?, NULL, 'member')")
+        .bind(tgId);
+      const insMember = db
+        .prepare(
+          'INSERT INTO household_members (household_id, user_id, role, joined_at) ' +
+            "SELECT i.household_id, last_insert_rowid(), 'member', ? FROM invites i " +
+            "WHERE i.code_hash = ? AND i.kind = 'household' AND i.used_at IS NULL AND i.expires_at > ? " +
+            'AND (SELECT COUNT(*) FROM household_members m WHERE m.household_id = i.household_id) < 2',
+        )
+        .bind(nowIso, codeHash, nowIso);
+      // фаза 1: юзер + членство (last_insert_rowid() в insMember = users.id).
+      // Дальше last_insert_rowid уже затирается rowid household_members —
+      // поэтому погашение/удаление — второй фазой с явным userId.
+      const [u, m] = await db.batch([insUser, insMember]);
+      if (!u || !m) throw new Error('redeemHouseholdInviteNewUser: пустой результат batch');
+      const userId = Number(u.meta.last_row_id);
+      if (m.meta.changes === 1) {
+        await db
+          .prepare('UPDATE invites SET used_by = ?, used_at = ? WHERE code_hash = ? AND used_at IS NULL')
+          .bind(userId, nowIso, codeHash)
+          .run();
+        // имя — отдельным UPDATE: uid=users.id неизвестен до вставки
+        if (displayName !== null) await setDisplayName(userId, displayName);
+      } else {
+        // членство не вставилось (инвайт мёртв/занят) → сироту-юзера сносим
+        await db
+          .prepare('DELETE FROM users WHERE id = ? AND NOT EXISTS (SELECT 1 FROM household_members WHERE user_id = ?)')
+          .bind(userId, userId)
+          .run();
+      }
+      return { redeemed: m.meta.changes === 1, userId };
+    },
+
     /** Идемпотентность webhook: true → update новый, false → дубликат. */
     async markUpdateProcessed(updateId: number): Promise<boolean> {
       const r = await db.prepare('INSERT OR IGNORE INTO processed_updates (update_id) VALUES (?)').bind(updateId).run();
@@ -1505,9 +1712,9 @@ export async function encryptBackfill(db: Env['DB'], limitPerTable = 200): Promi
   for (const [table, cols] of Object.entries(FIELDS)) {
     const colNames = Object.keys(cols);
     const unenc = (c: string) => `(${c} IS NOT NULL AND (typeof(${c}) != 'text' OR ${c} NOT LIKE 'enc1:%'))`;
-    // PK-варианты: user_id (profiles/conversation_state) / id=uid (users) / id+user_id (остальные)
+    // PK-варианты: user_id (profiles/conversation_state) / id=uid (users, households) / id+user_id (остальные)
     const userKeyed = table === 'conversation_state' || table === 'profiles';
-    const selfKeyed = table === 'users';
+    const selfKeyed = table === 'users' || table === 'households';
     const keyCols = userKeyed ? 'user_id' : selfKeyed ? 'id' : 'id, user_id';
     const rows = await db
       .prepare(`SELECT ${keyCols}, ${colNames.join(', ')} FROM ${table} WHERE ${colNames.map(unenc).join(' OR ')} LIMIT ?`)

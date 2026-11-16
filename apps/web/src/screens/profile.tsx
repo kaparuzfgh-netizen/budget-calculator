@@ -27,11 +27,12 @@ import {
   SunMoon,
   TrendingUp,
   Upload,
+  Users,
   Wallet,
   Zap,
 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { Api, CommitmentsList, Profile } from '../api';
+import type { Api, CommitmentsList, HouseholdInviteResponse, HouseholdResponse, HouseholdSummary, Profile } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import type { SelectOption } from '../ui';
 import { amountError, currencyError, fmtMinor, parseAmount, timezoneError, todayIso } from '../fmt';
@@ -140,6 +141,7 @@ function tzOptions(current: string): SelectOption[] {
 export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
   const prof = useData(() => api.get<Profile>('/api/tma/profile'), onFatal, []);
   const com = useData(() => api.get<CommitmentsList>('/api/tma/commitments'), onFatal, []);
+  const hh = useData(() => api.get<HouseholdResponse>('/api/tma/household'), onFatal, []);
   // профиль без онбординга — как «нет доступа» (завершить /start в боте)
   useFatalOn(prof.data !== undefined && !prof.data.onboarded, onFatal);
 
@@ -224,6 +226,9 @@ export function ProfileScreen({ api, nav, onFatal }: ScreenProps) {
         p={p}
         reload={prof.reload}
         payments={payments}
+        pair={hh.data?.household ?? null}
+        pairLoading={hh.loading}
+        pairReload={hh.reload}
       />
     </>
   );
@@ -343,12 +348,18 @@ function ProfileForms({
   p,
   reload,
   payments,
+  pair,
+  pairLoading,
+  pairReload,
 }: {
   api: Api;
   nav: Nav;
   p: Profile;
   reload: () => void;
   payments: ComponentChildren;
+  pair: HouseholdSummary | null;
+  pairLoading: boolean;
+  pairReload: () => void;
 }) {
   // базовый доход (0/пусто = «вычисляется»: платежи + бюджет + кредиты)
   const [inc, setInc] = useState(String((p.typical_income_minor ?? 0) / 100 || ''));
@@ -761,6 +772,24 @@ function ProfileForms({
       </div>
 
       <h2 class={`${headCls} mt-6`}>
+        <Users size={16} strokeWidth={1.5} /> Семья
+        <Info title="Общий бюджет на двоих">
+          <p>
+            Один недельный лимит на пару — траты обоих идут в общий котёл.
+            Партнёр присоединяется по одноразовой ссылке. Суммы трат друг
+            друга видны, строки и категории — нет.
+          </p>
+        </Info>
+      </h2>
+      {pairLoading ? (
+        <div class={`${cardCls} mt-2`}>
+          <p class={mutedCls}>Загрузка…</p>
+        </div>
+      ) : (
+        <FamilyCard key={pair ? `hh` : 'none'} api={api} nav={nav} pair={pair} reload={pairReload} />
+      )}
+
+      <h2 class={`${headCls} mt-6`}>
         <Database size={16} strokeWidth={1.5} /> Данные
       </h2>
       <div class={`${cardCls} mt-2`}>
@@ -780,5 +809,163 @@ function ProfileForms({
         </p>
       </div>
     </>
+  );
+}
+
+// ── Семья: общий бюджет пары ──
+
+function FamilyCard({
+  api,
+  nav,
+  pair,
+  reload,
+}: {
+  api: Api;
+  nav: Nav;
+  pair: HouseholdSummary | null;
+  reload: () => void;
+}) {
+  const [cap, setCap] = useState(String((pair?.living_cap_minor ?? 0) / 100 || ''));
+  const [ccy, setCcy] = useState(pair?.currency ?? 'USD');
+  const [joinCode, setJoinCode] = useState('');
+  const [invite, setInvite] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const fail = (e: unknown) => setErr(e instanceof ApiError ? e.message : 'Не удалось — проверьте соединение');
+
+  const createInvite = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.post<HouseholdInviteResponse>('/api/tma/household/invite');
+      setInvite(r.link ?? r.code);
+      nav.flash('Приглашение создано — отправьте ссылку партнёру');
+      reload();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const join = async (ev: Event) => {
+    ev.preventDefault();
+    if (!joinCode.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.post('/api/tma/household/join', { code: joinCode });
+      nav.flash('Вы в общем бюджете');
+      reload();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+    return undefined;
+  };
+
+  const saveCap = async (ev: Event) => {
+    ev.preventDefault();
+    const aErr = amountError(cap);
+    const cErr = currencyError(ccy);
+    if (aErr || cErr) return setErr(aErr ?? cErr);
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.patch('/api/tma/household', { living_cap: parseAmount(cap), living_currency: ccy.trim().toUpperCase() });
+      nav.flash('Общий лимит сохранён');
+      reload();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+    return undefined;
+  };
+
+  const leave = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.post('/api/tma/household/leave');
+      nav.flash('Вы вышли из общего бюджета');
+      reload();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!pair) {
+    return (
+      <div class={`${cardCls} mt-2`}>
+        <p class={`${mutedCls} mb-3`}>
+          Общий недельный бюджет на двоих. Создайте пару — партнёр присоединится по ссылке —
+          или введите код приглашения от партнёра.
+        </p>
+        {invite ? (
+          <div class={`${cardCls} bg-fill/40 mb-3 break-all text-[13px]`}>
+            <p class={mutedCls}>Передайте партнёру (одноразовая, 48 ч):</p>
+            <p class="mt-1 font-mono text-sky-400">{invite}</p>
+          </div>
+        ) : (
+          <button type="button" class={primaryBtnCls} disabled={busy} onClick={() => void createInvite()}>
+            <Users size={16} strokeWidth={1.5} /> Создать общий бюджет
+          </button>
+        )}
+        <form class="mt-3 flex gap-2" onSubmit={(e) => void join(e)}>
+          <input
+            class={`${inputCls} flex-1`}
+            placeholder="Код приглашения или ссылка"
+            value={joinCode}
+            onInput={(e) => setJoinCode((e.target as HTMLInputElement).value)}
+          />
+          <button type="submit" class={smBtnCls} disabled={busy || !joinCode.trim()}>
+            Вступить
+          </button>
+        </form>
+        <FormError msg={err} />
+      </div>
+    );
+  }
+
+  return (
+    <div class={`${cardCls} mt-2`}>
+      {pair.members.map((m) => (
+        <div key={m.user_id} class={rowCls}>
+          <span>{m.is_me ? 'Вы' : (m.name ?? 'Партнёр')}</span>
+          <span class={mutedCls}>
+            {fmtMinor(m.spent_week_minor, pair.currency)} за неделю{m.role === 'owner' ? ' · создатель' : ''}
+          </span>
+        </div>
+      ))}
+      <form class="mt-4" onSubmit={(e) => void saveCap(e)}>
+        <Field label="Месячный лимит пары">
+          <div class="flex gap-2">
+            <input
+              class={`${inputCls} flex-1`}
+              inputMode="decimal"
+              value={cap}
+              onInput={(e) => setCap((e.target as HTMLInputElement).value)}
+            />
+            <input
+              class={`${inputCls} w-20`}
+              maxLength={5}
+              value={ccy}
+              onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
+            />
+          </div>
+        </Field>
+        <button type="submit" class={`${primaryBtnCls} mt-3`} disabled={busy}>
+          Сохранить лимит
+        </button>
+      </form>
+      <button type="button" class={`${secondaryBtnCls} mt-2 text-red-400`} disabled={busy} onClick={() => void leave()}>
+        Выйти из общего бюджета
+      </button>
+      <FormError msg={err} />
+    </div>
   );
 }

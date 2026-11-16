@@ -124,4 +124,14 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     текстовая/amount-колонка ОБЯЗАТЕЛЬНО добавляется в `FIELDS`.
     `users.display_name` — тоже `enc1:`, но uid там = `users.id`
     (колонки `user_id` нет); имя обновляется refresh-on-change на вебхуке
-    и в `/api/tma/auth` (`accessRepo.refreshDisplayName`).
+    и в `/api/tma/auth` (`accessRepo.refreshDisplayName`). `households`
+    — тоже self-keyed (ключ от `households.id`): insert двухшаговый,
+    как у users.
+20. **Общий бюджет пары:** `households` + `household_members` (≤2 члена,
+    юзер — максимум в одном). Членство проверяется на КАЖДЫЙ запрос
+    (`householdFor(user.id)`), наружу — только агрегаты по людям
+    (`householdSummary`): строки трат и категории партнёра не отдаются.
+    Приглашение — `invites.kind='household'` + `household_id`, код
+    `hh_<hex>` (хэш хранится от полного кода с префиксом). Выход члена
+    удаляет только ЕГО опустевший household (+ зануляет
+    `invites.household_id` — FK), чужие пустые не трогает.

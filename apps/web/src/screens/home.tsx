@@ -17,10 +17,11 @@ import {
   Plus,
   Receipt,
   User,
+  Users,
   Wallet,
 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { Overview, Upcoming, UpcomingItem, WeekStatus } from '../api';
+import type { HouseholdResponse, Overview, Upcoming, UpcomingItem, WeekStatus } from '../api';
 import type { ScreenProps } from '../app';
 import { fmtDay, fmtMinor } from '../fmt';
 import {
@@ -511,6 +512,7 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
   const ov = useData(() => api.get<Overview>('/api/tma/overview'), onFatal, []);
   const wk = useData(() => api.get<WeekStatus>('/api/tma/week'), onFatal, []);
   const up = useData(() => api.get<Upcoming>('/api/tma/upcoming'), onFatal, []);
+  const hh = useData(() => api.get<HouseholdResponse>('/api/tma/household'), onFatal, []);
   const [openB, setOpenB] = useState(false);
   const [whatIfMinor, setWhatIfMinor] = useState<number | null>(null);
   // вид hero-графика: tempo-проп — стартовый (демо), дальше — выбор в «деталях»
@@ -541,6 +543,8 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
       />
     );
   }
+  // общий бюджет — опционально: ошибка/loading не блокируют экран
+  const pair = hh.data?.household ?? null;
 
   const o = ov.data;
   const w = wk.data;
@@ -849,6 +853,41 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
           </div>
         )}
       </div>
+
+      {pair && (
+        <>
+          <h2 class={`${headCls} mt-6`}>
+            <Users size={16} strokeWidth={1.5} /> Общий бюджет
+            <Info title="Бюджет на двоих">
+              <p>
+                Общий недельный лимит пары — траты обоих считаются вместе.
+                Лимит меняется в профиле → «Семья». Траты партнёра видны
+                только суммой, без деталей.
+              </p>
+            </Info>
+          </h2>
+          <div class={`${cardCls} mt-2`}>
+            <div class={rowCls}>
+              <span class={mutedCls}>Неделя</span>
+              <b class={pair.week_over ? 'text-red-400' : ''}>
+                {fmtMinor(pair.spent_week_minor, pair.currency)} / {fmtMinor(pair.weekly_budget_minor, pair.currency)}
+              </b>
+            </div>
+            <BudgetBar share={pair.weekly_budget_minor > 0 ? pair.spent_week_minor / pair.weekly_budget_minor : 0} />
+            {pair.members.map((mem) => (
+              <div key={mem.user_id} class={`${rowCls} mt-2`}>
+                <span class={mutedCls}>{mem.is_me ? 'Вы' : (mem.name ?? 'Партнёр')}</span>
+                <span>{fmtMinor(mem.spent_week_minor, pair.currency)}</span>
+              </div>
+            ))}
+            <div class={`${rowCls} mt-2`}>
+              <span class={mutedCls}>Лимит месяца</span>
+              <span>{fmtMinor(pair.living_cap_minor, pair.currency)}</span>
+            </div>
+            {pair.fx_note && <p class="mt-1.5 text-[12px] text-amber-400">{pair.fx_note}</p>}
+          </div>
+        </>
+      )}
 
       <h2 class={`${headCls} mt-6`}>
         <Banknote size={16} strokeWidth={1.5} /> Доход за месяц

@@ -23,6 +23,7 @@ import { registerTmaExpenses } from '../tma/expenses';
 import { registerTmaProfile } from '../tma/profile';
 import { registerTmaDebts } from '../tma/debts';
 import { registerTmaFx } from '../tma/fx';
+import { registerTmaHousehold } from '../tma/household';
 import { registerTmaVision } from '../tma/vision';
 import { version as APP_VERSION } from '../../package.json';
 
@@ -201,6 +202,7 @@ export function createRouter(deps: RouterDeps = {}) {
   registerTmaCommitments(app, tmaAuth);
   registerTmaDebts(app, tmaAuth, fxProvider);
   registerTmaFx(app, tmaAuth, fxProvider);
+  registerTmaHousehold(app, tmaAuth, fxProvider);
   // Скриншот банка из Mini App — те же ключи/фетч, что и у бота
   // (deps.vision в тестах, env-секреты в проде; резолвится на запрос).
   registerTmaVision(app, tmaAuth, (c) =>

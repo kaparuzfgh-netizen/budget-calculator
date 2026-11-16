@@ -13,6 +13,8 @@ import { INVITE_TTL_MS, MAX_ACTIVE_INVITES, TEXT, inviteLink } from '../bot/comm
 import { advance, onCcyResult, startOnboarding, type ObEffect, type ObInput, type ObState } from '../bot/onboarding';
 import { monthInTz, parseAmount, todayInTz } from '../bot/parse';
 import { handleExCategory, runIncome, runPlan, runProfile, runReport, runSpent, runWeek } from '../bot/features';
+import { householdLine, householdSummary } from './household';
+import { fmtMoney } from '../bot/format';
 import type { Period } from '../domain/report';
 import { advancePf, renderPf, type PfState } from '../bot/profile';
 import {
@@ -386,6 +388,12 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
   const tz = profile.timezone;
   const today = todayInTz(tz, deps.now ?? new Date());
   const fx = fxAdapter(deps);
+  // /start hh_<код> — вход в общий бюджет по ссылке (известный юзер)
+  const hhCode = START_RE.exec(cmd)?.[1];
+  if (hhCode?.startsWith('hh_')) {
+    await joinHouseholdCmd(msg, user, hhCode.slice(3), deps);
+    return;
+  }
   if (START_RE.test(cmd) || CMD('menu').test(cmd) || text === '🏠 Меню') {
     await tg.sendMessage(msg.chatId, 'Главное меню', { replyMarkup: homeMarkup() });
     return;
@@ -503,6 +511,10 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     await createInvite(msg, user, deps, accessRepo(deps.db));
     return;
   }
+  if (CMD('family').test(cmd)) {
+    await familyCmd(msg, user, deps);
+    return;
+  }
   // Быстрый ввод: голая сумма вне активного шага — это трата («500 кафе»).
   // Активные шаги (spent_ask/income_ask/онбординг) обрабатываются выше и сюда
   // не доходят.
@@ -542,6 +554,11 @@ export async function handleMessage(msg: IncomingMessage, deps: AccessDeps): Pro
     const m = START_RE.exec(msg.text);
     const code = m?.[1];
     if (code) {
+      // hh_<код> — инвайт в общий бюджет пары (создаёт юзера + членство)
+      if (code.startsWith('hh_')) {
+        await redeemHouseholdNewUser(msg, code.slice(3), deps, repo);
+        return;
+      }
       await redeemInvite(msg, code, deps, repo);
       return;
     }
@@ -748,4 +765,119 @@ async function redeemInvite(msg: IncomingMessage, code: string, deps: AccessDeps
   const reason = await repo.inviteState(codeHash);
   await repo.audit('invite_redeem_failed', null, { reason });
   await tg.sendMessage(msg.chatId, TEXT.inviteInvalid);
+}
+
+// ── общий бюджет пары (/family, hh_-инвайты) ──
+
+/** /family: статус · создание пары+инвайта · /family leave — выход. */
+async function familyCmd(msg: IncomingMessage, user: UserRow, deps: AccessDeps) {
+  const tg = deps.telegram;
+  const repo = accessRepo(deps.db);
+  const existing = await repo.householdFor(user.id);
+
+  if (/\bleave\b/.test(msg.text)) {
+    if (!existing) {
+      await tg.sendMessage(msg.chatId, TEXT.familyNoPair);
+      return;
+    }
+    const members = await repo.householdMembers(existing.id);
+    await repo.leaveHousehold(user.id);
+    await repo.audit('household_left', user.id);
+    await tg.sendMessage(msg.chatId, TEXT.familyLeft);
+    const other = members.find((m) => m.user_id !== user.id);
+    if (other) await tg.sendMessage(other.telegram_id, TEXT.familyLeftPartner(user.display_name));
+    return;
+  }
+
+  if (!existing) {
+    const now = new Date();
+    if ((await repo.countActiveInvites(user.id, now.toISOString())) >= MAX_ACTIVE_INVITES) {
+      await tg.sendMessage(msg.chatId, TEXT.inviteLimit);
+      return;
+    }
+    // лимит по умолчанию — личный living_cap партнёра-создателя
+    const prof = await scoped(deps.db, user.id).getProfile();
+    const capMinor = prof?.living_cap_minor ?? 0;
+    const ccy = prof?.living_currency ?? 'USD';
+    const weeklyMinor = prof?.weekly_budget_minor ?? Math.round((capMinor * 12) / 52);
+    const hhId = await repo.createHousehold(user.id, capMinor, ccy, weeklyMinor);
+    const code = `hh_${newInviteCode()}`;
+    const expiresAt = new Date(now.getTime() + INVITE_TTL_MS).toISOString();
+    await repo.createHouseholdInvite(await sha256Hex(code), user.id, hhId, expiresAt);
+    // хэш хранится от полного кода с префиксом 'hh_' (входы: бот/TMA — одинаково)
+    await repo.audit('household_invite_created', user.id, { expires_at: expiresAt });
+    await tg.sendMessage(msg.chatId, TEXT.familyInvite(inviteLink(code, deps.botUsername), code));
+    return;
+  }
+
+  // статус: недельная строка «потрачено / лимит» + месячный лимит
+  const fmt = (minor: number, ccy: string) => fmtMoney(minor / 100, ccy);
+  try {
+    const s = await householdSummary(deps.db, user.id, fxAdapter(deps).get, deps.now ?? new Date());
+    if (!s) {
+      await tg.sendMessage(msg.chatId, TEXT.familyNoPair);
+      return;
+    }
+    await tg.sendMessage(msg.chatId, TEXT.familyStatus(householdLine(s, fmt), fmt(s.living_cap_minor, s.currency)));
+  } catch {
+    await tg.sendMessage(msg.chatId, TEXT.familyStatus(fmt(existing.weekly_budget_minor, existing.living_currency), fmt(existing.living_cap_minor, existing.living_currency)));
+  }
+}
+
+/** /start hh_<код> у известного юзера — join в существующий household. */
+async function joinHouseholdCmd(msg: IncomingMessage, user: UserRow, code: string, deps: AccessDeps) {
+  const tg = deps.telegram;
+  const repo = accessRepo(deps.db);
+  if (await repo.householdFor(user.id)) {
+    await tg.sendMessage(msg.chatId, TEXT.familyAlready);
+    return;
+  }
+  const r = await repo.redeemHouseholdInvite(await sha256Hex(`hh_${code}`), user.id, new Date().toISOString());
+  if (!r.redeemed) {
+    await repo.audit('household_join_failed', user.id);
+    await tg.sendMessage(msg.chatId, TEXT.familyInvalid);
+    return;
+  }
+  await repo.audit('household_joined', user.id);
+  const hh = await repo.householdFor(user.id);
+  const members = hh ? await repo.householdMembers(hh.id) : [];
+  const other = members.find((m) => m.user_id !== user.id);
+  await tg.sendMessage(msg.chatId, TEXT.familyJoined(other?.display_name ?? null));
+  if (other) await tg.sendMessage(other.telegram_id, TEXT.familyJoinedPartner(user.display_name));
+}
+
+/** /start hh_<код> у незнакомца — atomic: юзер + членство + погашение. */
+async function redeemHouseholdNewUser(
+  msg: IncomingMessage,
+  code: string,
+  deps: AccessDeps,
+  repo: ReturnType<typeof accessRepo>,
+) {
+  const tg = deps.telegram;
+  const codeHash = await sha256Hex(`hh_${code}`);
+  let r: { redeemed: boolean; userId: number } | undefined;
+  for (let attempt = 0; attempt < 3 && !r; attempt++) {
+    try {
+      r = await repo.redeemHouseholdInviteNewUser(codeHash, msg.fromId, msg.firstName, new Date().toISOString());
+    } catch (e) {
+      if (!/locked|busy/i.test(String(e)) || attempt === 2) throw e;
+      await new Promise((res) => setTimeout(res, 30 * (attempt + 1)));
+    }
+  }
+  const res = r!;
+  if (!res.redeemed) {
+    await repo.audit('household_join_failed', null);
+    await tg.sendMessage(msg.chatId, TEXT.familyInvalid);
+    return;
+  }
+  await repo.audit('household_joined', res.userId);
+  const created = await repo.findUserByTelegramId(msg.fromId);
+  if (!created) return;
+  const hh = await repo.householdFor(created.id);
+  const members = hh ? await repo.householdMembers(hh.id) : [];
+  const other = members.find((m) => m.user_id !== created.id);
+  const stg = tgWithKeyboardMigration(scoped(deps.db, created.id), tg);
+  await stg.sendMessage(msg.chatId, TEXT.familyJoined(other?.display_name ?? null));
+  if (other) await tg.sendMessage(other.telegram_id, TEXT.familyJoinedPartner(msg.firstName));
+  await applyOnboarding(startOnboarding(), msg, created, { ...deps, telegram: stg });
 }

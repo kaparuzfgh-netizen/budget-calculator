@@ -564,6 +564,36 @@ claim (следующий тик повторит). Тумблер — `⚙️ �
    раза в неделю на пару);
 7. `/export` содержит `exchanges` без `source_key`; `/delete_me` чистит.
 
+## Веха K: общий бюджет на двоих (P2, миграция 0020)
+
+- **Модель**: `households` (единый месячный лимит пары `living_cap_minor` +
+  `living_currency` + производная `weekly_budget_minor`, enc1: с ключом от
+  `households.id` — self-keyed, как `users`) + `household_members`
+  (≤2 члена, `UNIQUE(user_id)` — юзер максимум в одной паре).
+- **Приглашение**: `invites` расширены `kind` (`access`|`household`) и
+  `household_id`. Код — `hh_<hex32>`; хэш в БД считается от ПОЛНОГО кода
+  с префиксом (и бот, и TMA одинаково — иначе кросс-канал не сработает).
+- **Бот**: `/family` — статус / создать пару + ссылку; `/family leave` —
+  выход; `/start hh_<код>` — join (незнакомцу — atomic
+  `redeemHouseholdInviteNewUser`: юзер + членство + погашение, сироты
+  нет; известному — `redeemHouseholdInvite` с проверкой места и членства).
+  Партнёр уведомляется о join/leave. `redeemHouseholdInviteNewUser` —
+  двухфазный batch: INSERT в household_members затирает
+  `last_insert_rowid()`, поэтому погашение/очистка — отдельными запросами
+  с явным `userId`.
+- **TMA**: `GET /api/tma/household` (сводка или `household:null`),
+  `PATCH` (лимит пары, weekly=cap×12/52), `POST …/invite|join|leave`.
+- **Приватность**: `householdSummary` отдаёт только агрегаты по людям
+  (сумма недели каждого в валюте котла через `convert`+FX, имя, роль);
+  строки трат и категории партнёра наружу не уходят. Траты члена читаются
+  его `scoped(user_id)` — серверная дешифровка легальна, выдача — только
+  суммы. Неделя — в таймзоне запрашивающего.
+- **UI**: карточка «Общий бюджет» на «Обзоре» (неделя + по членам),
+  секция «Семья» в профиле (члены, лимит, invite/join/leave).
+- **Выход**: `leaveHousehold` удаляет членство и — только ЕГО опустевший
+  household (`NOT EXISTS members`, гонки с чужой новой парой исключены);
+  `invites.household_id` зануляется в том же batch (FK на households).
+
 ## Жёсткие правила (повтор из AGENTS.md)
 
 - В `apps/api` — только Workers-совместимые API (Web Crypto, `fetch`, `URL`…).

@@ -101,6 +101,8 @@ async function cleanDb() {
     'processed_updates',
     'audit_log',
     'invites',
+    'household_members',
+    'households',
     'users',
     'reminder_log',
     'rate_limit',
@@ -435,5 +437,101 @@ describe('харденинг (веха E)', () => {
     expect(csp).toContain("frame-ancestors https://web.telegram.org");
     expect(csp).toContain("script-src 'self' https://telegram.org");
     expect(spa.headers.get('X-Frame-Options')).toBeNull(); // Mini App во фрейме — нельзя DENY
+  });
+});
+
+// ── общий бюджет пары (P2) ──
+
+const hhReq = (token: string, method: string, path = '/api/tma/household', body?: unknown) =>
+  app.fetch(
+    new Request(`https://t${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }),
+    tenv(),
+  );
+
+describe('/api/tma/household — общий бюджет пары', () => {
+  it('без пары → household: null; invite → join вторым; оба видят агрегаты, членство проверяется', async () => {
+    const a = await addUser(700, 'Аня');
+    await addUser(701, 'Борис');
+    await addUser(702, 'Посторонний');
+    const ta = await tokenFor(700);
+    const tb = await tokenFor(701);
+    const tz = await tokenFor(702);
+
+    const empty = (await (await hhReq(ta, 'GET')).json()) as { household: unknown };
+    expect(empty.household).toBeNull();
+
+    const inv = (await (
+      await hhReq(ta, 'POST', '/api/tma/household/invite')
+    ).json()) as { code: string; link: string | null };
+    expect(inv.code).toMatch(/^hh_[0-9a-f]{32}$/);
+    expect(inv.link).toContain(encodeURIComponent(inv.code));
+
+    // A уже в паре → повторный invite 409; посторонний join чужим кодом — ок
+    expect((await hhReq(ta, 'POST', '/api/tma/household/invite')).status).toBe(409);
+    const join = await hhReq(tb, 'POST', '/api/tma/household/join', { code: inv.link });
+    expect(join.status).toBe(200);
+
+    // оба члена видят сводку; посторонний — null (не 403: признак «нет пары»)
+    const sa = (await (await hhReq(ta, 'GET')).json()) as { household: { members: { is_me: boolean; user_id: number }[] } };
+    const sb = (await (await hhReq(tb, 'GET')).json()) as { household: { members: unknown[] } };
+    expect(sa.household.members).toHaveLength(2);
+    expect(sa.household.members.find((m) => m.is_me)!.user_id).toBe(a);
+    expect(sb.household.members).toHaveLength(2);
+    expect(((await (await hhReq(tz, 'GET')).json()) as { household: unknown }).household).toBeNull();
+    expect((await hhReq(tz, 'PATCH', '/api/tma/household', { living_cap: 100, living_currency: 'USD' })).status).toBe(404);
+  });
+
+  it('join: битый/просроченный код → 400; уже в паре → 409', async () => {
+    await addUser(710, 'A');
+    await addUser(711, 'B');
+    await addUser(712, 'C');
+    const ta = await tokenFor(710);
+    const tb = await tokenFor(711);
+    const tc = await tokenFor(712);
+
+    expect((await hhReq(tb, 'POST', '/api/tma/household/join', { code: 'бред' })).status).toBe(400);
+    const inv = (await (await hhReq(ta, 'POST', '/api/tma/household/invite')).json()) as { code: string };
+    expect((await hhReq(tb, 'POST', '/api/tma/household/join', { code: inv.code })).status).toBe(200);
+    // C опаздывает: код уже погашен
+    expect((await hhReq(tc, 'POST', '/api/tma/household/join', { code: inv.code })).status).toBe(400);
+    // B уже в паре — второй join запрещён
+    expect((await hhReq(tb, 'POST', '/api/tma/household/join', { code: inv.code })).status).toBe(409);
+  });
+
+  it('PATCH лимита — weekly = cap×12/52 (enc1:), leave → household исчезает', async () => {
+    await addUser(720, 'A');
+    await addUser(721, 'B');
+    const ta = await tokenFor(720);
+    const tb = await tokenFor(721);
+    const inv = (await (await hhReq(ta, 'POST', '/api/tma/household/invite')).json()) as { code: string };
+    await hhReq(tb, 'POST', '/api/tma/household/join', { code: inv.code });
+
+    expect((await hhReq(ta, 'PATCH', '/api/tma/household', { living_cap: 1200, living_currency: 'EUR' })).status).toBe(200);
+    const s = (await (await hhReq(tb, 'GET')).json()) as {
+      household: { living_cap_minor: number; weekly_budget_minor: number; currency: string };
+    };
+    expect(s.household.currency).toBe('EUR');
+    expect(s.household.living_cap_minor).toBe(1200_00);
+    expect(s.household.weekly_budget_minor).toBe(Math.round((1200 * 12 * 100) / 52));
+    // в БД — шифртекст
+    const raw = await env.DB.prepare('SELECT living_cap_minor FROM households').first<{ living_cap_minor: string }>();
+    expect(raw!.living_cap_minor).toMatch(/^enc1:/);
+    // валидация
+    expect((await hhReq(ta, 'PATCH', '/api/tma/household', { living_cap: -5, living_currency: 'USD' })).status).toBe(400);
+    expect((await hhReq(ta, 'PATCH', '/api/tma/household', { living_cap: 10 })).status).toBe(400);
+
+    expect((await hhReq(tb, 'POST', '/api/tma/household/leave')).status).toBe(200);
+    expect(((await (await hhReq(tb, 'GET')).json()) as { household: unknown }).household).toBeNull();
+    // владелец остался — пара жива; его выход — пара удалена
+    expect(((await (await hhReq(ta, 'GET')).json()) as { household: unknown }).household).not.toBeNull();
+    await hhReq(ta, 'POST', '/api/tma/household/leave');
+    expect(await env.DB.prepare('SELECT COUNT(*) n FROM households').first<{ n: number }>()).toEqual({ n: 0 });
   });
 });

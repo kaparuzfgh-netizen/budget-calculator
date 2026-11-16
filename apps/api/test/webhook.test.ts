@@ -7,7 +7,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyD1Migrations } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { createRouter } from '../src/http/router';
-import { accessRepo } from '../src/db/repo';
+import { accessRepo, scoped } from '../src/db/repo';
 import { timingSafeEqualStr, verifyWebhookSecret } from '../src/http/security';
 import { configureDataKey } from '../src/db/crypto';
 import type { TelegramClient } from '../src/telegram/client';
@@ -72,6 +72,8 @@ async function cleanDb() {
     'processed_updates',
     'audit_log',
     'invites',
+    'household_members',
+    'households',
     'users',
     'reminder_log',
   ]) {
@@ -367,6 +369,82 @@ describe('fail-closed DATA_KEY (A2-8)', () => {
       // master-ключ — модульное состояние: возвращаем рабочий для других тестов
       configureDataKey(env.DATA_KEY as string);
     }
+  });
+});
+
+describe('общий бюджет пары (hh_-инвайты)', () => {
+  const sha256Hex = async (s: string) =>
+    [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+  /** owner бутстрапится, онбоарден (upsertProfile) и создаёт пару с hh_<code>. */
+  async function seedHousehold(code: string) {
+    await post(msg(600, OWNER_TG, '/start'));
+    sent.length = 0;
+    const owner = (await accessRepo(env.DB).findUserByTelegramId(OWNER_TG))!;
+    await scoped(env.DB, owner.id).upsertProfile({
+      base_currency: 'USD', income_currency: 'USD', living_currency: 'USD',
+      timezone: 'UTC', income_minor: 0, living_cap_minor: 60_000_00,
+      weekly_budget_minor: 13_846_00, bonus_prepay_share: 0, bonus_dca_share: 0,
+      onboarded_at: '2026-01-01T00:00:00Z',
+    });
+    const hh = await accessRepo(env.DB).createHousehold(owner.id, 60_000_00, 'USD', 13_846_00);
+    await accessRepo(env.DB).createHouseholdInvite(await sha256Hex(`hh_${code}`), owner.id, hh, '2999-01-01T00:00:00.000Z');
+    return { owner, hh };
+  }
+
+  it('/start hh_<код> у незнакомца — юзер+членство+погашение атомарно, партнёр уведомлён', async () => {
+    const { owner, hh } = await seedHousehold('aa11bb22cc33dd44');
+    await post(msg(601, 884422, '/start hh_aa11bb22cc33dd44'));
+    const u = await accessRepo(env.DB).findUserByTelegramId(884422);
+    expect(u).not.toBeNull();
+    expect((await accessRepo(env.DB).householdFor(u!.id))!.id).toBe(hh);
+    const inv = await env.DB
+      .prepare('SELECT used_by FROM invites WHERE household_id = ?')
+      .bind(hh)
+      .first<{ used_by: number }>();
+    expect(inv!.used_by).toBe(u!.id);
+    // приветствие новичку + уведомление партнёру + онбординг запущен
+    const texts = sent.map((s) => s.text).join(' ');
+    expect(texts).toContain('общем бюджете');
+    expect(sent.some((s) => s.chatId === OWNER_TG)).toBe(true); // партнёр узнал о join
+    void owner;
+  });
+
+  it('/start hh_<битый код> — отказ, юзер не создаётся (сироты нет)', async () => {
+    await seedHousehold('cc11bb22cc33dd44');
+    await post(msg(602, 884433, '/start hh_deadbeefdeadbeef'));
+    expect(sent.at(-1)!.text).toContain('недействительно');
+    expect(await accessRepo(env.DB).findUserByTelegramId(884433)).toBeFalsy();
+  });
+
+  it('/start hh_<код> у члена другой пары → «уже в общем бюджете», без join', async () => {
+    const { hh } = await seedHousehold('dd22bb22cc33dd44');
+    // чужая пара с действующим кодом
+    await accessRepo(env.DB).createUser(555666777, 'Третий', 'member');
+    const u3 = (await accessRepo(env.DB).findUserByTelegramId(555666777))!;
+    const hhOther = await accessRepo(env.DB).createHousehold(u3.id, 1_000_00, 'USD', 23_076);
+    const c3 = 'ff44bb22cc33dd44';
+    await accessRepo(env.DB).createHouseholdInvite(await sha256Hex(`hh_${c3}`), u3.id, hhOther, '2999-01-01T00:00:00.000Z');
+    // owner уже член своей пары — join в чужую отклонён до проверки кода
+    await post(msg(603, OWNER_TG, `/start hh_${c3}`));
+    expect(sent.at(-1)!.text).toContain('уже в общем бюджете');
+    const owner = (await accessRepo(env.DB).findUserByTelegramId(OWNER_TG))!;
+    expect((await accessRepo(env.DB).householdFor(owner.id))!.id).toBe(hh);
+  });
+
+  it('/family: в паре → статус недели; leave → выход и пустой household сносится', async () => {
+    const { hh } = await seedHousehold('bb22bb22cc33dd44');
+    await post(msg(604, OWNER_TG, '/family'));
+    expect(sent.at(-1)!.text).toContain('Общий бюджет недели');
+    await post(msg(605, OWNER_TG, '/family leave'));
+    expect(sent.at(-1)!.text).toContain('вышли из общего бюджета');
+    expect((await env.DB.prepare('SELECT COUNT(*) n FROM households WHERE id = ?').bind(hh).first<{ n: number }>())!.n).toBe(0);
+    await post(msg(606, OWNER_TG, '/family'));
+    // пары нет → создана новая + ссылка-приглашение с hh_-кодом
+    expect(sent.at(-1)!.text).toContain('Перешли партнёру');
+    expect(sent.at(-1)!.text).toContain('start=hh_');
   });
 });
 

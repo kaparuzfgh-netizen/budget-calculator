@@ -515,6 +515,33 @@ export interface Upcoming {
   currency_hint: string;
   items: UpcomingItem[];
 }
+// ── общий бюджет пары ──
+export interface HouseholdMemberSpend {
+  user_id: number;
+  name: string | null;
+  role: 'owner' | 'member';
+  is_me: boolean;
+  spent_week_minor: number;
+}
+export interface HouseholdSummary {
+  currency: string;
+  living_cap_minor: number;
+  weekly_budget_minor: number;
+  spent_week_minor: number;
+  week_remaining_minor: number;
+  week_over: boolean;
+  members: HouseholdMemberSpend[];
+  fx_as_of: string;
+  fx_note?: string;
+}
+export interface HouseholdResponse {
+  household: HouseholdSummary | null;
+}
+export interface HouseholdInviteResponse {
+  ok: boolean;
+  code: string;
+  link: string | null;
+}
 export type ReportPeriod = 'week' | 'month' | 'quarter' | 'half' | 'year';
 export interface ReportCategory {
   id: number | null;
