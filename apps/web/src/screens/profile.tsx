@@ -16,13 +16,11 @@ import {
   Banknote,
   Bell,
   CalendarClock,
-  Camera,
   Clock,
   Database,
   Globe,
   Pause,
   Plus,
-  Receipt,
   Settings,
   SunMoon,
   TrendingUp,
@@ -32,9 +30,8 @@ import {
   Zap,
 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { Api, CommitmentsList, HouseholdInviteResponse, HouseholdResponse, HouseholdSummary, Profile } from '../api';
+import type { Api, CommitmentsList, HouseholdResponse, HouseholdSummary, Profile } from '../api';
 import type { Nav, ScreenProps } from '../app';
-import type { SelectOption } from '../ui';
 import { amountError, currencyError, fmtMinor, parseAmount, timezoneError, todayIso } from '../fmt';
 import { getTheme, setTheme } from '../theme';
 import {
@@ -60,80 +57,10 @@ import {
   useData,
   useFatalOn,
 } from '../ui';
-
-/**
- * Часовой пояс: полный список IANA (Intl.supportedValuesOf) с поиском.
- * Первой закреплена текущая зона («Текущая: X»), затем избранные, дальше —
- * весь список. Если API нет (старый WebView) — статичный fallback ~50 зон.
- * Русские имена городов ищутся через hint (SelectOption) — «москва» →
- * Europe/Moscow и т.п. Храним значение = IANA-строку (проверяет сервер).
- */
-const TZ_FAVORITES = ['Europe/Moscow', 'Asia/Bishkek', 'Europe/Minsk', 'Asia/Almaty', 'UTC'] as const;
-/** Алиасы городов → IANA: ищутся по подстроке (см. SelectOption.hint). */
-const TZ_ALIASES: Record<string, string> = {
-  'Europe/Moscow': 'москва питер санкт-петербург',
-  'Europe/Samara': 'самара',
-  'Asia/Bishkek': 'бишкек',
-  'Europe/Minsk': 'минск',
-  'Asia/Almaty': 'алматы',
-  'Europe/Kyiv': 'киев',
-  'Europe/Kiev': 'киев',
-  'Europe/Berlin': 'берлин',
-  'Europe/London': 'лондон',
-  'America/New_York': 'нью-йорк',
-  'Asia/Dubai': 'дубай',
-  'Europe/Istanbul': 'стамбул',
-};
-/** Статичный список ~50 ходовых зон — fallback без Intl.supportedValuesOf. */
-const TZ_FALLBACK: readonly string[] = [
-  'UTC',
-  'Europe/London', 'Europe/Dublin', 'Europe/Lisbon',
-  'Europe/Berlin', 'Europe/Paris', 'Europe/Madrid', 'Europe/Rome',
-  'Europe/Amsterdam', 'Europe/Vienna', 'Europe/Zurich',
-  'Europe/Warsaw', 'Europe/Prague', 'Europe/Stockholm', 'Europe/Helsinki',
-  'Europe/Athens', 'Europe/Bucharest', 'Europe/Istanbul', 'Europe/Kyiv',
-  'Europe/Minsk', 'Europe/Moscow', 'Europe/Samara',
-  'Asia/Yekaterinburg', 'Asia/Novosibirsk', 'Asia/Krasnoyarsk',
-  'Asia/Irkutsk', 'Asia/Vladivostok', 'Asia/Kamchatka',
-  'Asia/Tbilisi', 'Asia/Yerevan', 'Asia/Baku', 'Asia/Tashkent',
-  'Asia/Almaty', 'Asia/Bishkek', 'Asia/Dubai', 'Asia/Karachi',
-  'Asia/Kolkata', 'Asia/Bangkok', 'Asia/Shanghai', 'Asia/Singapore',
-  'Asia/Tokyo', 'Asia/Seoul',
-  'Australia/Sydney', 'Pacific/Auckland',
-  'America/Anchorage', 'America/Los_Angeles', 'America/Chicago',
-  'America/New_York', 'America/Mexico_City', 'America/Sao_Paulo',
-  'Africa/Cairo', 'Africa/Johannesburg',
-];
-
-/** Все IANA-зоны из рантайма; без supportedValuesOf — TZ_FALLBACK. */
-function allTimezones(): string[] {
-  try {
-    const fn = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
-    const list = fn?.call(Intl, 'timeZone');
-    if (list?.length) return list;
-  } catch {
-    // старый WebView — ниже вернём fallback
-  }
-  return [...TZ_FALLBACK];
-}
-
-/** Опции селекта: «Текущая: X», избранные, полный список (без дублей). */
-function tzOptions(current: string): SelectOption[] {
-  const all = allTimezones();
-  const opt = (z: string, label = z): SelectOption => ({
-    value: z,
-    label,
-    ...(TZ_ALIASES[z] ? { hint: TZ_ALIASES[z] } : {}),
-  });
-  const head = new Set<string>([current]);
-  const favs = TZ_FAVORITES.filter((z) => z !== current && all.includes(z));
-  for (const z of favs) head.add(z);
-  return [
-    opt(current, `Текущая: ${current}`),
-    ...favs.map((z) => opt(z)),
-    ...all.filter((z) => !head.has(z)).map((z) => opt(z)),
-  ];
-}
+import { tzOptions } from './profile-tz';
+import { Switch, REMINDERS, FEATURES, REM_HOUR_OPTIONS } from './profile-toggles';
+import type { ToggleKey } from './profile-toggles';
+import { FamilyCard } from './profile-family';
 
 
 // ── Профиль ──
@@ -247,101 +174,6 @@ function profileKey(p: Profile): string {
 }
 
 // ── формы профиля ──
-
-/** Переключатель-«тогл» в стиле iOS: PATCH по change, без submit-кнопки. */
-function Switch({
-  icon,
-  label,
-  hint,
-  checked,
-  busy,
-  onToggle,
-}: {
-  icon: ComponentChildren;
-  label: ComponentChildren;
-  hint?: string | undefined;
-  checked: boolean;
-  busy: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div class="flex items-center justify-between gap-3 px-4 py-3">
-      <span class="flex items-center gap-2.5 text-[15px] text-zinc-100">
-        {icon}
-        <span>
-          {label}
-          {hint ? <span class="mt-0.5 block text-xs text-zinc-400">{hint}</span> : null}
-        </span>
-      </span>
-      <span class="relative inline-flex h-[27px] w-[46px] flex-none cursor-pointer items-center">
-        <input
-          type="checkbox"
-          class="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-default"
-          checked={checked}
-          disabled={busy}
-          onChange={() => onToggle()}
-        />
-        <span class="absolute inset-0 rounded-full bg-fill-3 transition peer-checked:bg-sky-500 peer-disabled:opacity-50" />
-        <span class="absolute left-[3px] top-[3px] h-[21px] w-[21px] rounded-full bg-white transition peer-checked:translate-x-[19px]" />
-      </span>
-    </div>
-  );
-}
-
-/** Ключи boolean-настроек профиля (PATCH /profile) — и напоминания, и фичи. */
-type ToggleKey = 'reminders_weekly' | 'reminders_payments' | 'reminders_digest' | 'fx_alerts_enabled' | 'vision_enabled';
-
-const REMINDERS: {
-  key: ToggleKey;
-  icon: typeof Bell;
-  label: ComponentChildren;
-  hint: string;
-}[] = [
-  { key: 'reminders_weekly', icon: CalendarClock, label: 'Еженедельный итог', hint: 'вс 20:00 — траты недели' },
-  { key: 'reminders_payments', icon: Receipt, label: 'Платежи и сроки', hint: 'за 2 дня до срока, 10:00' },
-  { key: 'reminders_digest', icon: CalendarClock, label: 'Дайджест месяца', hint: 'итоги в последний день месяца' },
-  { key: 'fx_alerts_enabled', icon: TrendingUp, label: 'Алерты по курсам', hint: 'выгодные моменты для обмена' },
-];
-
-/** «⚡️ Возможности» — opt-in фичи (не напоминания), тот же PATCH-контракт. */
-const FEATURES: {
-  key: ToggleKey;
-  icon: typeof Bell;
-  label: ComponentChildren;
-  hint: string;
-}[] = [
-  {
-    key: 'vision_enabled',
-    icon: Camera,
-    label: (
-      <>
-        Распознавание скриншотов
-        <Info title="Распознавание скриншотов">
-          <p>
-            Включите — и можно прислать скриншот банковского приложения боту
-            ИЛИ загрузить его здесь: кнопка «📷 Из скриншота» в форме траты.
-            Строки операций распознаются списком — перед записью их можно
-            проверить и поправить.
-          </p>
-          <p>
-            Фото уходит в Google AI (резерв — Groq), хранится только результат.
-            Лимит — 20 фото в день.
-          </p>
-        </Info>
-      </>
-    ),
-    hint: 'фото банка — в боте или в форме траты',
-  },
-];
-
-/** «Время напоминаний»: «По умолчанию» → null (легаси) + часы 0–23. */
-const REM_HOUR_OPTIONS: SelectOption[] = [
-  { value: '', label: 'По умолчанию', hint: '10:00 · вс 20:00' },
-  ...Array.from({ length: 24 }, (_, h) => ({
-    value: String(h),
-    label: `${String(h).padStart(2, '0')}:00`,
-  })),
-];
 
 function ProfileForms({
   api,
@@ -881,163 +713,5 @@ function ProfileForms({
         </p>
       </div>
     </>
-  );
-}
-
-// ── Семья: общий бюджет пары ──
-
-function FamilyCard({
-  api,
-  nav,
-  pair,
-  reload,
-}: {
-  api: Api;
-  nav: Nav;
-  pair: HouseholdSummary | null;
-  reload: () => void;
-}) {
-  const [cap, setCap] = useState(String((pair?.living_cap_minor ?? 0) / 100 || ''));
-  const [ccy, setCcy] = useState(pair?.currency ?? 'USD');
-  const [joinCode, setJoinCode] = useState('');
-  const [invite, setInvite] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const fail = (e: unknown) => setErr(e instanceof ApiError ? e.message : 'Не удалось — проверьте соединение');
-
-  const createInvite = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const r = await api.post<HouseholdInviteResponse>('/api/tma/household/invite');
-      setInvite(r.link ?? r.code);
-      nav.flash('Приглашение создано — отправьте ссылку партнёру');
-      reload();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const join = async (ev: Event) => {
-    ev.preventDefault();
-    if (!joinCode.trim()) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.post('/api/tma/household/join', { code: joinCode });
-      nav.flash('Вы в общем бюджете');
-      reload();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
-    return undefined;
-  };
-
-  const saveCap = async (ev: Event) => {
-    ev.preventDefault();
-    const aErr = amountError(cap);
-    const cErr = currencyError(ccy);
-    if (aErr || cErr) return setErr(aErr ?? cErr);
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.patch('/api/tma/household', { living_cap: parseAmount(cap), living_currency: ccy.trim().toUpperCase() });
-      nav.flash('Общий лимит сохранён');
-      reload();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
-    return undefined;
-  };
-
-  const leave = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.post('/api/tma/household/leave');
-      nav.flash('Вы вышли из общего бюджета');
-      reload();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!pair) {
-    return (
-      <div class={`${cardCls} mt-2`}>
-        <p class={`${mutedCls} mb-3`}>
-          Общий недельный бюджет на двоих. Создайте пару — партнёр присоединится по ссылке —
-          или введите код приглашения от партнёра.
-        </p>
-        {invite ? (
-          <div class={`${cardCls} bg-fill/40 mb-3 break-all text-[13px]`}>
-            <p class={mutedCls}>Передайте партнёру (одноразовая, 48 ч):</p>
-            <p class="mt-1 font-mono text-sky-400">{invite}</p>
-          </div>
-        ) : (
-          <button type="button" class={primaryBtnCls} disabled={busy} onClick={() => void createInvite()}>
-            <Users size={16} strokeWidth={1.5} /> Создать общий бюджет
-          </button>
-        )}
-        <form class="mt-3 flex gap-2" onSubmit={(e) => void join(e)}>
-          <input
-            class={`${inputCls} flex-1`}
-            placeholder="Код приглашения или ссылка"
-            value={joinCode}
-            onInput={(e) => setJoinCode((e.target as HTMLInputElement).value)}
-          />
-          <button type="submit" class={smBtnCls} disabled={busy || !joinCode.trim()}>
-            Вступить
-          </button>
-        </form>
-        <FormError msg={err} />
-      </div>
-    );
-  }
-
-  return (
-    <div class={`${cardCls} mt-2`}>
-      {pair.members.map((m) => (
-        <div key={m.user_id} class={rowCls}>
-          <span>{m.is_me ? 'Вы' : (m.name ?? 'Партнёр')}</span>
-          <span class={mutedCls}>
-            {fmtMinor(m.spent_week_minor, pair.currency)} за неделю{m.role === 'owner' ? ' · создатель' : ''}
-          </span>
-        </div>
-      ))}
-      <form class="mt-4" onSubmit={(e) => void saveCap(e)}>
-        <Field label="Месячный лимит пары">
-          <div class="flex gap-2">
-            <input
-              class={`${inputCls} flex-1`}
-              inputMode="decimal"
-              value={cap}
-              onInput={(e) => setCap((e.target as HTMLInputElement).value)}
-            />
-            <input
-              class={`${inputCls} w-20`}
-              maxLength={5}
-              value={ccy}
-              onInput={(e) => setCcy((e.target as HTMLInputElement).value)}
-            />
-          </div>
-        </Field>
-        <button type="submit" class={`${primaryBtnCls} mt-3`} disabled={busy}>
-          Сохранить лимит
-        </button>
-      </form>
-      <button type="button" class={`${secondaryBtnCls} mt-2 text-red-400`} disabled={busy} onClick={() => void leave()}>
-        Выйти из общего бюджета
-      </button>
-      <FormError msg={err} />
-    </div>
   );
 }

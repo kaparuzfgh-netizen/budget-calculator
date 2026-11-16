@@ -36,7 +36,7 @@ Budget Companion — мультипользовательский Telegram-бо�
 
 - **Workers ≠ Node:** в `apps/api` только Web API; без `process/fs/Buffer/node:*`.
 - **Tenant (правило 3):** БД только через `scoped(env.DB, userId)` в
-  `db/repo.ts`; каждый запрос с `WHERE user_id = ?`, мутации по id —
+  `db/repo.ts` (части — `db/scoped/*`); каждый запрос с `WHERE user_id = ?`, мутации по id —
   `WHERE id=? AND user_id=?`. Сырой `db.prepare` вне repo.ts запрещён.
   Новый эндпоинт/запрос ⇒ тест «A не видит B». `user_id` — никогда не вход клиента.
 - **Деньги:** INTEGER minor units в D1; домен (`src/domain/`) — чистые функции
