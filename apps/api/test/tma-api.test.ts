@@ -583,6 +583,15 @@ describe('базовый доход: explicit/computed/none, напоминан�
       expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminder_hour: badHour } })).status, JSON.stringify(badHour)).toBe(400);
   });
 
+  it('profile.reminders_digest: GET дефолт 1, PATCH boolean round-trip, не-boolean → 400', async () => {
+    const A = await user(900052);
+    const g1 = (await (await api('/api/tma/profile', { token: A.token })).json()) as { reminders_digest: number };
+    expect(g1.reminders_digest).toBe(1);
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminders_digest: false } })).status).toBe(200);
+    expect((await scoped(env.DB, A.uid).getProfile())!.reminders_digest).toBe(0);
+    expect((await api('/api/tma/profile', { method: 'PATCH', token: A.token, body: { reminders_digest: 'yes' } })).status).toBe(400);
+  });
+
   it('profile.timezone: произвольная IANA принимается (не только пресеты); мусор → 400', async () => {
     const A = await user(900051);
     for (const tz of ['Pacific/Auckland', 'America/Argentina/Buenos_Aires', 'Asia/Kamchatka', 'Europe/Kyiv']) {

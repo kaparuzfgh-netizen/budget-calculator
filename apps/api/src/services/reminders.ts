@@ -20,6 +20,8 @@
  *      поэтому при не-403 ошибке отправки claim'ы и события остаются
  *      (дублировать данные нельзя), а день считается failed.
  *   d) loan: 10:00–21:59 local → займы со сроком «сегодня» и «через 3 дня»
+ *   f) digest: последний день месяца ≥ часа окна (+ catch-up 1-го числа до 12:00)
+ *      → итоги месяца; claim 'digest' на 'YYYY-MM', после автопроводки
  * Час начала окон (a) и (b/d/e — общее окно дня) настраивается профилем:
  * reminder_hour (миграция 0018); NULL — легаси-константы WEEKLY_HOUR/PAY_HOUR.
  * Идемпотентность: reminder_log claim (INSERT OR IGNORE) — шлём только если
@@ -43,6 +45,8 @@ export { dueDateFor };
 import { todayInTz } from '../bot/parse';
 import { fmtMoney } from '../bot/format';
 import { runFxAlerts } from './fx';
+import { buildDigest, renderDigest } from './digest';
+import { digestTarget } from '../domain/digest';
 import type { InlineButton } from '../telegram/client';
 
 interface LocalParts {
@@ -207,7 +211,7 @@ export async function runReminders(
             sent++;
           } catch (e) {
             if (e instanceof TelegramError && e.status === 403) {
-              await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0 });
+              await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0, reminders_digest: 0 });
               console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
             } else {
               await repo.releaseReminder('weekly', lp.iso);
@@ -231,7 +235,7 @@ export async function runReminders(
             sent++;
           } catch (e) {
             if (e instanceof TelegramError && e.status === 403) {
-              await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0 });
+              await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0, reminders_digest: 0 });
               console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
             } else {
               await repo.releaseReminder(kind, lp.iso);
@@ -360,7 +364,7 @@ export async function runReminders(
             sent++;
           } catch (e) {
             if (e instanceof TelegramError && e.status === 403) {
-              await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0 });
+              await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0, reminders_digest: 0 });
               console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
             } else {
               // уведомление best-effort: записи корректны, claim'ы не трогаем
@@ -393,11 +397,38 @@ export async function runReminders(
           sent += fxSent.length;
         } catch (e) {
           if (e instanceof TelegramError && e.status === 403) {
-            await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0, fx_alerts_enabled: 0 });
+            await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0, reminders_digest: 0, fx_alerts_enabled: 0 });
             console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
           } else {
             throw e;
           }
+        }
+      }
+
+      // (f) дайджест месяца (T2): последний локальный день ≥ часа окна (+ catch-up
+      // 1-го числа до полудня за прошлый месяц). СТРОГО после автопроводки (c),
+      // чтобы платёж последнего дня попал в факт. Claim — до сборки отчёта.
+      if (p.reminders_digest === 1) {
+        const target = digestTarget(lp.iso, lp.hour, payStart);
+        if (target) {
+          const claim = await repo.claimReminder('digest', target.key);
+          if (claim.meta.changes === 1) {
+            try {
+              const d = await buildDigest(repo, fx, now, target.offset, lp.iso);
+              if (d) {
+                await tgU.sendMessage(telegramId, renderDigest(d), { replyMarkup: HOME_ROW_MK });
+                sent++;
+              }
+            } catch (e) {
+              if (e instanceof TelegramError && e.status === 403) {
+                await repo.patchProfile({ reminders_weekly: 0, reminders_payments: 0, reminders_digest: 0, fx_alerts_enabled: 0 });
+                console.warn(`reminders: user ${userId} blocked the bot — reminders disabled`);
+              } else {
+                await repo.releaseReminder('digest', target.key);
+                throw e;
+              }
+            }
+          } else skipped++;
         }
       }
     } catch (e) {

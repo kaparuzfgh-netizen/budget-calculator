@@ -165,6 +165,7 @@ export const PROFILE: Profile = {
   timezone: 'Asia/Bishkek',
   reminders_weekly: 1,
   reminders_payments: 1,
+  reminders_digest: 1,
   fx_alerts_enabled: 1,
   vision_enabled: 0,
   cushion_minor: 18000000,

@@ -45,6 +45,7 @@ const profilePatchSchema = z.object({
   // переключатели напоминаний/фич — все 4, как в боте
   reminders_weekly: z.boolean().optional(),
   reminders_payments: z.boolean().optional(),
+  reminders_digest: z.boolean().optional(),
   fx_alerts_enabled: z.boolean().optional(),
   vision_enabled: z.boolean().optional(),
   /** Свой час начала окна напоминаний 0–23; null — легаси (платежи 10:00, итог вс 20:00). */
@@ -170,6 +171,7 @@ export function registerTmaProfile(
       reminders_weekly: p.reminders_weekly,
       reminders_payments: p.reminders_payments,
       reminder_hour: p.reminder_hour,
+      reminders_digest: p.reminders_digest,
       fx_alerts_enabled: p.fx_alerts_enabled,
       vision_enabled: p.vision_enabled,
       cushion_minor: p.cushion_minor,
@@ -200,6 +202,7 @@ export function registerTmaProfile(
     if (b.reminders_weekly !== undefined) patch.reminders_weekly = b.reminders_weekly ? 1 : 0;
     if (b.reminders_payments !== undefined) patch.reminders_payments = b.reminders_payments ? 1 : 0;
     if (b.reminder_hour !== undefined) patch.reminder_hour = b.reminder_hour;
+    if (b.reminders_digest !== undefined) patch.reminders_digest = b.reminders_digest ? 1 : 0;
     if (b.fx_alerts_enabled !== undefined) patch.fx_alerts_enabled = b.fx_alerts_enabled ? 1 : 0;
     if (b.vision_enabled !== undefined) patch.vision_enabled = b.vision_enabled ? 1 : 0;
     if (b.cushion !== undefined) patch.cushion_minor = toMinor(b.cushion);

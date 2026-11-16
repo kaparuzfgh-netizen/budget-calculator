@@ -289,7 +289,7 @@ function Switch({
 }
 
 /** Ключи boolean-настроек профиля (PATCH /profile) — и напоминания, и фичи. */
-type ToggleKey = 'reminders_weekly' | 'reminders_payments' | 'fx_alerts_enabled' | 'vision_enabled';
+type ToggleKey = 'reminders_weekly' | 'reminders_payments' | 'reminders_digest' | 'fx_alerts_enabled' | 'vision_enabled';
 
 const REMINDERS: {
   key: ToggleKey;
@@ -299,6 +299,7 @@ const REMINDERS: {
 }[] = [
   { key: 'reminders_weekly', icon: CalendarClock, label: 'Еженедельный итог', hint: 'вс 20:00 — траты недели' },
   { key: 'reminders_payments', icon: Receipt, label: 'Платежи и сроки', hint: 'за 2 дня до срока, 10:00' },
+  { key: 'reminders_digest', icon: CalendarClock, label: 'Дайджест месяца', hint: 'итоги в последний день месяца' },
   { key: 'fx_alerts_enabled', icon: TrendingUp, label: 'Алерты по курсам', hint: 'выгодные моменты для обмена' },
 ];
 

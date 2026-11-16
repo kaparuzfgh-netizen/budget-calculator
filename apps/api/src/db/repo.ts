@@ -34,6 +34,8 @@ export interface ProfileRow {
   onboarded_at: string | null;
   reminders_weekly: number;
   reminders_payments: number;
+  /** Дайджест месяца (миграция 0022): итог в последний день месяца. */
+  reminders_digest: number;
   /** Свой час начала окна напоминаний 0–23 (миграция 0018); NULL — легаси 10:00/вс 20:00. */
   reminder_hour: number | null;
   /** Согласие на отправку скриншотов во внешний vision-провайдер (миграция 0012). */
@@ -240,7 +242,7 @@ export function scoped(db: Env['DB'], userId: number) {
     async upsertProfile(
       p: Omit<
         ProfileRow,
-        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency' | 'reminder_hour' | 'cushion_minor'
+        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'reminders_digest' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency' | 'reminder_hour' | 'cushion_minor'
       > & {
         reminders_weekly?: number;
         reminders_payments?: number;
@@ -807,6 +809,7 @@ export function scoped(db: Env['DB'], userId: number) {
       timezone?: string;
       reminders_weekly?: number;
       reminders_payments?: number;
+      reminders_digest?: number;
       reminder_hour?: number | null;
       vision_enabled?: number;
       fx_alerts_enabled?: number;
@@ -826,6 +829,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'timezone',
         'reminders_weekly',
         'reminders_payments',
+        'reminders_digest',
         'reminder_hour',
         'vision_enabled',
         'fx_alerts_enabled',
@@ -1409,7 +1413,7 @@ export function accessRepo(db: Env['DB']) {
     async listReminderCandidates(): Promise<number[]> {
       const r = await db
         .prepare(
-          'SELECT user_id FROM profiles WHERE onboarded_at IS NOT NULL AND (reminders_weekly = 1 OR reminders_payments = 1 OR fx_alerts_enabled = 1)',
+          'SELECT user_id FROM profiles WHERE onboarded_at IS NOT NULL AND (reminders_weekly = 1 OR reminders_payments = 1 OR reminders_digest = 1 OR fx_alerts_enabled = 1)',
         )
         .all<{ user_id: number }>();
       return r.results.map((x) => x.user_id);

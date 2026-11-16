@@ -82,3 +82,37 @@ Mini App (`/api/tma/*`, Bearer JWT) + статика SPA (Workers Static Assets)
 **Документация (для documenter).** `docs/ARCHITECTURE.md` (таблица + миграции), `docs/BACKLOG.md` (вычеркнуть P2-10), `docs/USER_GUIDE.md`, `/export` в README/SECURITY при упоминании схемы.
 
 Задачу можно переводить в `[READY]` после подтверждения плана.
+
+### План задачи T2: Дайджест месяца «факт vs план» + savings rate
+
+**Цель.** Раз в месяц пользователь получает сообщение-итог: доход план/факт,
+оплачено N из M обязательных, повседневные % от бюджета, savings rate, топ-2
+категории. Границы: только push в бот + тумблер; экран дайджеста в Mini App,
+«подорожание платежей» (данные T1) и сравнение нескольких месяцев — вне задачи.
+
+**Решения (приняты владельцем по умолчанию).**
+- Триггер: последний локальный день месяца (завтра — другой месяц), `lp.hour >= reminder_hour ?? PAY_HOUR`, окно до 23:59. Catch-up: 1-го числа 00:00–11:59 за прошлый месяц с тем же claim.
+- Claim `claimReminder('digest', 'YYYY-MM')` ставится ДО сборки отчёта; при ошибке отправки — `releaseReminder` (как у weekly); 403 — гасит `reminders_weekly/payments/digest`.
+- Запуск внутри `processUser` строго после блока автопроводки (c), чтобы платёж последнего дня попал в факт.
+- Доход: факт месяца (`income_entries`), иначе `resolveIncome` (typical → computed) с пометкой «оценка», иначе none.
+- savings rate = (доход − обязательные − повседневные) / доход, где обязательные = оплаты платежей + платежи по кредитам (`report.commitments + report.credits`); при доходе ≤ 0 → «—»; отрицательное значение показываем как есть.
+- Топ-2 категории: по росту суммы к прошлому месяцу (report уже считает prev), нет прошлого — топ-2 по сумме. Без бюджетов по категориям.
+- Данные: `buildUserReport(repo, fx, 'month', offset, now)` (offset 0 в последний день, −1 при catch-up) + `listCommitments` + `occurrencesInRange`/`isOccurrencePaid` из `domain/schedule` для «оплачено N из M» (считаем только активные платежи).
+
+**Данные.** Миграция `0022_reminders_digest.sql`: `ALTER TABLE profiles ADD COLUMN reminders_digest INTEGER NOT NULL DEFAULT 1`. Новых таблиц и шифруемых колонок нет (флаг — plaintext, как остальные). Расширить `ProfileRow`, `patchProfile` (whitelist), `upsertProfile` не трогать (DEFAULT).
+
+**Шаги.**
+1. Миграция 0022 + `ProfileRow.reminders_digest` + whitelist в `patchProfile`; `listReminderCandidates` — добавить `OR reminders_digest = 1`.
+2. `domain/digest.ts` — чистые функции без I/O: `savingsRate(income, obligatory, living)`, `topCategoryMovers(cur, prev, n=2)`, `isLastDayOfMonth(iso)` / `digestTarget(localIso)` → `{ offset: 0 | -1, key: 'YYYY-MM' } | null` (последний день → текущий месяц; день 1 и час < 12 → прошлый). Golden/юнит-тесты, включая февраль, високосный год, границы 31→1.
+3. `services/digest.ts`: `buildDigest(repo, fx, now, offset)` → структура (income plan/actual+source, paid N/M, living used%, savings rate, movers) и `renderDigest` → текст (HTML-экранирование имён категорий). Без логирования текста.
+4. `reminders.ts`: блок (f) после автопроводки: `p.reminders_digest === 1`, `digestTarget(...)`, claim → build → `tgU.sendMessage`; 403/ошибка — как в weekly; 403-хендлеры везде гасят и `reminders_digest`. Обновить шапочный комментарий файла.
+5. TMA: `PATCH /api/tma/profile` zod `reminders_digest: boolean`, GET отдаёт флаг; `web/src/api.ts` + `ToggleKey` + запись в списке тумблеров профиля («Дайджест месяца», hint «итоги в последний день месяца»); demo/mock.
+6. Бот: профиль-экран напоминаний — тумблер `pf:*` только если уже есть паттерн для weekly/payments; иначе вне задачи. Любое новое нав-состояние — сначала `docs/ux/navigation.md` + `screens.json` (правило 12).
+7. Тесты: `domain/digest.test.ts`; `reminders.test.ts` — отправка в последний день после часа, не раньше часа, идемпотентность (второй тик — skipped), catch-up 1-го числа, release при сбое отправки + повтор, 403 гасит флаги, юзер только с `reminders_digest=1` попадает в кандидаты, платёж последнего дня учтён (автопроводка раньше дайджеста), `reminders_digest=0` → тишина; tma-profile тест на GET/PATCH флага; изоляция — дайджест читает только через `scoped(userId)` (A не получает цифры B).
+8. `npm run check`.
+
+**Риски.** (а) Пустой месяц (нет данных) — слать минимальный дайджест или пропускать: пропускать, если нет ни дохода, ни оплат, ни трат (иначе спам новым юзерам); (б) CPU/subrequests в «час пик» последнего дня: claim до сборки + пачки по 8 уже есть; один `buildUserReport` на юзера, FX — из кэша; (в) смена TZ юзера в последний день может дать два дайджеста за разные ключи — claim по `YYYY-MM` исключает дубль; (г) текст содержит суммы — только в Telegram-сообщение, в логи не попадает. Откат: флаг `reminders_digest = 0` у всех новой миграцией/`UPDATE`; саму колонку не трогаем.
+
+**Документация (для documenter).** `docs/ARCHITECTURE.md` (миграции 0001–0022, описание cron), `docs/BACKLOG.md` (P2-12), `docs/USER_GUIDE.md` (дайджест, тумблер), `CHANGELOG.md`, шапка `reminders.ts`.
+
+Задачу можно переводить в `[READY]` после подтверждения плана.

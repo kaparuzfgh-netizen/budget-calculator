@@ -24,7 +24,7 @@ beforeEach(async () => {
     await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 async function user(tgId: number, tz: string, opts: {
-  weekly?: number; pay?: number;
+  weekly?: number; pay?: number; digest?: number;
   commits?: {
     name: string; minor: number; ccy: string; due: number | null; active?: number;
     /** Каденс (0016); без полей — monthly. */
@@ -42,6 +42,7 @@ async function user(tgId: number, tz: string, opts: {
     bonus_prepay_share: 0, bonus_dca_share: 0, onboarded_at: 'x',
     reminders_weekly: opts.weekly ?? 1, reminders_payments: opts.pay ?? 1,
   });
+  await env.DB.prepare('UPDATE profiles SET reminders_digest = ? WHERE user_id = ?').bind(opts.digest ?? 0, uid).run();
   // kb-миграция снятия клавиатуры у этих юзеров «уже пройдена» — считаем только напоминания
   await scoped(env.DB, uid).claimReminder('kb_removed', 'v1');
   for (const c of opts.commits ?? [])
@@ -661,5 +662,72 @@ describe('P2-1: runWeek — граница выборки трат', () => {
     expect(spy).toHaveBeenLastCalledWith('2026-09-28');
     spy.mockRestore();
     void uid;
+  });
+});
+
+describe('runReminders — дайджест месяца (T2)', () => {
+  // 30 нояб 2026 (последний день), Бишкек +6: 10:00 локально = 04:00 UTC
+  const at = (d: number, h: number, m = 10) => new Date(Date.UTC(2026, m, d, h, 0));
+  const digests = () => sent.filter((x) => x.text.includes('Итоги месяца'));
+
+  it('последний день ≥ часа: один дайджест с планом/нормой; повтор — дедуп; рано/не последний день — тишина', async () => {
+    const uid = await user(710101, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 1 });
+    await scoped(env.DB, uid).addIncomeEntry({ month: '2026-11', amount_minor: 100_000, currency: 'EUR', note: null, source_key: 't1' });
+    await scoped(env.DB, uid).addExpense({ spent_on: '2026-11-10', amount_minor: 1_000_000, currency: 'RUB', note: null, source: 'tg', source_key: 'e1' });
+    await run(at(30, 3)); // 09:00 локально — рано
+    await run(at(29, 6)); // не последний день
+    expect(digests()).toHaveLength(0);
+    await run(at(30, 5)); // 11:00 локально
+    expect(digests()).toHaveLength(1);
+    expect(digests()[0]!.text).toContain('ноябрь');
+    expect(digests()[0]!.text).toContain('Норма сбережений');
+    await run(at(30, 6));
+    expect(digests()).toHaveLength(1);
+  });
+
+  it('юзер только с дайджестом (weekly/pay = 0) попадает в кандидаты', async () => {
+    const uid = await user(710102, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 1 });
+    await scoped(env.DB, uid).addIncomeEntry({ month: '2026-11', amount_minor: 100_000, currency: 'EUR', note: null, source_key: 't2' });
+    await run(at(30, 5));
+    expect(digests()).toHaveLength(1);
+  });
+
+  it('digest=0 — тишина; пустой месяц — не шлём', async () => {
+    const a = await user(710103, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 0 });
+    await scoped(env.DB, a).addIncomeEntry({ month: '2026-11', amount_minor: 100_000, currency: 'EUR', note: null, source_key: 't3' });
+    await user(710104, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 1 });
+    await run(at(30, 5));
+    expect(digests()).toHaveLength(0);
+  });
+
+  it('catch-up: сбой в последний день → повтор 1-го числа за прошлый месяц; один раз', async () => {
+    const uid = await user(710105, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 1 });
+    await scoped(env.DB, uid).addIncomeEntry({ month: '2026-11', amount_minor: 100_000, currency: 'EUR', note: null, source_key: 't5' });
+    const failTg: TelegramClient = { ...tg, sendMessage: async () => { throw new Error('boom'); } };
+    await run(at(30, 5), { telegram: failTg }); // claim снят при сбое
+    expect(digests()).toHaveLength(0);
+    await run(new Date(Date.UTC(2026, 11, 1, 0, 0))); // 1 дек 06:00 локально
+    expect(digests()).toHaveLength(1);
+    expect(digests()[0]!.text).toContain('ноябрь');
+    await run(new Date(Date.UTC(2026, 11, 1, 1, 0)));
+    expect(digests()).toHaveLength(1);
+  });
+
+  it('403 гасит reminders_digest', async () => {
+    const uid = await user(710106, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 1 });
+    await scoped(env.DB, uid).addIncomeEntry({ month: '2026-11', amount_minor: 100_000, currency: 'EUR', note: null, source_key: 't6' });
+    const blocked: TelegramClient = { ...tg, sendMessage: async () => { throw new TelegramError(403, 'blocked'); } };
+    await run(at(30, 5), { telegram: blocked });
+    expect((await scoped(env.DB, uid).getProfile())!.reminders_digest).toBe(0);
+  });
+
+  it('изоляция: дайджест A не содержит данных B', async () => {
+    const a = await user(710107, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 1 });
+    const b = await user(710108, 'Asia/Bishkek', { weekly: 0, pay: 0, digest: 0 });
+    await scoped(env.DB, a).addIncomeEntry({ month: '2026-11', amount_minor: 100_000, currency: 'EUR', note: null, source_key: 't7' });
+    await scoped(env.DB, b).addIncomeEntry({ month: '2026-11', amount_minor: 777_700, currency: 'EUR', note: null, source_key: 't8' });
+    await run(at(30, 5));
+    expect(digests()).toHaveLength(1);
+    expect(digests()[0]!.text).not.toContain('7 777');
   });
 });
