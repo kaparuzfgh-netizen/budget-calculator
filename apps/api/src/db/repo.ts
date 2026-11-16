@@ -159,6 +159,18 @@ export interface CommitmentPaymentRow {
   source_key: string | null;
 }
 
+/** История изменений платежа (0021): old_val/new_val — строки (amount — minor units). */
+export type CommitmentChangeField = 'name' | 'amount' | 'currency' | 'due_day' | 'active' | 'cadence';
+export interface CommitmentChangeRow {
+  id: number;
+  user_id: number;
+  commitment_id: number;
+  field: CommitmentChangeField;
+  old_val: string | null;
+  new_val: string | null;
+  changed_at: string;
+}
+
 export interface LoanEventRow {
   id: number;
   user_id: number;
@@ -371,14 +383,68 @@ export function scoped(db: Env['DB'], userId: number) {
         binds.push(patch.every_months);
       }
       binds.push(id, userId);
+      // История «было → стало»: только реально изменившиеся поля (сравнение после дешифровки).
+      const cur = await this.getCommitment(id);
+      const stmts = [
+        db
+          .prepare(`UPDATE commitments SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
+          .bind(...binds),
+      ];
+      if (cur) {
+        const cad = (c: {
+          frequency: string;
+          interval_days: number | null;
+          anchor_on: string | null;
+          due_month: number | null;
+          every_months: number;
+        }) => [c.frequency, c.interval_days ?? '', c.anchor_on ?? '', c.due_month ?? '', c.every_months].join('|');
+        const next = {
+          frequency: patch.frequency ?? cur.frequency,
+          interval_days: patch.interval_days !== undefined ? patch.interval_days : cur.interval_days,
+          anchor_on: patch.anchor_on !== undefined ? patch.anchor_on : cur.anchor_on,
+          due_month: patch.due_month !== undefined ? patch.due_month : cur.due_month,
+          every_months: patch.every_months ?? cur.every_months,
+        };
+        const diffs: [CommitmentChangeField, string | null, string | null][] = [];
+        const s2 = (v: string | number | null) => (v === null ? null : String(v));
+        const add = (f: CommitmentChangeField, o: string | number | null, n: string | number | null | undefined) => {
+          if (n !== undefined && s2(o) !== s2(n)) diffs.push([f, s2(o), s2(n)]);
+        };
+        add('name', cur.name, patch.name);
+        add('amount', cur.amount_minor, patch.amount_minor);
+        add('currency', cur.currency, patch.currency);
+        add('due_day', cur.due_day, patch.due_day);
+        add('active', cur.active, patch.active);
+        if (cad(cur) !== cad(next)) diffs.push(['cadence', cad(cur), cad(next)]);
+        for (const [f, o, n] of diffs) {
+          stmts.push(
+            db
+              .prepare(
+                'INSERT INTO commitment_changes (user_id, commitment_id, field, old_val, new_val) VALUES (?, ?, ?, ?, ?)',
+              )
+              .bind(
+                userId,
+                id,
+                f,
+                o === null ? null : await en('commitment_changes', 'old_val', o),
+                n === null ? null : await en('commitment_changes', 'new_val', n),
+              ),
+          );
+        }
+      }
+      return db.batch(stmts);
+    },
+    /** Лента изменений платежа (новые первыми); чужой commitment → пусто. */
+    listCommitmentChanges(commitmentId: number, limit = 50) {
       return db
-        .prepare(`UPDATE commitments SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
-        .bind(...binds)
-        .run();
+        .prepare('SELECT * FROM commitment_changes WHERE user_id = ? AND commitment_id = ? ORDER BY id DESC LIMIT ?')
+        .bind(userId, commitmentId, limit)
+        .all<CommitmentChangeRow>().then((r) => decRows('commitment_changes', r));
     },
     /** Удаление платежа вместе с журналом оплат (batch = одна транзакция). */
     deleteCommitment(id: number) {
       return db.batch([
+        db.prepare('DELETE FROM commitment_changes WHERE user_id = ? AND commitment_id = ?').bind(userId, id),
         db.prepare('DELETE FROM commitment_payments WHERE user_id = ? AND commitment_id = ?').bind(userId, id),
         db.prepare('DELETE FROM commitments WHERE id = ? AND user_id = ?').bind(id, userId),
       ]);
@@ -668,11 +734,12 @@ export function scoped(db: Env['DB'], userId: number) {
     },
     /** /export — только собственные строки пользователя, без секретов/хэшей. */
     async exportUserData() {
-      const [profile, commitments, commitPays, expenses, income, debts, debtEvents, loans, loanEvents, exchanges, categories] =
+      const [profile, commitments, commitPays, commitChanges, expenses, income, debts, debtEvents, loans, loanEvents, exchanges, categories] =
         await Promise.all([
           this.getProfile(),
           this.listCommitments(false),
           db.prepare('SELECT * FROM commitment_payments WHERE user_id = ? ORDER BY id').bind(userId).all<CommitmentPaymentRow>().then((r) => decRows('commitment_payments', r)),
+          db.prepare('SELECT * FROM commitment_changes WHERE user_id = ? ORDER BY id').bind(userId).all<CommitmentChangeRow>().then((r) => decRows('commitment_changes', r)),
           this.listExpenses(),
           db.prepare('SELECT * FROM income_entries WHERE user_id = ? ORDER BY id').bind(userId).all<IncomeEntryRow>().then((r) => decRows('income_entries', r)),
           this.listDebts(false),
@@ -688,11 +755,12 @@ export function scoped(db: Env['DB'], userId: number) {
         return rest;
       };
       return {
-        schema_version: 5,
+        schema_version: 6,
         exported_at: new Date().toISOString(),
         profile: profile ? strip(profile as unknown as Record<string, unknown>) : null,
         commitments: commitments.results.map((c) => strip(c as unknown as Record<string, unknown>)),
         commitment_payments: commitPays.results.map((e) => strip(e as unknown as Record<string, unknown>)),
+        commitment_changes: commitChanges.results.map((e) => strip(e as unknown as Record<string, unknown>)),
         weekly_expenses: expenses.results.map((e) => strip(e as unknown as Record<string, unknown>)),
         income_entries: income.results.map((e) => strip(e as unknown as Record<string, unknown>)),
         debts: debts.results.map((d) => strip(d as unknown as Record<string, unknown>)),
@@ -715,6 +783,7 @@ export function scoped(db: Env['DB'], userId: number) {
         'exchanges',
         'debt_events',
         'debts',
+        'commitment_changes',
         'commitment_payments',
         'commitments',
         'profiles',

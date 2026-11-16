@@ -9,7 +9,7 @@
 import { useState } from 'preact/hooks';
 import { Banknote, Bot, CircleCheck, History, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { Api, CommitmentPayment, CommitmentPaymentsList, CommitmentsList, Profile } from '../api';
+import type { Api, CommitmentChange, CommitmentChangesList, CommitmentPayment, CommitmentPaymentsList, CommitmentsList, Profile } from '../api';
 import type { Nav, ScreenProps } from '../app';
 import { amountError, currencyError, fmtDay, fmtMinor, nameError, parseAmount, todayIso } from '../fmt';
 import {
@@ -50,10 +50,11 @@ export function CommitmentScreen({
 }: ScreenProps & { commitmentId: number }) {
   const q = useData(() => api.get<CommitmentsList>('/api/tma/commitments'), onFatal, []);
   const pays = useData(() => api.get<CommitmentPaymentsList>(`/api/tma/commitments/${commitmentId}/payments`), onFatal, [commitmentId]);
+  const chg = useData(() => api.get<CommitmentChangesList>(`/api/tma/commitments/${commitmentId}/changes`), onFatal, [commitmentId]);
   const item = q.data?.commitments.find((x) => x.id === commitmentId);
 
-  if (q.loading || pays.loading) return <Loading />;
-  const qErr = q.error ?? pays.error;
+  if (q.loading || pays.loading || chg.loading) return <Loading />;
+  const qErr = q.error ?? pays.error ?? chg.error;
   if (qErr) {
     const v = errorView(qErr);
     return <ErrorView title={v.title} text={v.text} onRetry={q.reload} />;
@@ -73,9 +74,11 @@ export function CommitmentScreen({
       nav={nav}
       item={item}
       payments={pays.data?.payments ?? []}
+      changes={chg.data?.changes ?? []}
       reload={() => {
         q.reload();
         pays.reload();
+        chg.reload();
       }}
     />
   );
@@ -86,12 +89,14 @@ function CommitmentCard({
   nav,
   item,
   payments,
+  changes,
   reload,
 }: {
   api: Api;
   nav: Nav;
   item: CommitmentsList['commitments'][number];
   payments: CommitmentPayment[];
+  changes: CommitmentChange[];
   reload: () => void;
 }) {
   const [name, setName] = useState(item.name);
@@ -273,6 +278,22 @@ function CommitmentCard({
         )}
       </div>
 
+      {changes.length ? (
+        <>
+          <h2 class={`${headCls} mt-6`}>
+            <Pencil size={16} strokeWidth={1.5} /> История изменений
+          </h2>
+          <ul class={`${listCardCls} mt-2 divide-y divide-line-soft`}>
+            {changes.map((ch) => (
+              <li key={ch.id} class="px-4 py-2 text-sm">
+                <span class={mutedCls}>{fmtDay(ch.changed_at.slice(0, 10))} · </span>
+                {changeText(ch, item.currency)}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
       {confirmDel ? (
         <div class={`${confirmCls} mt-3`}>
           <p class="text-sm">Удалить платёж «{item.name}»? Действие необратимо.</p>
@@ -302,6 +323,28 @@ function CommitmentCard({
       )}
     </>
   );
+}
+
+// ── история изменений ──
+
+const FIELD_LABEL: Record<CommitmentChange['field'], string> = {
+  name: 'Название',
+  amount: 'Сумма',
+  currency: 'Валюта',
+  due_day: 'День платежа',
+  active: 'Статус',
+  cadence: 'Расписание',
+};
+
+function changeText(ch: CommitmentChange, ccy: string): string {
+  const v = (x: string | null): string => {
+    if (x === null || x === '') return '—';
+    if (ch.field === 'amount') return fmtMinor(Number(x), ccy);
+    if (ch.field === 'active') return x === '1' ? 'включён' : 'пауза';
+    return x;
+  };
+  if (ch.field === 'cadence') return 'Расписание изменено';
+  return `${FIELD_LABEL[ch.field]}: ${v(ch.old)} → ${v(ch.new)}`;
 }
 
 // ── журнал оплат ──

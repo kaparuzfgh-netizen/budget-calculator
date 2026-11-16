@@ -26,7 +26,7 @@ const tenv = () => ({ ...env, JWT_SECRET, TELEGRAM_BOT_TOKEN: 't', TELEGRAM_WEBH
 
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
-  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'debt_events', 'debts', 'loan_events', 'loans', 'exchanges', 'commitments', 'profiles', 'consents', 'reminder_log', 'rate_limit', 'audit_log', 'processed_updates', 'invites', 'users'])
+  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_changes', 'commitment_payments', 'debt_events', 'debts', 'loan_events', 'loans', 'exchanges', 'commitments', 'profiles', 'consents', 'reminder_log', 'rate_limit', 'audit_log', 'processed_updates', 'invites', 'users'])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 
@@ -636,7 +636,7 @@ describe('базовый доход: explicit/computed/none, напоминан�
       commitments: { name: string; user_id: number }[];
       profile: { user_id: number } | null;
     };
-    expect(j.schema_version).toBe(5);
+    expect(j.schema_version).toBe(6);
     expect(j.profile?.user_id).toBe(A.uid);
     const names = j.commitments.map((x) => x.name);
     expect(names).toContain('A-тайное');

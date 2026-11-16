@@ -199,6 +199,16 @@ export interface CommitmentPayment {
   paid_on: string;
   source: 'manual' | 'auto';
 }
+export interface CommitmentChange {
+  id: number;
+  field: 'name' | 'amount' | 'currency' | 'due_day' | 'active' | 'cadence';
+  old: string | null;
+  new: string | null;
+  changed_at: string;
+}
+export interface CommitmentChangesList {
+  changes: CommitmentChange[];
+}
 export interface CommitmentPaymentsList {
   payments: CommitmentPayment[];
 }

@@ -116,6 +116,7 @@ export const FIELDS: FieldsSpec = {
   },
   commitments: { name: 'str', amount_minor: 'num' },
   commitment_payments: { amount_minor: 'num' },
+  commitment_changes: { old_val: 'str', new_val: 'str' },
   weekly_expenses: { amount_minor: 'num', note: 'str' },
   income_entries: { amount_minor: 'num', note: 'str' },
   debts: { name: 'str', rate: 'num', initial_balance_minor: 'num', initial_payment_minor: 'num' },

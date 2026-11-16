@@ -20,7 +20,7 @@ const fx: FxProvider = { latest: async () => ({ perUsd: { USD: 1, EUR: 1 / 1.09,
 beforeAll(() => applyD1Migrations(env.DB, env.TEST_MIGRATIONS));
 beforeEach(async () => {
   sent.length = 0;
-  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_payments', 'commitments', 'debt_events', 'debts', 'loan_events', 'loans', 'profiles', 'consents', 'reminder_log', 'audit_log', 'processed_updates', 'invites', 'users'])
+  for (const t of ['conversation_state', 'income_entries', 'weekly_expenses', 'categories', 'commitment_changes', 'commitment_payments', 'commitments', 'debt_events', 'debts', 'loan_events', 'loans', 'profiles', 'consents', 'reminder_log', 'audit_log', 'processed_updates', 'invites', 'users'])
     await env.DB.prepare(`DELETE FROM ${t}`).run();
 });
 async function user(tgId: number, tz: string, opts: {

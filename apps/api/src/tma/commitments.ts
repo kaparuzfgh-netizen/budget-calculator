@@ -238,6 +238,18 @@ export function registerTmaCommitments(
     return okJson(c, { ok: true });
   });
 
+  // ── история изменений платежа (commitment_changes) ──
+  app.get('/api/tma/commitments/:id/changes', tmaAuth, async (c) => {
+    const id = idOf(c);
+    if (!id) return c.json(notFound().body, 404);
+    const repo = repoOf(c);
+    if (!(await repo.getCommitment(id))) return c.json(notFound().body, 404);
+    const rows = (await repo.listCommitmentChanges(id)).results;
+    return okJson(c, {
+      changes: rows.map((e) => ({ id: e.id, field: e.field, old: e.old_val, new: e.new_val, changed_at: e.changed_at })),
+    });
+  });
+
   // ── журнал оплат платежей (commitment_payments) ──
   app.get('/api/tma/commitments/:id/payments', tmaAuth, async (c) => {
     const id = idOf(c);
