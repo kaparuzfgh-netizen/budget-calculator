@@ -42,7 +42,11 @@ const tileCls =
 const tileOnCls =
   'flex items-center justify-center rounded-xl border border-sky-500/60 bg-sky-500/15 py-2.5 text-[14px] font-medium text-sky-300';
 
-const fromItem = (h: HoldingItem): HoldingForm => ({
+const swapCls = 'mb-2 rounded-2xl border border-line bg-zinc-900/60 p-3';
+const swapLabelCls = 'mb-1 block text-[12px] text-zinc-500';
+const swapInputCls = 'min-w-0 flex-1 bg-transparent text-[24px] font-medium text-zinc-100 outline-none placeholder:text-zinc-600';
+
+const fromItem =(h: HoldingItem): HoldingForm => ({
   kind: h.kind,
   name: h.name,
   ticker: h.ticker ?? '',
@@ -133,18 +137,50 @@ function HoldingFormView({
             </Field>
           )}
           <Field label="Название">{txt('name', { maxLength: 60, placeholder: 'например, Вклад в банке', autoFocus: !edit })}</Field>
-          <div class="flex gap-3">
+          {!usesQty(f.kind) && (
             <Field label="Валюта">
               <CcySelect value={f.currency} onChange={(v) => set('currency', v)} />
             </Field>
-            {usesQty(f.kind) && <Field label="Тикер (необяз.)">{txt('ticker', { maxLength: 12, placeholder: 'BTC' })}</Field>}
-          </div>
+          )}
 
           {usesQty(f.kind) ? (
             <>
-              <Field label="Количество">{txt('quantity', { inputMode: 'decimal', placeholder: '0,002' })}</Field>
-              <Field label="Потрачено всего">{txt('invested', { inputMode: 'decimal', placeholder: '128' })}</Field>
-              <p class={`${mutedCls} mb-3`}>Сколько вы заплатили за всё количество (в валюте выше).</p>
+              {/* как в обменниках: сумма и её валюта/тикер в одной строке */}
+              <div class={swapCls}>
+                <span class={swapLabelCls}>Потратил</span>
+                <div class="flex items-center gap-3">
+                  <input
+                    class={swapInputCls}
+                    value={f.invested}
+                    inputMode="decimal"
+                    placeholder="0"
+                    onInput={(e) => set('invested', (e.target as HTMLInputElement).value)}
+                  />
+                  <div class="w-28 shrink-0">
+                    <CcySelect value={f.currency} onChange={(v) => set('currency', v)} />
+                  </div>
+                </div>
+              </div>
+              <div class={swapCls}>
+                <span class={swapLabelCls}>Получил</span>
+                <div class="flex items-center gap-3">
+                  <input
+                    class={swapInputCls}
+                    value={f.quantity}
+                    inputMode="decimal"
+                    placeholder="0"
+                    onInput={(e) => set('quantity', (e.target as HTMLInputElement).value)}
+                  />
+                  <input
+                    class={`${inputCls} w-28 shrink-0 text-center font-medium uppercase`}
+                    value={f.ticker}
+                    maxLength={12}
+                    placeholder="BTC"
+                    onInput={(e) => set('ticker', (e.target as HTMLInputElement).value)}
+                  />
+                </div>
+              </div>
+              <p class={`${mutedCls} mb-3`}>Сколько заплатили всего и сколько единиц получили. Цену за штуку считаем сами.</p>
               {needsPrice(f, supported) ? (
                 <Field label="Цена сейчас (за единицу)">{txt('price', { inputMode: 'decimal', placeholder: '30000' })}</Field>
               ) : (
