@@ -10,6 +10,8 @@ import type { FxProvider } from '../fx/provider';
 import { convert, round2, toMinor } from '../domain/money';
 import { isValidTimezone, monthInTz, todayInTz } from '../bot/parse';
 import { baselineIncome } from '../services/baseline';
+import { parseTargets, validateTargets } from '../domain/portfolio';
+import { DomainError } from '../domain/errors';
 import {
   bad,
   dayInRange,
@@ -55,6 +57,8 @@ const profilePatchSchema = z.object({
   /** Каскад бонуса: доли дельты дохода → досрочка / DCA (0..1, сумма ≤ 1). */
   bonus_prepay_share: z.number().finite().min(0).max(1).optional(),
   bonus_dca_share: z.number().finite().min(0).max(1).optional(),
+  /** Цели распределения портфеля: {вид: целый %}, сумма 100; null — сбросить. */
+  invest_targets: z.record(z.string(), z.number()).nullable().optional(),
 });
 
 export function registerTmaProfile(
@@ -177,6 +181,7 @@ export function registerTmaProfile(
       cushion_minor: p.cushion_minor,
       bonus_prepay_share: p.bonus_prepay_share,
       bonus_dca_share: p.bonus_dca_share,
+      invest_targets: parseTargets(p.invest_targets),
     });
   });
   app.patch('/api/tma/profile', tmaAuth, async (c) => {
@@ -208,6 +213,14 @@ export function registerTmaProfile(
     if (b.cushion !== undefined) patch.cushion_minor = toMinor(b.cushion);
     if (b.bonus_prepay_share !== undefined) patch.bonus_prepay_share = b.bonus_prepay_share;
     if (b.bonus_dca_share !== undefined) patch.bonus_dca_share = b.bonus_dca_share;
+    if (b.invest_targets !== undefined) {
+      try {
+        patch.invest_targets = b.invest_targets === null ? null : JSON.stringify(validateTargets(b.invest_targets));
+      } catch (e) {
+        if (e instanceof DomainError) return c.json(bad(e.message).body, 400);
+        throw e;
+      }
+    }
     // сумма долей каскада ≤ 1 — по слитым с текущими значениям
     const preSum = (patch.bonus_prepay_share ?? p0.bonus_prepay_share) + (patch.bonus_dca_share ?? p0.bonus_dca_share);
     if (preSum > 1 + 1e-9) return c.json(bad('сумма долей каскада больше 100%').body, 400);

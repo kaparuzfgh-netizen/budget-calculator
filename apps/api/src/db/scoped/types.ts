@@ -31,6 +31,8 @@ export interface ProfileRow {
   fx_alerts_enabled: number;
   /** «Подушка безопасности» — ручной остаток в living_currency (миграция 0019); NULL → не задана. */
   cushion_minor: number | null;
+  /** Цели распределения портфеля (0023): JSON {kind: целые %}, сумма 100; NULL — не заданы. */
+  invest_targets: string | null;
 }
 
 export interface CommitmentRow {
@@ -186,6 +188,28 @@ export interface ExchangeRow {
   spent_on: string; // 'YYYY-MM-DD' локально
   note: string;
   source: string;
+  source_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Позиция ручного инвест-портфеля (0023). quantity/avg_price/price — канонические десятичные строки. */
+export interface HoldingRow {
+  id: number;
+  user_id: number;
+  kind: 'deposit' | 'bond' | 'crypto' | 'stock' | 'other';
+  name: string;
+  ticker: string | null;
+  currency: string;
+  quantity: string | null;
+  avg_price: string | null;
+  price: string | null;
+  price_on: string | null;
+  amount_minor: number | null;
+  rate: number | null; // % годовых
+  opened_on: string | null;
+  matures_on: string | null;
+  note: string | null;
   source_key: string | null;
   created_at: string;
   updated_at: string;

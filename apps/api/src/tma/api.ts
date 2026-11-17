@@ -14,6 +14,7 @@ import { computeWaterfall } from '../domain/cashflow';
 import { weeklyStatus } from '../domain/budget';
 import { dayOfMonth, daysInMonth } from '../domain/dates';
 import { convert, round2, toMinor } from '../domain/money';
+import { dcaTargetsFrom, parseTargets } from '../domain/portfolio';
 
 const usd = (amount: number, ccy: string, pu: Record<string, number>) => convert(amount, ccy, 'USD', { perUsd: pu });
 import { resolveIncome } from '../bot/features';
@@ -39,6 +40,11 @@ import {
 } from './common';
 
 export { LIMITS };
+
+/** split по целям → [{kind, usd_minor}] (USD, minor). */
+function dcaSplit(split: Record<string, number>): { kind: string; usd_minor: number }[] {
+  return Object.entries(split).map(([kind, v]) => ({ kind, usd_minor: toMinor(round2(v)) }));
+}
 
 export function registerTmaApi(
   app: Hono<{ Bindings: Env; Variables: { tmaUser: UserRow } }>,
@@ -90,7 +96,7 @@ export function registerTmaApi(
         livingCap: { amount: p.living_cap_minor / 100, currency: p.living_currency },
         bonusPrepayShare: p.bonus_prepay_share,
         bonusDcaShare: p.bonus_dca_share,
-        dcaTargets: { USD: 1 },
+        dcaTargets: dcaTargetsFrom(parseTargets(p.invest_targets)),
         fx: { perUsd: fxr.perUsd },
       });
       // «подушка»: остаток в валюте бюджета vs месячная потребность
@@ -128,6 +134,8 @@ export function registerTmaApi(
                 delta_usd_minor: toMinor(round2(w.bonusDeltaUsd)),
                 prepay_usd_minor: toMinor(round2(w.toPrepayUsd)),
                 dca_usd_minor: toMinor(round2(w.toDcaUsd)),
+                // раскладка DCA по целям портфеля (пусто без целей)
+                dca_split: p.invest_targets ? dcaSplit(w.split) : [],
                 prepay_target: prepayTarget,
               }
             : null,

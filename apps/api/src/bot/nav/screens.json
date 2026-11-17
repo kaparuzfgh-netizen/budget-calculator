@@ -520,6 +520,13 @@
       "nav": "cancel"
     },
     {
+      "id": "INVEST",
+      "kind": "result",
+      "depth": 1,
+      "parent": "HOME",
+      "nav": "home"
+    },
+    {
       "id": "FX_HUB",
       "kind": "menu",
       "depth": 1,
@@ -751,6 +758,7 @@
     ["LOAN_ADD_AMOUNT", "LOANS"],
     ["LOAN_ADD_DUE", "LOANS"],
     ["LOAN_ADD_NOTE", "LOANS"],
+    ["HOME", "INVEST"],
     ["HOME", "FX_HUB"],
     ["FX_HUB", "FX_LIST"],
     ["FX_HUB", "FX_ADD_FROM"],

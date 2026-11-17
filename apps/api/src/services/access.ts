@@ -12,6 +12,7 @@ import type { SendMessageOpts, TelegramClient } from '../telegram/client';
 import { INVITE_TTL_MS, MAX_ACTIVE_INVITES, TEXT, inviteLink } from '../bot/commands';
 import { advance, onCcyResult, startOnboarding, type ObEffect, type ObInput, type ObState } from '../bot/onboarding';
 import { monthInTz, parseAmount, todayInTz } from '../bot/parse';
+import { runInvest } from '../bot/invest';
 import { handleExCategory, runIncome, runPlan, runProfile, runReport, runSpent, runWeek } from '../bot/features';
 import { householdLine, householdSummary } from './household';
 import { fmtMoney } from '../bot/format';
@@ -81,6 +82,7 @@ const MENU: Record<string, string> = {
   '🏦 Кредиты': '/credits',
   '🤝 Долги': '/loans',
   '💱 Курсы': '/fx',
+  '💼 Инвестиции': '/invest',
   '📈 Отчёт': '/report',
   '⚙️ Профиль': '/profile',
 };
@@ -491,6 +493,10 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     await openHub(LOAN_FLOW, 'LOANS', msg, repo, deps);
     return;
   }
+  if (CMD('invest').test(cmd)) {
+    await runInvest(msg.chatId, tg, repo, fx, today);
+    return;
+  }
   if (CMD('fx').test(cmd)) {
     await openHub(FX_FLOW, 'FX_HUB', msg, repo, deps);
     return;
@@ -658,6 +664,7 @@ export async function handleCallback(
       DEBTS: '/debts',
       LOANS: '/loans',
       FX_HUB: '/fx',
+      INVEST: '/invest',
       REPORT: '/report',
     }[target];
     if (cmd) {

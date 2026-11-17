@@ -16,6 +16,7 @@ import { expensesRepo } from './expenses';
 import { exchangesRepo } from './exchanges';
 import { debtsRepo } from './debts';
 import { loansRepo } from './loans';
+import { holdingsRepo } from './holdings';
 import { conversationRepo } from './conversation';
 import { userDataRepo } from './userdata';
 
@@ -37,6 +38,7 @@ export function scoped(db: Env['DB'], userId: number) {
     ...exchangesRepo(c),
     ...debtsRepo(c),
     ...loansRepo(c),
+    ...holdingsRepo(c),
     ...conversationRepo(c),
   };
   return { ...parts, ...userDataRepo(c, parts) };

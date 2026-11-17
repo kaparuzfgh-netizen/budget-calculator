@@ -160,6 +160,7 @@ function screenOf(): string {
   const cbs = lastCbs();
   const t = lastMsg().text;
   if (t === 'Главное меню') return 'HOME';
+  if (t.includes('Инвестиции')) return 'INVEST';
   if (cbs.includes('pf:sec:income')) return 'PF_HOME';
   if (cbs.includes('pf:typ')) return 'PF_INCOME';
   if (cbs.includes('pf:liv')) return 'PF_LIVING';
@@ -789,6 +790,16 @@ describe('контракт навигации (walk)', () => {
     expectNav('FX_DEL');
     await cb(tgId, 'fxa:dyes');
     expect(screenOf()).toBe('FX_LIST');
+
+    // INVEST (result): [🏠]; /invest и кнопка HOME ведут на один экран
+    await cb(tgId, 'nv:home');
+    expect(lastCbs()).toContain('nv:go:INVEST');
+    await cb(tgId, 'nv:go:INVEST');
+    expect(screenOf()).toBe('INVEST');
+    expectNav('INVEST');
+    expect(lastMsg().text).toContain('не инвестиционная рекомендация');
+    await msg(tgId, '/invest');
+    expect(screenOf()).toBe('INVEST');
 
     // HOME из глубины за ≤3 нажатия: с карточки платежа
     await cb(tgId, 'nv:home');

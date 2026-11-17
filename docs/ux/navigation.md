@@ -204,6 +204,7 @@ flowchart TD
   LOAN_ADD_DUE -- Отмена --> LOANS
   LOAN_ADD_NOTE -- Отмена --> LOANS
 
+  HOME --> INVEST["💼 Инвестиции: итог портфеля (результат)"]
   HOME --> FX_HUB["💱 Курсы: анализ пар + журнал"]
   FX_HUB --> FX_LIST["📒 Журнал обменов"]
   FX_HUB --> FX_ADD_FROM["Новый обмен: из чего"]
@@ -316,6 +317,7 @@ flowchart TD
 | LOAN_ADD_AMOUNT | prompt | 2 | LOANS | `[✖ Отмена]` → LOANS |
 | LOAN_ADD_DUE | prompt | 2 | LOANS | `[✖ Отмена]` → LOANS; кнопка `[Без срока]` |
 | LOAN_ADD_NOTE | prompt | 2 | LOANS | `[✖ Отмена]` → LOANS; кнопка `[Пропустить]`; сохранено → LOANS |
+| INVEST | result | 1 | HOME | `[🏠 Меню]`; итог и доли портфеля, ввод позиций — в Mini App; `/invest` |
 | FX_HUB | menu | 1 | HOME | `[🏠 Меню]`; `[📒 Журнал]` `[➕ Записать]`; `/fx` |
 | FX_LIST | menu | 2 | FX_HUB | `[← Назад] [🏠 Меню]`; строки обменов → FX_ITEM + `[➕ Записать]` |
 | FX_ITEM | menu | 3 | FX_LIST | `[← Назад] [🏠 Меню]`; `[✏️ Суммы] [📅 Дата] [📝 Заметка] [🗑]` |

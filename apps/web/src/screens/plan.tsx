@@ -12,6 +12,7 @@ import { ApiError } from '../api';
 import type { IncomeSource, PlanData, Upcoming, UpcomingItem } from '../api';
 import type { ScreenProps } from '../app';
 import { amountError, currencyError, fmtMinor, parseAmount } from '../fmt';
+import { KIND_PLURAL } from './invest-common';
 import {
   cardCls,
   CcySelect,
@@ -328,6 +329,12 @@ export function PlanScreen({ api, onFatal }: ScreenProps) {
             </span>
           </div>
         )}
+        {p.bonus?.dca_split?.length ? (
+          <p class={`${mutedCls} mt-1`}>
+            DCA по целям портфеля:{' '}
+            {p.bonus.dca_split.map((s) => `${KIND_PLURAL[s.kind].toLowerCase()} ${fmtMinor(s.usd_minor, usd)}`).join(' · ')}
+          </p>
+        ) : null}
       </div>
       <p class={`${mutedCls} mt-2`}>
         Итоги в базовой валюте USD · курсы на {p.fx_as_of || '—'}

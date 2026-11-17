@@ -7,6 +7,8 @@ import { weeklyStatus } from '../domain/budget';
 import { matchCategory } from '../domain/categories';
 import { convert, round2 } from '../domain/money';
 import { cadenceLabel, monthlyAmount } from '../domain/schedule';
+import { dcaTargetsFrom, parseTargets, type HoldingKind } from '../domain/portfolio';
+import { KIND_LABEL } from '../services/portfolio';
 import type { Period } from '../domain/report';
 import { buildUserReport } from '../services/report';
 import { baselineIncome } from '../services/baseline';
@@ -134,8 +136,8 @@ export async function runPlan(
     livingCap: { amount: p.living_cap_minor / 100, currency: p.living_currency },
     bonusPrepayShare: p.bonus_prepay_share,
     bonusDcaShare: p.bonus_dca_share,
-    // целей DCA пока нет (шаг 6) — {USD:1}: при dca_share=0 не используется
-    dcaTargets: { USD: 1 },
+    // цели портфеля (T3a); без целей — {USD:1}, как раньше
+    dcaTargets: dcaTargetsFrom(parseTargets(p.invest_targets)),
     fx: { perUsd: pu },
   });
   const top = [...commits]
@@ -179,6 +181,13 @@ export async function runPlan(
       `🎁 Дельта бонуса: +${fmtMoney(round2(w.bonusDeltaUsd), 'USD')}` +
         ` → досрочка ${fmtMoney(round2(w.toPrepayUsd), 'USD')}${target ? ` («${escapeHtml(target.name)}»)` : ''} · DCA ${fmtMoney(round2(w.toDcaUsd), 'USD')}`,
     );
+    // раскладка DCA по целям портфеля (если заданы)
+    if (p.invest_targets && w.toDcaUsd > 0) {
+      const parts = Object.entries(w.split)
+        .filter(([, v]) => v > 0)
+        .map(([k, v]) => `${KIND_LABEL[k as HoldingKind].toLowerCase()} ${fmtMoney(round2(v), 'USD')}`);
+      if (parts.length) lines.push(`📈 <i>DCA → ${parts.join(' · ')}</i>`);
+    }
   }
   lines.push(
     `<i>Курсы на ${escapeHtml(fxr.asOf || '—')}${fxr.stale ? ' — курсы устарели, провайдер недоступен' : ''}</i>`,

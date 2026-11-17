@@ -102,6 +102,8 @@ export interface PlanData {
     prepay_usd_minor: number;
     dca_usd_minor: number;
     prepay_target: string | null;
+    /** Раскладка DCA по целям портфеля (USD, minor); пусто без целей. */
+    dca_split?: { kind: HoldingKind; usd_minor: number }[];
   } | null;
   /** Подушка: остаток в валюте бюджета + покрытие «обязательные+повседневные» в мес. */
   cushion: { minor: number; currency: string; months: number; goal_months: number };
@@ -165,6 +167,8 @@ export interface Profile {
   bonus_prepay_share?: number;
   /** Каскад бонуса: доля → накопления/DCA (0..1); сумма долей ≤ 1. */
   bonus_dca_share?: number;
+  /** Цели распределения портфеля {вид: целый %}, сумма 100; null — не заданы. */
+  invest_targets?: Partial<Record<HoldingKind, number>> | null;
 }
 
 export type CommitmentFrequency = 'monthly' | 'interval_days' | 'yearly';
@@ -289,6 +293,48 @@ export interface LoansList {
   owed: LoanItem[];
   owe_usd_minor: number | null;
   owed_usd_minor: number | null;
+}
+
+// ── инвестиции /api/tma/holdings* (T3a, ручной портфель) ──
+
+export type HoldingKind = 'deposit' | 'bond' | 'crypto' | 'stock' | 'other';
+export interface HoldingItem {
+  id: number;
+  kind: HoldingKind;
+  name: string;
+  ticker: string | null;
+  currency: string;
+  /** Количество и цены — десятичные СТРОКИ (до 8 знаков), не числа. */
+  quantity: string | null;
+  avg_price: string | null;
+  price: string | null;
+  price_on: string | null;
+  price_stale: boolean;
+  amount_minor: number | null;
+  rate: number | null;
+  opened_on: string | null;
+  matures_on: string | null;
+  note: string | null;
+  /** Стоимость в валюте позиции (minor). */
+  value_minor: number;
+  pnl_minor: number | null;
+  accrued_minor: number | null;
+}
+export interface HoldingsList {
+  items: HoldingItem[];
+  total: {
+    currency: string;
+    /** null — нет курса базовой валюты. */
+    minor: number | null;
+    missing_rates: string[];
+    fx_as_of: string | null;
+    fx_stale: boolean;
+  };
+  allocation: {
+    current: Partial<Record<HoldingKind, number>>;
+    targets: Partial<Record<HoldingKind, number>> | null;
+  };
+  disclaimer: string;
 }
 
 // ── курсы /api/tma/fx* (шаг 8) ──

@@ -30,13 +30,14 @@ flowchart TD
       FEAT["bot/features.ts<br/>/plan /week /spent /income /profile"]
       DEBT["bot/debts.ts + services/debts.ts<br/>кредиты: платёж/ЧДП/сверка"]
       LOAN["bot/loans.ts + services/loans.ts<br/>займы: возврат/закрытие"]
+      INV["bot/invest.ts + services/portfolio.ts<br/>инвест-портфель: итог и доли (только просмотр)"]
       PROF["bot/profile.ts<br/>профиль: платежи/напоминания/данные"]
       REM["services/reminders.ts<br/>cron: итоги недели, дедлайны,<br/>автопроводка"]
-      TMA["tma/api.ts + expenses/profile/commitments/debts/fx/vision/overview<br/>REST /api/tma/* за Bearer-JWT"]
+      TMA["tma/api.ts + expenses/profile/commitments/debts/holdings/fx/vision/overview<br/>REST /api/tma/* за Bearer-JWT"]
     end
     REPO["db/repo.ts<br/>scoped(env.DB, user_id) — каждый запрос<br/>с WHERE user_id = ?"]
     FX["fx/service.ts → fx/frankfurter.ts<br/>getFxRates: кэш D1 (fx_rates, 6ч)"]
-    D1[("D1 «budget-companion»<br/>SQLite, 22 таблицы")]
+    D1[("D1 «budget-companion»<br/>SQLite, 24 таблицы")]
     SPA[("Workers Static Assets<br/>apps/web/dist — SPA-fallback")]
     CRON["scheduled()<br/>crons: 0 * * * * (каждый час UTC)"]
   end
@@ -53,6 +54,7 @@ flowchart TD
   ACCESS --> DEBT
   ACCESS --> LOAN
   ACCESS --> PROF
+  ACCESS --> INV
   RTR -->|"POST /api/tma/auth"| AUTH
   AUTH -->|"JWT 12ч"| TMA
   TMA --> REPO
@@ -60,6 +62,7 @@ flowchart TD
   DEBT --> REPO
   LOAN --> REPO
   PROF --> REPO
+  INV --> REPO
   ONB --> REPO
   ACCESS --> REPO
   REM --> REPO
@@ -134,7 +137,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 
 ## Слой данных (D1)
 
-22 таблицы, миграции `apps/api/migrations/0001–0022` — **иммутабельны**: изменения
+24 таблицы, миграции `apps/api/migrations/0001–0023` — **иммутабельны**: изменения
 только новыми файлами `NNNN_name.sql`; применение —
 `wrangler d1 migrations apply DB [--local|--remote]` (в `npm run release`
 уже встроено, при провале миграций деплой не идёт).
@@ -146,7 +149,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 | `consents` | 0001 | Согласия пользователя (`terms` и т.п.) |
 | `audit_log` | 0001 | Журнал действий доступа (`meta` — JSON без секретов и кодов) |
 | `processed_updates` | 0002 | Дедуп webhook по `update_id` (PK); очистка старше 7 дней каждый cron-тик |
-| `profiles` | 0003, 0005, 0015 | Профиль: валюты (включая `expense_currency` — дефолт трат), `timezone`, базовый доход (`income_minor`: >0 — явный, 0 — вычисляется из обязательств), бюджет повседневных, флаги `reminders_weekly`/`reminders_payments`/`reminders_digest` (0022)/`vision_enabled`/`fx_alerts_enabled` |
+| `profiles` | 0003, 0005, 0015, 0023 | Профиль: валюты (включая `expense_currency` — дефолт трат), `timezone`, базовый доход (`income_minor`: >0 — явный, 0 — вычисляется из обязательств), бюджет повседневных, флаги `reminders_weekly`/`reminders_payments`/`reminders_digest` (0022)/`vision_enabled`/`fx_alerts_enabled`; `invest_targets` (0023, `enc1:`) — цели распределения портфеля, JSON «вид → %» |
 | `commitments` | 0003, 0004 | Регулярные платежи: сумма, валюта, `due_day`, `active` (⏸) |
 | `weekly_expenses` | 0003 | Траты: `spent_on` (локальная дата), сумма, заметка; `UNIQUE(user_id, source_key)` |
 | `conversation_state` | 0003 | Состояние диалога бота (шаг + JSON), TTL 24ч на уровне кода |
@@ -164,11 +167,13 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 | `households` | 0020 | Общий бюджет пары: единый недельный лимит (`enc1:`, ключ от `households.id`) |
 | `household_members` | 0020 | Члены пары (≤2, юзер — максимум в одном), роль owner/member |
 | `categories` | 0014 | Категории трат: пресеты (`preset_key`) + свои, `archived`, `sort`; `weekly_expenses.category_id`, `income_entries.received_on` |
+| `holdings` | 0023 | Ручной инвест-портфель (T3a): вид `deposit`/`bond`/`crypto`/`stock`/`other`; `name`, `ticker`, `quantity`, `avg_price`, `price`, `amount_minor`, `rate`, `note` — `enc1:`; `currency`, `price_on`, `opened_on`, `matures_on` — plaintext; `source_key` (`tma:<client_id>`) — идемпотентность создания; не больше 50 позиций на пользователя |
 
 **Правила:**
 
 - **Деньги — `INTEGER` в минорных единицах** (копейки/центы); домен считает во
   float, конверсия `toMinor`/`fromMinor` — на границе репозитория.
+- **Исключение — инвест-позиции (правило 21):** количество и цены `holdings` — канонические десятичные строки (`domain/decimal.ts`, BigInt); через `toMinor` они не переводятся. Суммы вкладов и «другого» — `amount_minor` в minor units валюты позиции.
 - **Изоляция tenant:** каждая таблица с пользовательскими данными имеет
   `user_id`; доступ — только через `scoped(db, userId)`, где каждый запрос
   содержит `WHERE user_id = ?`. Мутации по id — `WHERE id=? AND user_id=?`
@@ -182,6 +187,16 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 - **Событийная модель долгов:** `debts`/`loans` хранят начальные параметры,
   текущий остаток вычисляется replay() по журналу событий — пересчёт
   идемпотентен и самовосстанавливается (как `DebtEngine` в v1).
+
+## Инвестиции (T3a): домен и сервисы
+
+Ручной портфель — этап 1 шага 10. Внешних источников цен пока нет: цены вводятся вручную, автоцены — T3b, облигации и акции (MOEX) — T3c, журнал сделок и напоминания о погашении — T3d.
+
+- `domain/decimal.ts` — точная десятичная арифметика на BigInt. Количество и цена — каноническая строка (до 12 цифр до точки, до 8 после, больше нуля). `mulToMinor` — qty × price в minor units с округлением half-up; переполнение (> 1e9 major) — `TOO_LARGE`.
+- `domain/portfolio.ts` — чистые функции без I/O, «сегодня» передаётся параметром: стоимость позиции (qty × price для облигаций, крипты и акций; сумма для вклада и «другого»), результат к цене покупки, «цена устарела» (старше 30 дней), «≈ начислено» по вкладу (простые проценты), доли по видам, валидация целей (целые проценты, сумма 100), `dcaTargetsFrom` — веса DCA для плана.
+- `services/portfolio.ts` — `portfolioView`: итог в валюте бюджета. Курс запрашивается по каждой валюте отдельно (толерантно): валюта без курса не валит экран — позиция видна, в итог не входит, код валюты попадает в `missing_rates`. Если курс валюты бюджета недоступен, итог не считается (`null`).
+- `bot/invest.ts` (`/invest`, экран INVEST — только просмотр) и `tma/holdings.ts` (`/api/tma/holdings`, CRUD) используют один и тот же `portfolioView`. Мутации по id — `WHERE id=? AND user_id=?`; партнёру по household позиции не отдаются.
+- Цели распределения — `profiles.invest_targets` (`GET`/`PATCH /api/tma/profile`). По ним план делит долю бонуса «в DCA» (`bonus.dca_split` в Mini App, строка «DCA → …» в `/plan` бота) вместо прежней заглушки `{USD:1}`.
 
 ## Топология деплоя
 
@@ -232,7 +247,7 @@ flowchart LR
 `src/db/crypto.ts`: HKDF-SHA256(`DATA_KEY`, salt 'budget-companion/data/v1',
 info 'user:<id>') → AES-GCM-256, формат `enc1:<b64url(iv||ct+tag)>`, AAD
 `<table>.<col>:<userId>`. Спек зашифрованных колонок — `FIELDS` (суммы, имена,
-заметки, `conversation_state.data`); остальное plaintext (даты, валюты, id, флаги —
+заметки, `conversation_state.data`, позиции `holdings`, `profiles.invest_targets`); остальное plaintext (даты, валюты, id, флаги —
 нужны для WHERE/CAS). `repo.ts` шифрует бинды и дешифрует строки прозрачно для
 вызывающих; cron (`services/encryption.ts` → `encryptBackfill`) дошифровывает
 legacy-строки идемпотентными CAS-UPDATE'ами (≤200/таблицу/тик).

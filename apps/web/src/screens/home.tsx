@@ -4,7 +4,7 @@
  * повседневные с прогресс-барами, доход и сетка разделов.
  */
 import { useState } from 'preact/hooks';
-import { ArrowLeftRight, Banknote, CalendarDays, ChartColumn, ChartPie, ChevronDown, CircleCheck, Handshake, Landmark, Plus, Receipt, User, Users, Wallet } from 'lucide-preact';
+import { ArrowLeftRight, Banknote, Briefcase, CalendarDays, ChartColumn, ChartPie, ChevronDown, CircleCheck, Handshake, Landmark, Plus, Receipt, User, Users, Wallet } from 'lucide-preact';
 import { ApiError } from '../api';
 import type { HouseholdResponse, Overview, Upcoming, UpcomingItem, WeekStatus } from '../api';
 import type { ScreenProps } from '../app';
@@ -552,6 +552,9 @@ export function HomeScreen({ api, nav, onFatal, name, tempo }: ScreenProps & { n
         </button>
         <button type="button" class={tileCls} onClick={() => nav.push({ id: 'fx' })}>
           <ArrowLeftRight size={18} strokeWidth={1.5} class={iconCls} /> Курсы
+        </button>
+        <button type="button" class={tileCls} onClick={() => nav.push({ id: 'invest' })}>
+          <Briefcase size={18} strokeWidth={1.5} class={iconCls} /> Инвестиции
         </button>
       </div>
     </>

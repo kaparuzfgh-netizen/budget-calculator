@@ -11,6 +11,7 @@ import { scoped, type ScopedRepo, type UserRow } from '../db/repo';
 import { getFxRates } from '../fx/service';
 import { FxUnavailable, type FxProvider } from '../fx/provider';
 import { DomainError } from '../domain/errors';
+import { normalizeDec } from '../domain/decimal';
 
 export type TmaContext = Context<{ Bindings: Env; Variables: { tmaUser: UserRow } }>;
 
@@ -20,6 +21,7 @@ export const LIMITS = {
   maxCommitments: 30,
   maxDebts: 20, // P2-2: активные кредиты — реестр и replay не разрастаются
   maxLoans: 100, // P2-2: открытые займы (closed_at IS NULL)
+  maxHoldings: 50, // T3a: позиции ручного инвест-портфеля
   maxNote: 200,
   maxName: 60,
   clientIdMax: 64,
@@ -36,6 +38,18 @@ export const notFound = () => err('not_found', 'Не найдено', 404);
 
 export const zCcy = z.string().trim().toUpperCase().regex(CCY_RE, 'валюта');
 export const zAmount = z.number().finite().positive().max(LIMITS.maxAmount); // major units
+/**
+ * Количество/цена — СТРОКОЙ (JSON-число теряет 8-й знак): запятая → точка,
+ * нормализация до канонической десятичной строки (domain/decimal), больше 0.
+ */
+export const zDec = z.string().transform((s, ctx) => {
+  try {
+    return normalizeDec(s);
+  } catch {
+    ctx.addIssue({ code: 'custom', message: 'число: до 12 цифр до точки и до 8 после, больше 0' });
+    return z.NEVER;
+  }
+});
 export const zNote = z.string().trim().max(LIMITS.maxNote).optional();
 export const zClientId = z.string().regex(CLIENT_ID_RE).optional();
 export const zDay = z.number().int().min(1).max(31).nullable().optional();

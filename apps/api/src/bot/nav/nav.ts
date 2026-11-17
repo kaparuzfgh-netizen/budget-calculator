@@ -85,8 +85,9 @@ export function homeMarkup(): ReplyMarkup {
       [
         { text: '💱 Курсы', callback_data: navGo('FX_HUB') },
         { text: '📈 Отчёт', callback_data: navGo('REPORT') },
-        { text: '⚙️ Профиль', callback_data: navGo('PF_HOME') },
+        { text: '💼 Инвестиции', callback_data: navGo('INVEST') },
       ],
+      [{ text: '⚙️ Профиль', callback_data: navGo('PF_HOME') }],
     ],
   };
 }
