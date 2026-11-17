@@ -45,20 +45,26 @@ function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
             : null;
   return (
     <li class={`${liCls} cursor-pointer transition hover:bg-fill`} onClick={onOpen}>
+      {/* как в кошельках: слева название, справа сумма в валюте, под ней количество в токенах */}
       <div class={rowCls}>
-        <span class="text-[15px] text-zinc-100">
-          {h.name}
-          {h.ticker ? <span class="text-zinc-500"> · {h.ticker}</span> : ''}
-        </span>
-        <span>{fmtMinor(h.value_minor, h.currency)}</span>
+        <span class="text-[15px] text-zinc-100">{h.name}</span>
+        <span class="text-[15px]">{fmtMinor(h.value_minor, h.currency)}</span>
       </div>
       <div class={`${rowCls} mt-1`}>
         <span class={mutedCls}>
           {KIND_LABEL[h.kind]}
-          {qty ? ` · ${h.quantity}${h.ticker ? ` ${h.ticker}` : ''}` : ''}
           {qty && h.invested ? ` · потрачено ${h.invested} ${h.currency}` : ''}
           {h.rate !== null && h.kind === 'deposit' ? ` · ${h.rate}%` : ''}
         </span>
+        {qty && (
+          <span class={mutedCls}>
+            {h.quantity}
+            {h.ticker ? ` ${h.ticker}` : ''}
+          </span>
+        )}
+      </div>
+      <div class={`${rowCls} mt-1`}>
+        <span class="text-[12px] text-zinc-500">{badge ?? ''}</span>
         {h.pnl_minor !== null ? (
           <span class={`text-[13px] ${h.pnl_minor >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
             {h.pnl_minor >= 0 ? '+' : ''}
@@ -68,7 +74,6 @@ function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
           <span class={mutedCls}>≈ начислено {fmtMinor(h.accrued_minor, h.currency)}</span>
         ) : null}
       </div>
-      {badge && <p class="mt-1 text-[12px] text-zinc-500">{badge}</p>}
       {h.price_stale && (
         <p class="mt-1 text-[12px] text-amber-400">
           {h.price_source === 'auto'
