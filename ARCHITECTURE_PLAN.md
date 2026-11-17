@@ -1,6 +1,6 @@
 # ARCHITECTURE_PLAN.md
 
-Снимок на 2026-11-17. Подробности — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+Снимок на 2026-11-17 (после T1–T6). Подробности — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [ADR-0001](docs/adr/0001-platform-and-architecture.md). Планы по задачам из
 `TASKS.md` добавляются ниже агентом `architect` (раздел «План задачи: …»).
 
@@ -32,9 +32,9 @@ Mini App (`/api/tma/*`, Bearer JWT) + статика SPA (Workers Static Assets)
 | # | Проблема | Подтверждение | Серьёзность |
 |---|---|---|---|
 | B1 | ~~**Файлы-«god object»**~~ ✅ частично закрыто (T6): repo.ts → `db/scoped/*`, web-экраны profile/home/debts разбиты; остаются `services/access.ts` (883) и `ProfileForms`. Исходно: **Файлы-«god object»**: `db/repo.ts` 1753 строк, `services/access.ts` 883, `web/screens/profile.tsx` 1042, `home.tsx` 935, `debts.tsx` 862. Растёт стоимость изменений и ревью; repo.ts — единая точка tenant-изоляции, поэтому правки в нём рискованны | `wc -l` | P2 |
-| B2 | **Дрейф документации**: `docs/ARCHITECTURE.md` говорит «19 таблиц» / «18 таблиц» и миграции «0001–0014», фактически 0001–0020 (нет `households`/`household_members` и других поздних таблиц); README уже ссылается на v2, но таблицы не обновлены | сравнение с `apps/api/migrations` | P3 |
-| B3 | **Нет корневого `.env.example`**: переменные описаны только в `apps/api/.dev.vars.example`; корневой `.env` (в .gitignore) читается скриптами `scripts/env.mjs` — его формат нигде не задокументирован | `ls`, `scripts/env.mjs` | P3 |
-| B4 | **Потеря истории платежей**: `patchCommitment` затирает прежнюю сумму, рост обязательных не объяснить (BACKLOG P2-10) | `docs/BACKLOG.md` | P2 |
+| B2 | ~~**Дрейф документации**~~ ✅ закрыто (T4) — **Дрейф документации**: `docs/ARCHITECTURE.md` говорит «19 таблиц» / «18 таблиц» и миграции «0001–0014», фактически 0001–0020 (нет `households`/`household_members` и других поздних таблиц); README уже ссылается на v2, но таблицы не обновлены | сравнение с `apps/api/migrations` | P3 |
+| B3 | ~~**Нет корневого `.env.example`**~~ ✅ закрыто (T5) — **Нет корневого `.env.example`**: переменные описаны только в `apps/api/.dev.vars.example`; корневой `.env` (в .gitignore) читается скриптами `scripts/env.mjs` — его формат нигде не задокументирован | `ls`, `scripts/env.mjs` | P3 |
+| B4 | ~~**Потеря истории платежей**~~ ✅ закрыто (T1) — **Потеря истории платежей**: `patchCommitment` затирает прежнюю сумму, рост обязательных не объяснить (BACKLOG P2-10) | `docs/BACKLOG.md` | P2 |
 | B5 | **Cron-окна и пачки**: надёжность закрыта аудитом (окна, догоняющая автопроводка, пачки по 8), но при росте пользователей лимиты Workers Free (subrequests/CPU за тик) — главный потолок; мониторинга лимитов нет | AUDIT_REPORT P1-1, «Отложено» | P2 |
 | B6 | **Единая точка отказа ключа**: потеря `DATA_KEY` необратима (DR-план описан в аудите A2-3, но восстановление не автоматизировано) | AUDIT_REPORT A2-3 | P2 |
 | B7 | **Только русский язык** UI, строки зашиты в код (BACKLOG P2-13) | BACKLOG | P3 |
@@ -49,70 +49,4 @@ Mini App (`/api/tma/*`, Bearer JWT) + статика SPA (Workers Static Assets)
 
 ## 4. Планы задач
 
-### План задачи T1: История изменений платежей
-
-**Цель.** Каждое изменение платежа (`patchCommitment`) оставляет append-only
-запись «было → стало»; в деталях платежа в Mini App — лента изменений.
-Границы: только чтение ленты и запись при правке. Откат/«восстановить
-значение» и использование в дайджесте (T2) — вне задачи.
-
-**Решения.**
-- Поля в журнале: `name`, `amount` (+`currency` как отдельное поле), `due_day`, `active`, `cadence` (одно поле: сериализация `frequency|interval_days|anchor_on|due_month|every_months`). `old_val`/`new_val` — строки, шифруются целиком (`str`), т.к. имена и суммы приватны.
-- Единая точка записи — `patchCommitment` в `db/repo.ts` (покрывает и бот через `flows.ts`, и TMA). Логируем только реально изменившиеся значения (сравнение с текущей строкой); пустой diff — запись не создаётся.
-- Журнал и обновление — в одном `db.batch` (атомарно). Сначала `getCommitment(id)` с `user_id`-предикатом; чужой/несуществующий id → ничего не пишем (как сейчас, молча).
-- Идемпотентность: повторная правка тем же значением даёт пустой diff, дублей нет; `client_id` не нужен.
-- Удаление платежа удаляет и его историю (как `commitment_payments`).
-
-**Данные.** Миграция `apps/api/migrations/0021_commitment_changes.sql`:
-`commitment_changes(id PK, user_id NOT NULL REFERENCES users(id), commitment_id NOT NULL, field TEXT NOT NULL CHECK(field IN (...)), old_val TEXT, new_val TEXT, changed_at TEXT NOT NULL DEFAULT (datetime('now')))`
-+ индекс `(user_id, commitment_id, id)`. `FIELDS += commitment_changes: { old_val:'str', new_val:'str' }` в `db/crypto.ts` (backfill подхватит автоматически).
-
-**Шаги.**
-1. Миграция 0021 + запись в `FIELDS`; типы строки (`CommitmentChangeRow`) в `repo.ts`.
-2. `patchCommitment`: читать текущую строку, посчитать diff по полям, собрать `INSERT INTO commitment_changes` (значения через `en(...)`) и добавить в `db.batch` вместе с `UPDATE`. Вернуть прежний тип результата (проверить вызовы в `flows.ts:260`, `tma/commitments.ts:229`).
-3. `repo.listCommitmentChanges(commitmentId, limit=50)` — `WHERE user_id=? AND commitment_id=? ORDER BY id DESC`, `decRows`.
-4. `deleteCommitment` — добавить `DELETE FROM commitment_changes WHERE user_id=? AND commitment_id=?` в batch; `deleteAllUserData` — таблица в начало списка (children first); `exportUserData` — секция `commitment_changes`, `schema_version` 5→6.
-5. TMA: `GET /api/tma/commitments/:id/changes` (Bearer, `getCommitment` → 404 для чужого; ответ `{changes:[{id, field, old, new, changed_at}]}`; суммы отдавать как minor units + currency, а не строкой).
-6. Web: в деталях платежа (`apps/web/src/screens/…` — найти экран деталей платежа) лента «было → стало» (суммы через `fmt`, цвета только токенами палитры).
-7. Тесты (api): diff пишет только изменённые поля; пустой patch — 0 записей; «A не видит B» (список изменений чужого платежа → 404, чужие записи не в выдаче); шифрование (в D1 `enc1:`, ключ `commitment_changes.old_val:<uid>`); удаление платежа и `/delete_me` чистят журнал; `/export` содержит секцию. Обновить списки таблиц в `privacy.test.ts` (строки 38, 53) и `encryption.test.ts` (стр. 19). Тест web на рендер ленты, если есть паттерн в `apps/web`.
-8. `npm run check` зелёный.
-
-**Риски.** (а) `patchCommitment` вызывается из бота и TMA с разными наборами полей — сравнивать по значениям после дешифровки, а не по наличию ключа; (б) суммы в `old_val` — строки minor units, валюту менять отдельным полем, иначе лента вводит в заблуждение; (в) рост таблицы — лимит выдачи 50, чистка не нужна (правка редкая). Откат — новой миграцией `DROP TABLE` (старые не трогаем).
-
-**Документация (для documenter).** `docs/ARCHITECTURE.md` (таблица + миграции), `docs/BACKLOG.md` (вычеркнуть P2-10), `docs/USER_GUIDE.md`, `/export` в README/SECURITY при упоминании схемы.
-
-Задачу можно переводить в `[READY]` после подтверждения плана.
-
-### План задачи T2: Дайджест месяца «факт vs план» + savings rate
-
-**Цель.** Раз в месяц пользователь получает сообщение-итог: доход план/факт,
-оплачено N из M обязательных, повседневные % от бюджета, savings rate, топ-2
-категории. Границы: только push в бот + тумблер; экран дайджеста в Mini App,
-«подорожание платежей» (данные T1) и сравнение нескольких месяцев — вне задачи.
-
-**Решения (приняты владельцем по умолчанию).**
-- Триггер: последний локальный день месяца (завтра — другой месяц), `lp.hour >= reminder_hour ?? PAY_HOUR`, окно до 23:59. Catch-up: 1-го числа 00:00–11:59 за прошлый месяц с тем же claim.
-- Claim `claimReminder('digest', 'YYYY-MM')` ставится ДО сборки отчёта; при ошибке отправки — `releaseReminder` (как у weekly); 403 — гасит `reminders_weekly/payments/digest`.
-- Запуск внутри `processUser` строго после блока автопроводки (c), чтобы платёж последнего дня попал в факт.
-- Доход: факт месяца (`income_entries`), иначе `resolveIncome` (typical → computed) с пометкой «оценка», иначе none.
-- savings rate = (доход − обязательные − повседневные) / доход, где обязательные = оплаты платежей + платежи по кредитам (`report.commitments + report.credits`); при доходе ≤ 0 → «—»; отрицательное значение показываем как есть.
-- Топ-2 категории: по росту суммы к прошлому месяцу (report уже считает prev), нет прошлого — топ-2 по сумме. Без бюджетов по категориям.
-- Данные: `buildUserReport(repo, fx, 'month', offset, now)` (offset 0 в последний день, −1 при catch-up) + `listCommitments` + `occurrencesInRange`/`isOccurrencePaid` из `domain/schedule` для «оплачено N из M» (считаем только активные платежи).
-
-**Данные.** Миграция `0022_reminders_digest.sql`: `ALTER TABLE profiles ADD COLUMN reminders_digest INTEGER NOT NULL DEFAULT 1`. Новых таблиц и шифруемых колонок нет (флаг — plaintext, как остальные). Расширить `ProfileRow`, `patchProfile` (whitelist), `upsertProfile` не трогать (DEFAULT).
-
-**Шаги.**
-1. Миграция 0022 + `ProfileRow.reminders_digest` + whitelist в `patchProfile`; `listReminderCandidates` — добавить `OR reminders_digest = 1`.
-2. `domain/digest.ts` — чистые функции без I/O: `savingsRate(income, obligatory, living)`, `topCategoryMovers(cur, prev, n=2)`, `isLastDayOfMonth(iso)` / `digestTarget(localIso)` → `{ offset: 0 | -1, key: 'YYYY-MM' } | null` (последний день → текущий месяц; день 1 и час < 12 → прошлый). Golden/юнит-тесты, включая февраль, високосный год, границы 31→1.
-3. `services/digest.ts`: `buildDigest(repo, fx, now, offset)` → структура (income plan/actual+source, paid N/M, living used%, savings rate, movers) и `renderDigest` → текст (HTML-экранирование имён категорий). Без логирования текста.
-4. `reminders.ts`: блок (f) после автопроводки: `p.reminders_digest === 1`, `digestTarget(...)`, claim → build → `tgU.sendMessage`; 403/ошибка — как в weekly; 403-хендлеры везде гасят и `reminders_digest`. Обновить шапочный комментарий файла.
-5. TMA: `PATCH /api/tma/profile` zod `reminders_digest: boolean`, GET отдаёт флаг; `web/src/api.ts` + `ToggleKey` + запись в списке тумблеров профиля («Дайджест месяца», hint «итоги в последний день месяца»); demo/mock.
-6. Бот: профиль-экран напоминаний — тумблер `pf:*` только если уже есть паттерн для weekly/payments; иначе вне задачи. Любое новое нав-состояние — сначала `docs/ux/navigation.md` + `screens.json` (правило 12).
-7. Тесты: `domain/digest.test.ts`; `reminders.test.ts` — отправка в последний день после часа, не раньше часа, идемпотентность (второй тик — skipped), catch-up 1-го числа, release при сбое отправки + повтор, 403 гасит флаги, юзер только с `reminders_digest=1` попадает в кандидаты, платёж последнего дня учтён (автопроводка раньше дайджеста), `reminders_digest=0` → тишина; tma-profile тест на GET/PATCH флага; изоляция — дайджест читает только через `scoped(userId)` (A не получает цифры B).
-8. `npm run check`.
-
-**Риски.** (а) Пустой месяц (нет данных) — слать минимальный дайджест или пропускать: пропускать, если нет ни дохода, ни оплат, ни трат (иначе спам новым юзерам); (б) CPU/subrequests в «час пик» последнего дня: claim до сборки + пачки по 8 уже есть; один `buildUserReport` на юзера, FX — из кэша; (в) смена TZ юзера в последний день может дать два дайджеста за разные ключи — claim по `YYYY-MM` исключает дубль; (г) текст содержит суммы — только в Telegram-сообщение, в логи не попадает. Откат: флаг `reminders_digest = 0` у всех новой миграцией/`UPDATE`; саму колонку не трогаем.
-
-**Документация (для documenter).** `docs/ARCHITECTURE.md` (миграции 0001–0022, описание cron), `docs/BACKLOG.md` (P2-12), `docs/USER_GUIDE.md` (дайджест, тумблер), `CHANGELOG.md`, шапка `reminders.ts`.
-
-Задачу можно переводить в `[READY]` после подтверждения плана.
+_Пока пусто. `architect` добавляет раздел при переводе задачи в `[DESIGN]`; после `[DONE]` раздел удаляется (история — в git и CHANGELOG)._

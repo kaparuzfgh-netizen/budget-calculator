@@ -30,8 +30,8 @@
 2. **`apps/api` — только Web API** (Workers ≠ Node): `fetch`, Web Crypto,
    `crypto`, `URL`, `URLSearchParams`; никаких `process`, `fs`, `Buffer`,
    `node:*`. Линтер это не отловит — смотри внимательно.
-3. **SQL — только в `apps/api/src/db/repo.ts`**, каждый запрос —
-   `WHERE user_id = ?` (изоляция tenant). Сырые `db.prepare` вне repo
+3. **SQL — только в `apps/api/src/db/repo.ts` и `apps/api/src/db/scoped/*`**, каждый запрос —
+   `WHERE user_id = ?` (изоляция tenant). Сырые `db.prepare` вне этих файлов
    запрещены; на новые чтения/мутации — тест «A не видит B».
 4. **Миграции иммутабельны**: только новые файлы `migrations/NNNN_name.sql`.
 5. **Навигация бота** — сначала `docs/ux/navigation.md` +
