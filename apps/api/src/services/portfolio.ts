@@ -10,9 +10,9 @@ import {
   allocation,
   depositAccrued,
   effectivePrice,
-  holdingValueMinor,
+  valuation,
+  investedMinor,
   parseTargets,
-  pnlMinor,
   portfolioTotals,
   type EffectivePrice,
   type HoldingKind,
@@ -34,6 +34,8 @@ export interface HoldingItem {
   currency: string;
   quantity: string | null;
   avg_price: string | null;
+  /** «Потрачено всего» (десятичная строка); у старых строк — qty×avg_price. */
+  invested: string | null;
   price: string | null;
   price_on: string | null;
   /** Действующая цена устарела (авто: >24ч; ручная: >30 дней). */
@@ -58,6 +60,8 @@ export interface HoldingItem {
   /** Стоимость в валюте позиции (minor). */
   value_minor: number;
   pnl_minor: number | null;
+  /** Цены нет — оценено по «потрачено», результат 0. */
+  valued_at_cost: boolean;
   accrued_minor: number | null;
 }
 
@@ -114,12 +118,22 @@ async function tolerantRates(
   return { fxr: { perUsd, asOf, stale }, unavailable };
 }
 
+/** «Потрачено» для отдачи: своё значение либо qty×avg_price старых строк (десятичная строка). */
+function investedStr(h: HoldingRow): string | null {
+  if (h.invested) return h.invested;
+  const m = investedMinor(h);
+  if (m === null) return null;
+  return `${Math.trunc(m / 100)}.${String(m % 100).padStart(2, '0')}`.replace(/.00$/, '').replace(/(.d)0$/, '$1');
+}
+
 export const toHoldingItem = (
   h: HoldingRow,
   today: string,
   eff: EffectivePrice = effectivePrice(h, null, today, '', false),
   autoNote: HoldingItem['auto_note'] = null,
-): HoldingItem => ({
+): HoldingItem => {
+  const val = valuation({ ...h, price: eff.price });
+  return {
   id: h.id,
   kind: h.kind,
   name: h.name,
@@ -127,6 +141,7 @@ export const toHoldingItem = (
   currency: h.currency,
   quantity: h.quantity,
   avg_price: h.avg_price,
+  invested: investedStr(h),
   price: h.price,
   price_on: h.price_on,
   price_stale: eff.stale,
@@ -142,10 +157,12 @@ export const toHoldingItem = (
   opened_on: h.opened_on,
   matures_on: h.matures_on,
   note: h.note,
-  value_minor: holdingValueMinor({ ...h, price: eff.price }),
-  pnl_minor: pnlMinor({ ...h, price: eff.price }),
+  value_minor: val.valueMinor,
+  pnl_minor: val.pnlMinor,
+  valued_at_cost: val.atCost,
   accrued_minor: depositAccrued(h, today),
-});
+  };
+};
 
 export async function portfolioView(
   repo: ScopedRepo,

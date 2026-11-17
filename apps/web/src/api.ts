@@ -311,6 +311,8 @@ export interface HoldingItem {
   /** Количество и цены — десятичные СТРОКИ (до 8 знаков), не числа. */
   quantity: string | null;
   avg_price: string | null;
+  /** «Потрачено всего» в валюте позиции (десятичная строка). */
+  invested: string | null;
   price: string | null;
   price_on: string | null;
   /** Действующая цена устарела (авто >24ч; ручная >30 дней). */
@@ -332,6 +334,8 @@ export interface HoldingItem {
   /** Стоимость в валюте позиции (minor). */
   value_minor: number;
   pnl_minor: number | null;
+  /** Цены нет — оценено по «потрачено», результат 0. */
+  valued_at_cost: boolean;
   accrued_minor: number | null;
 }
 export interface HoldingsList {

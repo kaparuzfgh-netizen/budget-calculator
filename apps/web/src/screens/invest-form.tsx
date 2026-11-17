@@ -1,6 +1,6 @@
 /**
  * invest-form.tsx — добавление/правка позиции портфеля (T3a).
- * Поля зависят от вида: крипта/акции/облигации — количество и цена (строки),
+ * Поля зависят от вида: крипта/акции/облигации — количество и «потрачено всего» (+ цена сейчас, если автоцены нет),
  * вклад/другое — сумма (+ ставка и даты для вклада). client_id один на
  * попытку (повторная отправка не задвоит позицию). Удаление — с подтверждением.
  */
@@ -26,10 +26,10 @@ import {
   useData,
 } from '../ui';
 import {
-  autoSupported,
   buildBody,
   emptyForm,
   formError,
+  needsPrice,
   KIND_LABEL,
   KINDS,
   usesQty,
@@ -48,14 +48,13 @@ const fromItem = (h: HoldingItem): HoldingForm => ({
   ticker: h.ticker ?? '',
   currency: h.currency,
   quantity: h.quantity ?? '',
-  avgPrice: h.avg_price ?? '',
+  invested: h.invested ?? '',
   price: h.price ?? '',
   amount: h.amount_minor === null ? '' : String(h.amount_minor / 100),
   rate: h.rate === null ? '' : String(h.rate),
   openedOn: h.opened_on ?? '',
   maturesOn: h.matures_on ?? '',
   note: h.note ?? '',
-  autoPrice: h.auto_price,
 });
 
 function HoldingFormView({
@@ -72,7 +71,7 @@ function HoldingFormView({
   const [cid] = useState(() => crypto.randomUUID()); // client_id на попытку формы
   const edit = holdingId !== undefined;
   const set = <K extends keyof HoldingForm>(k: K, v: HoldingForm[K]) => setF((s) => ({ ...s, [k]: v }));
-  const txt = (k: Exclude<keyof HoldingForm, 'autoPrice'>, props: Record<string, unknown> = {}) => (
+  const txt = (k: keyof HoldingForm, props: Record<string, unknown> = {}) => (
     <input
       class={inputCls}
       value={f[k]}
@@ -83,16 +82,16 @@ function HoldingFormView({
 
   const submit = async (ev: Event) => {
     ev.preventDefault();
-    const e0 = formError(f);
+    const e0 = formError(f, supported);
     if (e0) return setErr(e0);
     setBusy(true);
     setErr(null);
     try {
       if (edit) {
-        await api.patch(`/api/tma/holdings/${holdingId}`, buildBody(f, { original: original! }));
+        await api.patch(`/api/tma/holdings/${holdingId}`, buildBody(f, { original: original!, supported }));
         nav.flash('Позиция обновлена');
       } else {
-        await api.post('/api/tma/holdings', buildBody(f, { clientId: cid }));
+        await api.post('/api/tma/holdings', buildBody(f, { clientId: cid, supported }));
         nav.flash('Позиция добавлена');
       }
       nav.back();
@@ -143,28 +142,14 @@ function HoldingFormView({
 
           {usesQty(f.kind) ? (
             <>
-              <div class="flex gap-3">
-                <Field label="Количество">{txt('quantity', { inputMode: 'decimal', placeholder: '0,5' })}</Field>
-                <Field label="Цена за единицу">{txt('price', { inputMode: 'decimal', placeholder: '30000' })}</Field>
-              </div>
-              <Field label="Цена покупки (необязательно — для +/−)">
-                {txt('avgPrice', { inputMode: 'decimal', placeholder: '25000' })}
-              </Field>
-              {f.kind === 'crypto' && f.ticker.trim() !== '' && (
-                autoSupported(f.kind, f.ticker, supported) ? (
-                  <label class="mb-3 flex items-center gap-2 text-[14px] text-zinc-100">
-                    <input
-                      type="checkbox"
-                      checked={f.autoPrice}
-                      onChange={(e) => set('autoPrice', (e.target as HTMLInputElement).checked)}
-                    />
-                    Обновлять цену автоматически
-                  </label>
-                ) : (
-                  <p class={`${mutedCls} mb-3`}>Для этой монеты цена вручную.</p>
-                )
+              <Field label="Количество">{txt('quantity', { inputMode: 'decimal', placeholder: '0,002' })}</Field>
+              <Field label="Потрачено всего">{txt('invested', { inputMode: 'decimal', placeholder: '128' })}</Field>
+              <p class={`${mutedCls} mb-3`}>Сколько вы заплатили за всё количество (в валюте выше).</p>
+              {needsPrice(f, supported) ? (
+                <Field label="Цена сейчас (за единицу)">{txt('price', { inputMode: 'decimal', placeholder: '30000' })}</Field>
+              ) : (
+                <p class={`${mutedCls} mb-3`}>Цену этой монеты приложение берёт само.</p>
               )}
-              <p class={`${mutedCls} mb-3`}>Ручная цена остаётся запасной; крипту удобнее вести в USD.</p>
             </>
           ) : (
             <Field label="Сумма">{txt('amount', { inputMode: 'decimal', placeholder: '100000' })}</Field>

@@ -124,7 +124,7 @@ export const FIELDS: FieldsSpec = {
   debt_events: { amount_minor: 'num' },
   loans: { counterparty: 'str', amount_minor: 'num', note: 'str' },
   loan_events: { amount_minor: 'num' },
-  holdings: { name: 'str', ticker: 'str', quantity: 'str', avg_price: 'str', price: 'str', amount_minor: 'num', rate: 'num', note: 'str' },
+  holdings: { name: 'str', ticker: 'str', quantity: 'str', avg_price: 'str', invested: 'str', price: 'str', amount_minor: 'num', rate: 'num', note: 'str' },
   exchanges: { amount_from_minor: 'num', amount_to_minor: 'num', rate: 'num', note: 'str' },
   conversation_state: { data: 'str' },
   categories: { name: 'str', emoji: 'str' },

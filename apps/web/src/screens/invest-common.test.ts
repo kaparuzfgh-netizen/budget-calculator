@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildBody, emptyForm, formError, normDec, targetsFrom } from './invest-common';
+import { buildBody, needsPrice, emptyForm, formError, normDec, targetsFrom } from './invest-common';
 
-const crypto = { ...emptyForm('crypto'), name: 'BTC', currency: 'usd', quantity: '0,12345678', price: '30000.50' };
+const crypto = { ...emptyForm('crypto'), name: 'BTC', currency: 'usd', quantity: '0,12345678', invested: '128,5', price: '30000.50' };
 
 describe('invest-common', () => {
   it('normDec: запятая → точка, ноль и мусор отклоняются', () => {
@@ -72,12 +72,22 @@ describe('автоцены (T3b)', () => {
     expect(autoSupported('crypto', '', list)).toBe(false);
   });
 
-  it('auto_price уходит только у крипты; цена строкой, как раньше', () => {
-    const c = { ...crypto, autoPrice: false };
-    expect(buildBody(c, { clientId: 'c' }).auto_price).toBe(false);
-    expect(buildBody({ ...c, autoPrice: true }, { clientId: 'c' }).auto_price).toBe(true);
-    const stock = { ...emptyForm('stock'), name: 'S', currency: 'usd', quantity: '1', price: '2' };
-    expect('auto_price' in buildBody(stock, { clientId: 'c' })).toBe(false);
-    expect(typeof buildBody(c, { clientId: 'c' }).price).toBe('string');
+  it('T10: «Потрачено» строкой; цена сейчас — только если автоцены нет', () => {
+    const list = ['BTC'];
+    const btc = { ...crypto, ticker: 'btc', price: '' };
+    expect(needsPrice(btc, list)).toBe(false);
+    expect(formError(btc, list)).toBeNull();
+    const b = buildBody(btc, { clientId: 'c', supported: list });
+    expect(b.invested).toBe('128.5');
+    expect(typeof b.invested).toBe('string');
+    expect('price' in b).toBe(false);
+    expect('auto_price' in b).toBe(false);
+    expect('avg_price' in b).toBe(false);
+    // монета вне списка и акция — цена обязательна
+    const zzz = { ...btc, ticker: 'zzz' };
+    expect(formError(zzz, list)).toMatch(/Цена сейчас/);
+    expect(buildBody({ ...zzz, price: '2' }, { clientId: 'c', supported: list }).price).toBe('2');
+    expect(formError({ ...emptyForm('stock'), name: 'S', currency: 'usd', quantity: '1', invested: '5' }, list)).toMatch(/Цена сейчас/);
+    expect(formError({ ...btc, invested: '' }, list)).toMatch(/Потрачено/);
   });
 });

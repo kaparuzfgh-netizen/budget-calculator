@@ -97,7 +97,7 @@ describe('/export', () => {
       exchanges: { from_ccy: string; note: string; user_id: number }[];
       schema_version: number;
     };
-    expect(j.schema_version).toBe(8);
+    expect(j.schema_version).toBe(9);
     expect(j.profile.user_id).toBe(uidA);
     expect(j.commitments.map((c) => c.name)).toEqual(['A-тайное']);
     expect(j.commitment_payments).toHaveLength(1);

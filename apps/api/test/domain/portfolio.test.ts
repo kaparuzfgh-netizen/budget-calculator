@@ -4,11 +4,13 @@ import {
   dcaTargetsFrom,
   depositAccrued,
   holdingValueMinor,
+  investedMinor,
   parseTargets,
   pnlMinor,
   portfolioTotals,
   priceStale,
   validateTargets,
+  valuation,
 } from '../../src/domain/portfolio';
 import { computeWaterfall } from '../../src/domain/cashflow';
 
@@ -18,10 +20,25 @@ describe('portfolio: оценка', () => {
     expect(holdingValueMinor({ quantity: null, price: null, amount_minor: 50000 })).toBe(50000);
     expect(holdingValueMinor({ quantity: null, price: null, amount_minor: null })).toBe(0);
   });
-  it('P&L с и без цены покупки', () => {
-    expect(pnlMinor({ quantity: '2', price: '110', avg_price: '100' })).toBe(2000);
-    expect(pnlMinor({ quantity: '2', price: '90', avg_price: '100' })).toBe(-2000);
-    expect(pnlMinor({ quantity: '2', price: '90', avg_price: null })).toBeNull();
+  it('P&L = стоимость сейчас − потрачено', () => {
+    expect(pnlMinor({ quantity: '2', price: '110', avg_price: null, invested: '200' })).toBe(2000);
+    expect(pnlMinor({ quantity: '2', price: '90', avg_price: null, invested: '200' })).toBe(-2000);
+    expect(pnlMinor({ quantity: '2', price: '90', avg_price: null, invested: null })).toBeNull();
+    expect(pnlMinor({ quantity: '0.002', price: '64000', avg_price: null, invested: '100.5' })).toBe(2750);
+  });
+  it('старые строки: потрачено = qty × avg_price (BigInt, без float)', () => {
+    expect(investedMinor({ quantity: '2', avg_price: '100', invested: null })).toBe(20000);
+    expect(investedMinor({ quantity: '0.12345678', avg_price: '25000', invested: null })).toBe(308_642);
+    expect(investedMinor({ quantity: '2', avg_price: '100', invested: '150' })).toBe(15000); // invested приоритетнее
+    expect(investedMinor({ quantity: '2', avg_price: null, invested: null })).toBeNull();
+    expect(pnlMinor({ quantity: '2', price: '110', avg_price: '100', invested: null })).toBe(2000);
+    expect(pnlMinor({ quantity: '2', price: '90', avg_price: '100', invested: null })).toBe(-2000);
+  });
+  it('нет цены — оценка по потрачено, P&L 0; без потрачено — 0/null', () => {
+    const base = { quantity: '0.002', price: null, avg_price: null, amount_minor: null };
+    expect(valuation({ ...base, invested: '128' })).toEqual({ valueMinor: 12800, pnlMinor: 0, atCost: true });
+    expect(valuation({ ...base, invested: null })).toEqual({ valueMinor: 0, pnlMinor: null, atCost: false });
+    expect(valuation({ ...base, price: '70000', invested: '128' })).toEqual({ valueMinor: 14000, pnlMinor: 1200, atCost: false });
   });
   it('цена старше 30 дней — устарела', () => {
     expect(priceStale({ price: '1', price_on: '2026-10-01' }, '2026-11-17')).toBe(true);

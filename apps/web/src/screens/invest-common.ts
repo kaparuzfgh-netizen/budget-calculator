@@ -43,24 +43,27 @@ export interface HoldingForm {
   ticker: string;
   currency: string;
   quantity: string;
-  avgPrice: string;
+  /** «Потрачено всего» — сколько заплатили за всё количество. */
+  invested: string;
   price: string;
   amount: string;
   rate: string;
   openedOn: string;
   maturesOn: string;
   note: string;
-  /** Обновлять цену автоматически (только крипта с тикером из списка). */
-  autoPrice: boolean;
 }
 export const emptyForm = (kind: HoldingKind = 'deposit'): HoldingForm => ({
-  kind, name: '', ticker: '', currency: '', quantity: '', avgPrice: '', price: '', amount: '', rate: '',
-  openedOn: '', maturesOn: '', note: '', autoPrice: true,
+  kind, name: '', ticker: '', currency: '', quantity: '', invested: '', price: '', amount: '', rate: '',
+  openedOn: '', maturesOn: '', note: '',
 });
 
-/** Галочка автоцены видна: крипта и тикер из белого списка сервера. */
+/** У позиции есть автоцена: крипта и тикер из белого списка сервера. */
 export const autoSupported = (kind: HoldingKind, ticker: string, supported: readonly string[]): boolean =>
   kind === 'crypto' && supported.includes(ticker.trim().toUpperCase());
+
+/** Поле «Цена сейчас» нужно, только если автоцены у позиции нет. */
+export const needsPrice = (f: Pick<HoldingForm, 'kind' | 'ticker'>, supported: readonly string[]): boolean =>
+  usesQty(f.kind) && !autoSupported(f.kind, f.ticker, supported);
 
 /** «ЧЧ:ММ» локального времени авто-котировки (ISO) или пусто. */
 export function fmtAutoTime(iso: string | null): string {
@@ -70,16 +73,18 @@ export function fmtAutoTime(iso: string | null): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export function formError(f: HoldingForm): string | null {
+export function formError(f: HoldingForm, supported: readonly string[] = []): string | null {
   if (!f.name.trim()) return 'Введите название';
   if (f.name.trim().length > LIMITS.maxName) return `Название — до ${LIMITS.maxName} символов`;
   const c = currencyError(f.currency);
   if (c) return c;
   if (f.ticker.trim() && !/^[A-Za-z0-9.-]{1,12}$/.test(f.ticker.trim())) return 'Тикер — латиница/цифры, до 12 знаков';
   if (usesQty(f.kind)) {
-    const e = decError(f.quantity, 'Количество') ?? decError(f.price, 'Цена');
+    const e =
+      decError(f.quantity, 'Количество') ??
+      decError(f.invested, 'Потрачено') ??
+      (needsPrice(f, supported) ? decError(f.price, 'Цена сейчас') : null);
     if (e) return e;
-    if (f.avgPrice.trim() && decError(f.avgPrice, 'Цена покупки')) return decError(f.avgPrice, 'Цена покупки');
   } else {
     const e = amountError(f.amount);
     if (e) return e;
@@ -98,7 +103,7 @@ export function formError(f: HoldingForm): string | null {
  */
 export function buildBody(
   f: HoldingForm,
-  opts: { clientId?: string; original?: HoldingForm },
+  opts: { clientId?: string; original?: HoldingForm; supported?: readonly string[] },
 ): Record<string, unknown> {
   const o = opts.original;
   const body: Record<string, unknown> = {
@@ -112,9 +117,8 @@ export function buildBody(
   };
   if (usesQty(f.kind)) {
     body.quantity = normDec(f.quantity);
-    body.avg_price = f.avgPrice.trim() ? normDec(f.avgPrice) : null;
-    if (!o || normDec(o.price) !== normDec(f.price)) body.price = normDec(f.price);
-    if (f.kind === 'crypto') body.auto_price = f.autoPrice;
+    body.invested = normDec(f.invested);
+    if (needsPrice(f, opts.supported ?? []) && (!o || normDec(o.price) !== normDec(f.price))) body.price = normDec(f.price);
   } else {
     body.amount = parseAmount(f.amount);
   }

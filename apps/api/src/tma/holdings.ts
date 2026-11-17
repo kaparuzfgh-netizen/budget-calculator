@@ -14,6 +14,7 @@ import type { PriceProvider } from '../prices/provider';
 import { makePriceSource } from '../prices/service';
 import { toMinor } from '../domain/money';
 import { mulToMinor } from '../domain/decimal';
+import { coinIdFor } from '../domain/coins';
 import { HOLDING_KINDS } from '../domain/portfolio';
 import { todayInTz } from '../bot/parse';
 import { portfolioView } from '../services/portfolio';
@@ -53,6 +54,7 @@ const createSchema = z.object({
   currency: zCcy,
   quantity: zDec.optional(),
   avg_price: zDec.nullable().optional(),
+  invested: zDec.nullable().optional(), // «потрачено всего», в валюте позиции
   price: zDec.optional(),
   price_on: zIso.optional(),
   amount: zAmount.optional(), // major units → toMinor
@@ -70,6 +72,7 @@ const patchSchema = z.object({
   currency: zCcy.optional(),
   quantity: zDec.optional(),
   avg_price: zDec.nullable().optional(),
+  invested: zDec.nullable().optional(), // «потрачено всего», в валюте позиции
   price: zDec.optional(),
   price_on: zIso.optional(),
   amount: zAmount.optional(),
@@ -83,21 +86,27 @@ const patchSchema = z.object({
 type Shape = {
   kind: HoldingRow['kind'];
   quantity: string | null;
+  ticker?: string | null;
   avg_price: string | null;
+  invested?: string | null;
   price: string | null;
   amount_minor: number | null;
   opened_on: string | null;
   matures_on: string | null;
 };
 
-/** Одна модель оценки на вид: qty×price (crypto/stock/bond) либо сумма (deposit/other). */
+/**
+ * Одна модель оценки на вид: qty×price (crypto/stock/bond) либо сумма (deposit/other).
+ * Цена обязательна, кроме крипты с тикером из белого списка (автоцена; T10).
+ */
 function shapeError(h: Shape): string | null {
   if (h.kind === 'crypto' || h.kind === 'stock' || h.kind === 'bond') {
-    if (!h.quantity || !h.price) return 'нужны количество и цена';
+    if (!h.quantity) return 'нужно количество';
+    if (!h.price && coinIdFor(h.kind, h.ticker ?? null) === null) return 'нужна цена сейчас';
     if (h.amount_minor !== null) return 'для этого вида сумма не используется';
   } else {
     if (h.amount_minor === null) return 'нужна сумма';
-    if (h.quantity || h.avg_price || h.price) return 'для этого вида количество и цена не используются';
+    if (h.quantity || h.avg_price || h.invested || h.price) return 'для этого вида количество и цена не используются';
   }
   if (h.opened_on && h.matures_on && h.matures_on < h.opened_on) return 'окончание раньше открытия';
   return null;
@@ -146,7 +155,7 @@ export function registerTmaHoldings(
       const body = await c.req.json().catch(() => ({}));
       const parsed = createSchema.safeParse(body);
       if (!parsed.success)
-        return c.json(bad('проверьте поля: вид, название, валюта, количество/цена (строкой) или сумма').body, 400);
+        return c.json(bad('проверьте поля: вид, название, валюта, количество, потрачено/цена (строкой) или сумма').body, 400);
       const p = await needProfile(c);
       const b = parsed.data;
       const repo = repoOf(c);
@@ -158,6 +167,7 @@ export function registerTmaHoldings(
         currency: b.currency,
         quantity: b.quantity ?? null,
         avg_price: b.avg_price ?? null,
+        invested: b.invested ?? null,
         price: b.price ?? null,
         price_on: b.price !== undefined ? (b.price_on ?? today) : null,
         amount_minor: b.amount !== undefined ? toMinor(b.amount) : null,
@@ -174,6 +184,7 @@ export function registerTmaHoldings(
       // переполнение qty×price → DomainError('TOO_LARGE') → 400 (fail)
       if (row.quantity && row.price) mulToMinor(row.quantity, row.price);
       if (row.quantity && row.avg_price) mulToMinor(row.quantity, row.avg_price);
+      if (row.invested) mulToMinor(row.invested, '1');
 
       const key = b.client_id ? `tma:${b.client_id}` : null;
       if (key) {
@@ -209,6 +220,7 @@ export function registerTmaHoldings(
       if (b.currency !== undefined) patch.currency = b.currency;
       if (b.quantity !== undefined) patch.quantity = b.quantity;
       if (b.avg_price !== undefined) patch.avg_price = b.avg_price;
+      if (b.invested !== undefined) patch.invested = b.invested;
       if (b.price !== undefined) {
         patch.price = b.price;
         patch.price_on = b.price_on ?? today; // новая цена — «на сегодня»
@@ -226,6 +238,7 @@ export function registerTmaHoldings(
         if (d && !dayInRange(d, today)) return c.json(bad('дата: 2000-01-01 … сегодня').body, 400);
       if (merged.quantity && merged.price) mulToMinor(merged.quantity, merged.price);
       if (merged.quantity && merged.avg_price) mulToMinor(merged.quantity, merged.avg_price);
+      if (merged.invested) mulToMinor(merged.invested, '1');
       const w = await repo.patchHolding(id, patch);
       if (w.meta.changes === 0) return c.json(notFound().body, 404);
       return okJson(c, { ok: true });

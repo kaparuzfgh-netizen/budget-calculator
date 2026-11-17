@@ -136,19 +136,28 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     `hh_<hex>` (хэш хранится от полного кода с префиксом). Выход члена
     удаляет только ЕГО опустевший household (+ зануляет
     `invites.household_id` — FK), чужие пустые не трогает.
-21. **Инвестиции (T3a — ручной портфель, T3b — автоцены крипты):** таблица `holdings` (миграция 0023; `auto_price` — миграция 0024),
-    колонка `profiles.invest_targets`. Количество и цены — канонические десятичные
+21. **Инвестиции (T3a — ручной портфель, T3b — автоцены крипты, T10 — форма «количество + потрачено всего»):** таблица `holdings` (миграция 0023; `auto_price` — миграция 0024; `invested` — миграция 0025),
+    колонка `profiles.invest_targets`. Количество, «потрачено» и цены — канонические десятичные
     строки (`domain/decimal.ts`: до 12 цифр до точки и до 8 после, больше нуля);
     арифметика — на BigInt (`mulToMinor`, округление half-up до minor units).
     Их НЕЛЬЗЯ переводить через `toMinor` или float: это теряет 8-й знак количества
     и обнуляет цены мелких токенов. Суммы вкладов и «другого» — `amount_minor`
     (minor units валюты позиции). Все текстовые, денежные и процентные поля позиции
     и `invest_targets` — в `FIELDS` (`db/crypto.ts`): `name`, `ticker`, `quantity`,
-    `avg_price`, `price`, `amount_minor`, `rate`, `note`, `invest_targets`. По ним не
+    `avg_price`, `invested`, `price`, `amount_minor`, `rate`, `note`, `invest_targets`. По ним не
     пишем сырые WHERE и SQL-агрегаты: суммы и доли считаются в JS после дешифровки
     (`listHoldings`). `currency`, `price_on`, даты — plaintext. Партнёру по household
     позиции и цели не отдаются (`householdSummary` их не содержит). Ручная цена вводится
     с датой `price_on`; старше 30 дней — «цена устарела».
+    **Схема ввода позиции (T10):** пользователь вводит количество и «Потрачено всего»
+    (`holdings.invested`, десятичная строка в валюте позиции, `enc1:`, в `FIELDS`).
+    Цена сейчас обязательна, кроме крипты из белого списка `domain/coins.ts` — там цену
+    ведёт автоцена (`shapeError` в `tma/holdings.ts`). Если цены нет совсем, позиция
+    оценивается по сумме покупки: `valued_at_cost: true`, P&L = 0 (`valuation` в
+    `domain/portfolio.ts`). `avg_price` оставлен только для совместимости: API его ещё
+    принимает, форма не отправляет; у строк без `invested` при чтении
+    invested = quantity × avg_price (`investedMinor`, `investedStr`). P&L = стоимость
+    сейчас − потрачено (`pnlMinor`). Суммы и P&L считаются в JS, не SQL.
     **Автоцены крипты (T3b):** только для `kind='crypto'` с тикером из белого списка
     `domain/coins.ts` (тикер → id монеты CoinGecko; символы на CoinGecko не уникальны,
     поэтому вне списка — только ручная цена). Провайдер — CoinGecko Demo (`prices/coingecko.ts`,

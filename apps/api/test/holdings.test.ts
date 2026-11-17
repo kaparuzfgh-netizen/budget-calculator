@@ -61,11 +61,11 @@ async function user(tgId: number, onboarded = true) {
   return { uid, token: await signJwt({ tg_id: tgId }, JWT_SECRET, 3600) };
 }
 
-const crypto1 = { kind: 'crypto', name: 'Биткоин', ticker: 'btc', currency: 'USD', quantity: '0,12345678', price: '30000.5', avg_price: '25000' };
+const crypto1 = { kind: 'crypto', name: 'Биткоин', ticker: 'btc', currency: 'USD', quantity: '0,12345678', price: '30000.5', avg_price: '25000', invested: '2500.25' };
 const dep1 = { kind: 'deposit', name: 'Вклад Сбер', currency: 'USD', amount: 1000, rate: 10, opened_on: '2026-01-01' };
 const post = (token: string, body: unknown) => api('/api/tma/holdings', { method: 'POST', token, body });
 
-interface Item { id: number; name: string; quantity: string | null; value_minor: number; pnl_minor: number | null; price_stale: boolean; accrued_minor: number | null; currency: string }
+interface Item { id: number; name: string; quantity: string | null; value_minor: number; pnl_minor: number | null; invested: string | null; valued_at_cost: boolean; price_stale: boolean; accrued_minor: number | null; currency: string }
 interface List {
   items: Item[];
   total: { currency: string; minor: number | null; missing_rates: string[]; fx_stale: boolean };
@@ -79,13 +79,14 @@ describe('шифрование at rest', () => {
     const { uid, token } = await user(1);
     expect((await post(token, crypto1)).status).toBe(201);
     expect((await post(token, dep1)).status).toBe(201);
-    const raw = await env.DB.prepare('SELECT name, ticker, quantity, avg_price, price, amount_minor, rate, note FROM holdings ORDER BY id').all<Record<string, unknown>>();
+    const raw = await env.DB.prepare('SELECT name, ticker, quantity, avg_price, invested, price, amount_minor, rate, note FROM holdings ORDER BY id').all<Record<string, unknown>>();
     const [btc, dep] = raw.results;
-    for (const k of ['name', 'ticker', 'quantity', 'avg_price', 'price']) expect(String(btc![k]), k).toMatch(/^enc1:/);
+    for (const k of ['name', 'ticker', 'quantity', 'avg_price', 'invested', 'price']) expect(String(btc![k]), k).toMatch(/^enc1:/);
     for (const k of ['name', 'amount_minor', 'rate']) expect(String(dep![k]), k).toMatch(/^enc1:/);
     const row = (await scoped(env.DB, uid).listHoldings()).results[0]!;
     expect(row.quantity).toBe('0.12345678'); // 8-й знак не потерян
     expect(row.ticker).toBe('BTC');
+    expect(row.invested).toBe('2500.25');
 
     await api('/api/tma/profile', { method: 'PATCH', token, body: { invest_targets: { deposit: 60, crypto: 40 } } });
     const p = await env.DB.prepare('SELECT invest_targets FROM profiles WHERE user_id=?').bind(uid).first<{ invest_targets: string }>();
@@ -135,14 +136,14 @@ describe('/api/tma/holdings — доступ и валидация', () => {
 
   it('оценка: qty×price, P&L, вклад «≈ начислено», пометка устаревшей цены', async () => {
     const { token } = await user(6);
-    await post(token, { ...crypto1, quantity: '0.1', price: '30000.5', avg_price: '20000' });
+    await post(token, { ...crypto1, quantity: '0.1', price: '30000.5' });
     await post(token, dep1);
     const id = ((await (await post(token, { kind: 'stock', name: 'Old', currency: 'USD', quantity: '2', price: '10' })).json()) as { id: number }).id;
     await env.DB.prepare("UPDATE holdings SET price_on='2020-01-01' WHERE id=?").bind(id).run();
     const l = await list(token);
     const btc = l.items.find((i) => i.name === 'Биткоин')!;
     expect(btc.value_minor).toBe(300005);
-    expect(btc.pnl_minor).toBe(100005); // 0.1 × (30000.5 − 20000)
+    expect(btc.pnl_minor).toBe(300005 - 250025); // стоимость − потрачено (2500.25)
     expect(l.items.find((i) => i.name === 'Вклад Сбер')!.accrued_minor).toBeGreaterThan(0);
     expect(l.items.find((i) => i.name === 'Old')!.price_stale).toBe(true);
     expect(l.total.minor).toBe(300005 + 100000 + 2000);
@@ -266,13 +267,13 @@ describe('цели и каскад бонуса', () => {
 });
 
 describe('export / delete_me / household', () => {
-  it('export: schema_version 8, holdings без source_key; delete_me стирает только свои', async () => {
+  it('export: schema_version 9, holdings без source_key; delete_me стирает только свои', async () => {
     const a = await user(50);
     const b = await user(51);
     await post(a.token, { ...crypto1, client_id: 'x1' });
     await post(b.token, dep1);
     const ex = (await (await api('/api/tma/export', { token: a.token })).json()) as { schema_version: number; holdings: Record<string, unknown>[] };
-    expect(ex.schema_version).toBe(8);
+    expect(ex.schema_version).toBe(9);
     expect(ex.holdings).toHaveLength(1);
     expect(ex.holdings[0]!.name).toBe('Биткоин');
     expect('source_key' in ex.holdings[0]!).toBe(false);
@@ -317,5 +318,58 @@ describe('бот: экран INVEST', () => {
     expect(txt).toContain('не инвестиционная рекомендация');
     expect(txt).not.toContain('Биткоин'); // названия позиций в бот не выводим
     expect(renderInvest({ ...v, items: [] })).toContain('Позиций пока нет');
+  });
+});
+
+describe('T10: потрачено всего', () => {
+  const btc = { kind: 'crypto', name: 'BTC', ticker: 'BTC', currency: 'USD', quantity: '0.002', invested: '128' };
+
+  it('BTC без price создаётся; оценка по потрачено, P&L 0, valued_at_cost', async () => {
+    const { token } = await user(70);
+    expect((await post(token, btc)).status).toBe(201);
+    const it = (await list(token)).items[0]!;
+    expect(it.invested).toBe('128');
+    expect(it.value_minor).toBe(12800);
+    expect(it.pnl_minor).toBe(0);
+    expect(it.valued_at_cost).toBe(true);
+    expect((await list(token)).total.minor).toBe(12800); // входит в итог
+  });
+
+  it('акция и монета вне списка без price → 400; с price — P&L от потрачено', async () => {
+    const { token } = await user(71);
+    expect((await post(token, { kind: 'stock', name: 'S', currency: 'USD', quantity: '2', invested: '100' })).status).toBe(400);
+    expect((await post(token, { ...btc, ticker: 'ZZZ' })).status).toBe(400);
+    expect((await post(token, { ...btc, ticker: 'ZZZ', price: '70000' })).status).toBe(201);
+    const it = (await list(token)).items[0]!;
+    expect(it.value_minor).toBe(14000);
+    expect(it.pnl_minor).toBe(14000 - 12800);
+    expect(it.valued_at_cost).toBe(false);
+  });
+
+  it('invested: не число → 400; для вклада не принимается; PATCH меняет P&L', async () => {
+    const { token } = await user(72);
+    expect((await post(token, { ...btc, invested: 128 })).status).toBe(400);
+    expect((await post(token, { ...dep1, invested: '5' })).status).toBe(400);
+    const id = ((await (await post(token, { ...btc, price: '70000' })).json()) as { id: number }).id;
+    expect((await api(`/api/tma/holdings/${id}`, { method: 'PATCH', token, body: { invested: '100' } })).status).toBe(200);
+    expect((await list(token)).items[0]!.pnl_minor).toBe(14000 - 10000);
+  });
+
+  it('старая строка без invested: потрачено = qty × avg_price', async () => {
+    const { uid, token } = await user(73);
+    await scoped(env.DB, uid).addHolding({ kind: 'stock', name: 'Old', ticker: null, currency: 'USD', quantity: '2', avg_price: '100', price: '110', price_on: '2026-11-17', amount_minor: null, rate: null, opened_on: null, matures_on: null, note: null });
+    const it = (await list(token)).items[0]!;
+    expect(it.invested).toBe('200');
+    expect(it.pnl_minor).toBe(2000);
+  });
+
+  it('A не видит invested B', async () => {
+    const a = await user(74);
+    const b = await user(75);
+    const idB = ((await (await post(b.token, btc)).json()) as { id: number }).id;
+    expect((await list(a.token)).items).toHaveLength(0);
+    expect((await api(`/api/tma/holdings/${idB}`, { method: 'PATCH', token: a.token, body: { invested: '1' } })).status).toBe(404);
+    expect((await list(b.token)).items[0]!.invested).toBe('128');
+    expect((await scoped(env.DB, a.uid).patchHolding(idB, { invested: '1' })).meta.changes).toBe(0);
   });
 });

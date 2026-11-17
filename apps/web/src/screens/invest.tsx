@@ -32,15 +32,17 @@ import {
 import { fmtAutoTime, KIND_LABEL, KIND_PLURAL, KINDS, targetsFrom } from './invest-common';
 
 function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
-  const qty = h.quantity && h.effective_price;
+  const qty = !!h.quantity;
   const badge =
     h.price_source === 'auto'
       ? `авто · ${fmtAutoTime(h.effective_price_at)}`
-      : h.auto_note === 'ccy_unsupported'
-        ? `нет автоцены в ${h.currency} · вручную`
-        : h.price_on && qty
-          ? `вручную · ${fmtDay(h.price_on)}`
-          : null;
+      : h.valued_at_cost
+        ? 'по цене покупки'
+        : h.auto_note === 'ccy_unsupported'
+          ? `нет автоцены в ${h.currency} · вручную`
+          : h.price_on && h.effective_price
+            ? `вручную · ${fmtDay(h.price_on)}`
+            : null;
   return (
     <li class={`${liCls} cursor-pointer transition hover:bg-fill`} onClick={onOpen}>
       <div class={rowCls}>
@@ -53,7 +55,8 @@ function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
       <div class={`${rowCls} mt-1`}>
         <span class={mutedCls}>
           {KIND_LABEL[h.kind]}
-          {qty ? ` · ${h.quantity} × ${h.effective_price} ${h.currency}` : ''}
+          {qty ? ` · ${h.quantity}${h.ticker ? ` ${h.ticker}` : ''}` : ''}
+          {qty && h.invested ? ` · потрачено ${h.invested} ${h.currency}` : ''}
           {h.rate !== null && h.kind === 'deposit' ? ` · ${h.rate}%` : ''}
         </span>
         {h.pnl_minor !== null ? (

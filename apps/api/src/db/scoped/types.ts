@@ -205,6 +205,8 @@ export interface HoldingRow {
   currency: string;
   quantity: string | null;
   avg_price: string | null;
+  /** «Потрачено всего» в валюте позиции — десятичная строка (0025); у старых строк null. */
+  invested: string | null;
   price: string | null;
   price_on: string | null;
   amount_minor: number | null;

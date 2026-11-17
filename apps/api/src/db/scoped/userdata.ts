@@ -47,7 +47,7 @@ export function userDataRepo({ db, userId }: Ctx, r: DataSources) {
         return rest;
       };
       return {
-        schema_version: 8,
+        schema_version: 9,
         exported_at: new Date().toISOString(),
         profile: profile ? strip(profile as unknown as Record<string, unknown>) : null,
         commitments: commitments.results.map((c) => strip(c as unknown as Record<string, unknown>)),

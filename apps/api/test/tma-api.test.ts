@@ -645,7 +645,7 @@ describe('базовый доход: explicit/computed/none, напоминан�
       commitments: { name: string; user_id: number }[];
       profile: { user_id: number } | null;
     };
-    expect(j.schema_version).toBe(8);
+    expect(j.schema_version).toBe(9);
     expect(j.profile?.user_id).toBe(A.uid);
     const names = j.commitments.map((x) => x.name);
     expect(names).toContain('A-тайное');

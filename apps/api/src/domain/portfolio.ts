@@ -19,6 +19,8 @@ export interface HoldingLike {
   currency: string;
   quantity: string | null;
   avg_price: string | null;
+  /** «Потрачено всего» (T10); null у старых строк — тогда qty×avg_price. */
+  invested: string | null;
   price: string | null;
   price_on: string | null;
   amount_minor: number | null;
@@ -35,10 +37,35 @@ export function holdingValueMinor(h: Pick<HoldingLike, 'quantity' | 'price' | 'a
   return h.amount_minor ?? 0;
 }
 
-/** Результат к цене покупки: qty×(price−avg); null без avg/qty/price. */
-export function pnlMinor(h: Pick<HoldingLike, 'quantity' | 'price' | 'avg_price'>): number | null {
-  if (!h.quantity || !h.price || !h.avg_price) return null;
-  return mulToMinor(h.quantity, h.price) - mulToMinor(h.quantity, h.avg_price);
+/**
+ * Потрачено на позицию, minor единицы её валюты (T10): invested, а у старых строк
+ * (invested пуст) — quantity × avg_price. Точно, на BigInt. null — данных нет.
+ */
+export function investedMinor(h: Pick<HoldingLike, 'quantity' | 'avg_price' | 'invested'>): number | null {
+  if (h.invested) return mulToMinor(h.invested, '1');
+  if (h.quantity && h.avg_price) return mulToMinor(h.quantity, h.avg_price);
+  return null;
+}
+
+/** Результат: стоимость сейчас − потрачено; null без цены или без «потрачено». */
+export function pnlMinor(h: Pick<HoldingLike, 'quantity' | 'price' | 'avg_price' | 'invested'>): number | null {
+  const inv = investedMinor(h);
+  if (!h.quantity || !h.price || inv === null) return null;
+  return mulToMinor(h.quantity, h.price) - inv;
+}
+
+/**
+ * Оценка позиции с количеством: по цене (авто/ручной) либо, если цены нет совсем,
+ * по «потрачено» (atCost, результат 0). Без цены и без «потрачено» — 0 и null.
+ */
+export function valuation(
+  h: Pick<HoldingLike, 'quantity' | 'price' | 'avg_price' | 'invested' | 'amount_minor'>,
+): { valueMinor: number; pnlMinor: number | null; atCost: boolean } {
+  if (h.quantity && !h.price) {
+    const inv = investedMinor(h);
+    if (inv !== null) return { valueMinor: inv, pnlMinor: 0, atCost: true };
+  }
+  return { valueMinor: holdingValueMinor(h), pnlMinor: pnlMinor(h), atCost: false };
 }
 
 /** Цене больше PRICE_STALE_DAYS дней (или даты нет при наличии цены). */

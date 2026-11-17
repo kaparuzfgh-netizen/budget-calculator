@@ -44,6 +44,8 @@ export function renderInvest(v: PortfolioView): string {
       );
       lines.push(`<a href="${v.auto.attribution.url}">${v.auto.attribution.text}</a>`);
     }
+    const atCost = v.items.filter((i) => i.valued_at_cost).length;
+    if (atCost) lines.push(`Без цены (оценены по сумме покупки): ${atCost} поз.`);
     lines.push('<i>Позиции правятся в приложении.</i>');
   }
   lines.push(`<i>${INVEST_DISCLAIMER}</i>`);
