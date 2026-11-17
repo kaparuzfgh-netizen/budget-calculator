@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run check)",
+      "Bash(npm run test*)",
+      "Bash(npm run lint*)",
+      "Bash(npm run typecheck*)",
+      "Bash(npm run build:web)",
+      "Bash(npm run format*)",
+      "Bash(npm run release)",
+      "Bash(npm run release:staging)",
+      "Bash(npm run webhook:info)",
+      "Bash(npm run wrangler -- d1 migrations*)",
+      "Bash(npm test*)",
+      "Bash(npm ci)",
+      "Bash(npx tsc*)",
+      "Bash(npx eslint*)",
+      "Bash(npx prettier --check*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push origin main)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr checks*)",
+      "Bash(gh run list*)",
+      "Bash(gh run view*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./apps/api/.dev.vars)",
+      "Read(./secrets*.json)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean*)",
+      "Bash(npm run wrangler -- secret*)",
+      "Bash(npm run wrangler -- login*)",
+      "Bash(npm run wrangler -- logout*)"
+    ]
+  }
+}
