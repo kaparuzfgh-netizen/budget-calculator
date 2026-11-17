@@ -5,6 +5,16 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Инвестиции, этап 2 (T3b) — автоцены крипты:** позиции «Крипта» с тикером из белого
+  списка (`domain/coins.ts`) получают цену с CoinGecko Demo API. Opt-in: переключатель
+  «Автоцены крипты» в профиле Mini App (`profiles.auto_prices_enabled`, DEFAULT 0) и флаг
+  позиции «Обновлять цену автоматически» (`holdings.auto_price`, DEFAULT 1). Миграция 0024:
+  общий кэш `price_quotes` без `user_id` (TTL 15 мин) и `price_provider_state` (пауза после
+  429/401/5xx). Свежая автоцена (≤24 ч) показывается вместо ручной, ручная цена не
+  перезаписывается; старше 7 дней автоцена не используется. Ключ — секрет `COINGECKO_API_KEY`;
+  без него внешних запросов нет, тумблер неактивен. Атрибуция «Data provided by CoinGecko»
+  в Mini App и `/invest`. `/export` — `schema_version` 8 (`auto_price` у позиций,
+  `auto_prices_enabled` в профиле). Облигации и акции (MOEX) — T3c.
 - **Инвестиции, этап 1 (T3a) — ручной портфель:** таблица `holdings` и колонка
   `profiles.invest_targets` (миграция 0023; текстовые и денежные поля — `enc1:`;
   количество и цены — десятичные строки на BigInt, не `toMinor`). Виды: вклад,

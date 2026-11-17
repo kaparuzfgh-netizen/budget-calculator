@@ -58,7 +58,7 @@ function applyPatch(path: string, body: Record<string, unknown>): void {
     if (typeof body.living_currency === 'string') PROFILE.living_currency = body.living_currency;
     if ('expense_currency' in body) PROFILE.expense_currency = (body.expense_currency as string | null) ?? null;
     if (typeof body.timezone === 'string') PROFILE.timezone = body.timezone;
-    for (const k of ['reminders_weekly', 'reminders_payments', 'reminders_digest', 'fx_alerts_enabled', 'vision_enabled'] as const) {
+    for (const k of ['reminders_weekly', 'reminders_payments', 'reminders_digest', 'fx_alerts_enabled', 'vision_enabled', 'auto_prices_enabled'] as const) {
       if (k in body) PROFILE[k] = body[k] ? 1 : 0;
     }
     if (typeof body.cushion === 'number') {

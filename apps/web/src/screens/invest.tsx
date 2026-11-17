@@ -29,10 +29,18 @@ import {
   smBtnCls,
   useData,
 } from '../ui';
-import { KIND_LABEL, KIND_PLURAL, KINDS, targetsFrom } from './invest-common';
+import { fmtAutoTime, KIND_LABEL, KIND_PLURAL, KINDS, targetsFrom } from './invest-common';
 
 function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
-  const qty = h.quantity && h.price;
+  const qty = h.quantity && h.effective_price;
+  const badge =
+    h.price_source === 'auto'
+      ? `авто · ${fmtAutoTime(h.effective_price_at)}`
+      : h.auto_note === 'ccy_unsupported'
+        ? `нет автоцены в ${h.currency} · вручную`
+        : h.price_on && qty
+          ? `вручную · ${fmtDay(h.price_on)}`
+          : null;
   return (
     <li class={`${liCls} cursor-pointer transition hover:bg-fill`} onClick={onOpen}>
       <div class={rowCls}>
@@ -45,7 +53,7 @@ function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
       <div class={`${rowCls} mt-1`}>
         <span class={mutedCls}>
           {KIND_LABEL[h.kind]}
-          {qty ? ` · ${h.quantity} × ${h.price} ${h.currency}` : ''}
+          {qty ? ` · ${h.quantity} × ${h.effective_price} ${h.currency}` : ''}
           {h.rate !== null && h.kind === 'deposit' ? ` · ${h.rate}%` : ''}
         </span>
         {h.pnl_minor !== null ? (
@@ -57,9 +65,12 @@ function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
           <span class={mutedCls}>≈ начислено {fmtMinor(h.accrued_minor, h.currency)}</span>
         ) : null}
       </div>
+      {badge && <p class="mt-1 text-[12px] text-zinc-500">{badge}</p>}
       {h.price_stale && (
         <p class="mt-1 text-[12px] text-amber-400">
-          Цена на {h.price_on ? fmtDay(h.price_on) : '—'} — обновите цену
+          {h.price_source === 'auto'
+            ? `Автоцена устарела (${fmtAutoTime(h.effective_price_at)}) — провайдер недоступен`
+            : `Цена на ${h.effective_price_on ? fmtDay(h.effective_price_on) : '—'} — обновите цену`}
         </p>
       )}
     </li>
@@ -220,7 +231,16 @@ export function InvestScreen({ api, nav, onFatal }: ScreenProps) {
 
       <Targets api={api} current={d.allocation.targets} onSaved={q.reload} />
 
-      <p class={`${mutedCls} mt-6`}>{d.disclaimer} Цены вводятся вручную.</p>
+      <p class={`${mutedCls} mt-6`}>
+        {d.disclaimer} {d.auto.enabled && d.auto.available ? 'Цены крипты — автоматические, остальное вручную.' : 'Цены вводятся вручную.'}
+      </p>
+      {d.auto.enabled && d.auto.available && d.items.some((h) => h.price_source === 'auto') && (
+        <p class={`${mutedCls} mt-2`}>
+          <a href={d.auto.attribution.url} target="_blank" rel="noopener noreferrer" class="text-sky-400 underline">
+            {d.auto.attribution.text}
+          </a>
+        </p>
+      )}
     </>
   );
 }

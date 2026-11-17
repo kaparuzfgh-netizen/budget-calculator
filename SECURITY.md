@@ -21,7 +21,7 @@
 | Удалённый пользователь | живой JWT после `/delete_me` | `deleted_at` в `users`: `findUserByTelegramId` удалённых не возвращает → 403 на всех `/api/tma/*` и молчание в боте |
 | Скриншоты → внешний AI | данные видит сторонний провайдер | Opt-in: `profiles.vision_enabled` DEFAULT 0 — без согласия фото наружу не уходит; провайдеры Gemini (основной) и Groq (резерв) — ключи только в секретах воркера; лимит 20 скринов/день и 10 МБ; байты и ответы провайдеров не логируются |
 | Логи | утечка PII/секретов | Запрещено логировать текст сообщений, токены, коды инвайтов и их хэши, байты изображений, тела ответов провайдеров; в логах — `update_id`, счётчики и коды ошибок (`sanitizeTelegramError` → error_code) |
-| Внешние вызовы | данные третьим сторонам | Только `api.telegram.org`, `api.frankfurter.dev` (курсы, без ключа), `generativelanguage.googleapis.com`, `api.groq.com` (vision, по согласию); таймаут `AbortSignal.timeout(8s)` (vision — 20s) |
+| Внешние вызовы | данные третьим сторонам | Только `api.telegram.org`, `api.frankfurter.dev` (курсы, без ключа), `generativelanguage.googleapis.com`, `api.groq.com` (vision, по согласию); таймаут `AbortSignal.timeout(8s)` (vision — 20s); `api.coingecko.com` (автоцены крипты, opt-in `profiles.auto_prices_enabled`: id монет → CoinGecko, наружу — только id монет и валюта котировки, ключ `COINGECKO_API_KEY` — заголовком; таймаут 5s) |
 | Mini App (XSS/кликджекинг) | внедрение скриптов, фрейминг | CSP: `default-src 'self'; script-src 'self' https://telegram.org; connect-src 'self'; frame-ancestors` — только `*.telegram.org`; `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store` на `/api/*` и `/telegram/*` |
 
 ## Шифрование данных at rest (вариант A)
@@ -42,7 +42,8 @@ D1 Time Travel хранит до-бэкфилл plaintext до 30 дней. По
 
 - Прод — только `wrangler secret put`: `TELEGRAM_BOT_TOKEN`,
   `TELEGRAM_WEBHOOK_SECRET`, `JWT_SECRET`, `OWNER_TELEGRAM_ID`,
-  опционально `GEMINI_API_KEY`/`GEMINI_MODEL`, `GROQ_API_KEY`/`GROQ_MODEL`.
+  опционально `GEMINI_API_KEY`/`GEMINI_MODEL`, `GROQ_API_KEY`/`GROQ_MODEL`,
+  `COINGECKO_API_KEY` (автоцены крипты; без него цены остаются ручными).
   Несекретные `[vars]` в `wrangler.toml`: `TELEGRAM_BOT_USERNAME`,
   `MINI_APP_URL`.
 - Локально — `apps/api/.dev.vars` (в `.gitignore`); шаблон
@@ -70,6 +71,7 @@ gitleaks protect --staged --redact -c .gitleaks.toml      # по индексу
 | `JWT_SECRET` | `npm run setup -- --rotate` (или `wrangler secret put JWT_SECRET` новым `openssl rand -hex 32`) — все сессии Mini App обнулятся, пользователи войдут заново |
 | `TELEGRAM_WEBHOOK_SECRET` | `npm run setup` перегенерирует и загрузит сам; вручную — новый `openssl rand -hex 32` → `wrangler secret put` → `npm run webhook:set -- <url>` |
 | `GEMINI_API_KEY`/`GROQ_API_KEY` | Перевыпустить у провайдера → `wrangler secret put` новым значением |
+| `COINGECKO_API_KEY` | Перевыпустить Demo-ключ в личном кабинете CoinGecko → `wrangler secret put COINGECKO_API_KEY` новым значением |
 | `OWNER_TELEGRAM_ID` задан неверно | `wrangler secret put OWNER_TELEGRAM_ID` верным значением; проверить созданных пользователей в D1 |
 | API-токен Cloudflare (CI) | dash.cloudflare.com → API Tokens → Roll/Delete → обновить `CLOUDFLARE_API_TOKEN` в GitHub Secrets |
 | Данные пользователя | По запросу — `/delete_me` у пользователя; админ-удаление — `wrangler d1 execute` по `user_id` (см. список таблиц в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) |

@@ -26,6 +26,7 @@ import {
   useData,
 } from '../ui';
 import {
+  autoSupported,
   buildBody,
   emptyForm,
   formError,
@@ -54,6 +55,7 @@ const fromItem = (h: HoldingItem): HoldingForm => ({
   openedOn: h.opened_on ?? '',
   maturesOn: h.matures_on ?? '',
   note: h.note ?? '',
+  autoPrice: h.auto_price,
 });
 
 function HoldingFormView({
@@ -61,7 +63,8 @@ function HoldingFormView({
   nav,
   original,
   holdingId,
-}: Pick<ScreenProps, 'api' | 'nav'> & { original: HoldingForm | null; holdingId?: number }) {
+  supported,
+}: Pick<ScreenProps, 'api' | 'nav'> & { original: HoldingForm | null; holdingId?: number; supported: string[] }) {
   const [f, setF] = useState<HoldingForm>(original ?? emptyForm());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -69,7 +72,7 @@ function HoldingFormView({
   const [cid] = useState(() => crypto.randomUUID()); // client_id на попытку формы
   const edit = holdingId !== undefined;
   const set = <K extends keyof HoldingForm>(k: K, v: HoldingForm[K]) => setF((s) => ({ ...s, [k]: v }));
-  const txt = (k: keyof HoldingForm, props: Record<string, unknown> = {}) => (
+  const txt = (k: Exclude<keyof HoldingForm, 'autoPrice'>, props: Record<string, unknown> = {}) => (
     <input
       class={inputCls}
       value={f[k]}
@@ -147,7 +150,21 @@ function HoldingFormView({
               <Field label="Цена покупки (необязательно — для +/−)">
                 {txt('avgPrice', { inputMode: 'decimal', placeholder: '25000' })}
               </Field>
-              <p class={`${mutedCls} mb-3`}>Цена вводится вручную; крипту удобнее вести в USD.</p>
+              {f.kind === 'crypto' && f.ticker.trim() !== '' && (
+                autoSupported(f.kind, f.ticker, supported) ? (
+                  <label class="mb-3 flex items-center gap-2 text-[14px] text-zinc-100">
+                    <input
+                      type="checkbox"
+                      checked={f.autoPrice}
+                      onChange={(e) => set('autoPrice', (e.target as HTMLInputElement).checked)}
+                    />
+                    Обновлять цену автоматически
+                  </label>
+                ) : (
+                  <p class={`${mutedCls} mb-3`}>Для этой монеты цена вручную.</p>
+                )
+              )}
+              <p class={`${mutedCls} mb-3`}>Ручная цена остаётся запасной; крипту удобнее вести в USD.</p>
             </>
           ) : (
             <Field label="Сумма">{txt('amount', { inputMode: 'decimal', placeholder: '100000' })}</Field>
@@ -195,9 +212,9 @@ function HoldingFormView({
 }
 
 export function InvestFormScreen({ api, nav, onFatal, holdingId }: ScreenProps & { holdingId?: number }) {
-  // правка: позицию берём из общего списка (отдельного GET /:id нет)
+  // позицию (правка) и список поддерживаемых тикеров берём из общего GET (отдельного GET /:id нет)
   const q = useData(
-    () => (holdingId === undefined ? Promise.resolve(null) : api.get<HoldingsList>('/api/tma/holdings')),
+    () => api.get<HoldingsList>('/api/tma/holdings'),
     onFatal,
     [holdingId],
   );
@@ -207,8 +224,9 @@ export function InvestFormScreen({ api, nav, onFatal, holdingId }: ScreenProps &
     return <ErrorView title={v.title} text={v.text} onRetry={q.reload} />;
   }
   const item = holdingId === undefined ? null : q.data?.items.find((x) => x.id === holdingId);
+  const supported = q.data?.auto.supported_tickers ?? [];
   if (holdingId !== undefined && !item) {
     return <ErrorView title="Позиция не найдена" text="Возможно, она уже удалена." onRetry={() => nav.back()} />;
   }
-  return <HoldingFormView api={api} nav={nav} original={item ? fromItem(item) : null} {...(holdingId !== undefined ? { holdingId } : {})} />;
+  return <HoldingFormView api={api} nav={nav} original={item ? fromItem(item) : null} supported={supported} {...(holdingId !== undefined ? { holdingId } : {})} />;
 }

@@ -646,9 +646,9 @@ function ProfileForms({
               <Switch
                 icon={<f.icon size={17} strokeWidth={1.5} class="flex-none text-zinc-400" />}
                 label={f.label}
-                hint={f.hint}
+                hint={f.key === 'auto_prices_enabled' && p.auto_prices_available === false ? 'Автоцены пока не настроены' : f.hint}
                 checked={!!p[f.key]}
-                busy={remBusy}
+                busy={remBusy || (f.key === 'auto_prices_enabled' && p.auto_prices_available === false)}
                 onToggle={() => void toggleReminder(f.key, !p[f.key], 'Настройка сохранена', setFeatErr)}
               />
             </li>

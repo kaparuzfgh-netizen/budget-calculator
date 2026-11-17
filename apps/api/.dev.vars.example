@@ -22,3 +22,7 @@ OWNER_TELEGRAM_ID=
 # Без него /telegram/* и /api/tma/* отвечают 503 (fail-closed).
 # Значение ниже — 32 нулевых байта в base64, ВАЛИДНО для dev (для прода — свой!).
 DATA_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+# Автоцены крипты (T3b): Demo-ключ CoinGecko (coingecko.com → Developer Dashboard).
+# Без ключа внешних запросов нет — цены остаются ручными. В проде: wrangler secret put COINGECKO_API_KEY
+COINGECKO_API_KEY=

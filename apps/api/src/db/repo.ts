@@ -47,6 +47,60 @@ export function fxRepo(db: Env['DB']) {
   };
 }
 
+// ── глобальные, не user-data: кэш котировок (T3b) — без user_id ──
+export interface PriceQuoteRow {
+  source: string;
+  asset_id: string;
+  vs_currency: string;
+  price: string;
+  as_of: string;
+  fetched_at: string;
+}
+export interface PriceStateRow {
+  source: string;
+  blocked_until: string | null;
+  last_status: number | null;
+  updated_at: string;
+}
+
+export function priceRepo(db: Env['DB']) {
+  return {
+    /** Один SELECT по набору монет и валют (PRIMARY KEY покрывает выборку). */
+    async getMany(source: string, vs: string[], ids: string[]): Promise<PriceQuoteRow[]> {
+      if (!ids.length || !vs.length) return [];
+      const ph = (n: number) => Array(n).fill('?').join(',');
+      const r = await db
+        .prepare(
+          `SELECT * FROM price_quotes WHERE source = ? AND vs_currency IN (${ph(vs.length)}) AND asset_id IN (${ph(ids.length)})`,
+        )
+        .bind(source, ...vs, ...ids)
+        .all<PriceQuoteRow>();
+      return r.results;
+    },
+    /** Идемпотентная запись пачкой (db.batch + ON CONFLICT). */
+    async upsertMany(rows: PriceQuoteRow[]): Promise<void> {
+      if (!rows.length) return;
+      const stmt = db.prepare(
+        `INSERT INTO price_quotes (source, asset_id, vs_currency, price, as_of, fetched_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(source, asset_id, vs_currency) DO UPDATE SET price=excluded.price, as_of=excluded.as_of, fetched_at=excluded.fetched_at`,
+      );
+      await db.batch(rows.map((r) => stmt.bind(r.source, r.asset_id, r.vs_currency, r.price, r.as_of, r.fetched_at)));
+    },
+    getState(source: string) {
+      return db.prepare('SELECT * FROM price_provider_state WHERE source = ?').bind(source).first<PriceStateRow>();
+    },
+    setState(source: string, blockedUntil: string | null, status: number | null, now: string) {
+      return db
+        .prepare(
+          `INSERT INTO price_provider_state (source, blocked_until, last_status, updated_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(source) DO UPDATE SET blocked_until=excluded.blocked_until, last_status=excluded.last_status, updated_at=excluded.updated_at`,
+        )
+        .bind(source, blockedUntil, status, now)
+        .run();
+    },
+  };
+}
+
 export type ScopedRepo = ReturnType<typeof scoped>;
 
 // ── access-контур: users / invites / processed_updates / audit_log ──

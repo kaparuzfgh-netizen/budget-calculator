@@ -33,6 +33,8 @@ export interface ProfileRow {
   cushion_minor: number | null;
   /** Цели распределения портфеля (0023): JSON {kind: целые %}, сумма 100; NULL — не заданы. */
   invest_targets: string | null;
+  /** Автоцены крипты (0024, opt-in): 1 — названия монет уходят в CoinGecko. */
+  auto_prices_enabled: number;
 }
 
 export interface CommitmentRow {
@@ -210,6 +212,8 @@ export interface HoldingRow {
   opened_on: string | null;
   matures_on: string | null;
   note: string | null;
+  /** 1 — брать автоцену, если есть (0024); 0 — всегда ручная. */
+  auto_price: number;
   source_key: string | null;
   created_at: string;
   updated_at: string;

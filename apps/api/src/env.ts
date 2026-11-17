@@ -27,6 +27,8 @@ export interface Env {
   GEMINI_API_KEY?: string;
   /** Модель Gemini для vision (по умолчанию gemini-3.5-flash-lite). */
   GEMINI_MODEL?: string;
+  /** Секрет: Demo-ключ CoinGecko для автоцен крипты (T3b). Нет ключа → внешних запросов нет, цены ручные. */
+  COINGECKO_API_KEY?: string;
   /** Секрет: ключ Groq — резервный vision-провайдер. */
   GROQ_API_KEY?: string;
   /** Секрет/переменная: модель Groq (умолчание — llama-4-scout). */

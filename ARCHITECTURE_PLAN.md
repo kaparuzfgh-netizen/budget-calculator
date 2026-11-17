@@ -269,3 +269,302 @@ Zod (`holdingSchema`, discriminated по `kind`):
 5. Для вкладов показывать «≈ начислено» по простой формуле (без капитализации)? (По умолчанию — да, с пометкой «примерно».)
 
 задачу можно переводить в `[READY]`
+
+---
+
+### План задачи: T3b Автоцены
+
+Источник: `TASKS.md` T3b (разбор advisor), BACKLOG P1-9 (T3b). Продолжение T3a
+(уже в проде: `holdings`, `domain/decimal.ts`, `domain/portfolio.ts`,
+`services/portfolio.ts`, `tma/holdings.ts`, `bot/invest.ts`, `web/screens/invest*.tsx`).
+Правила: AGENTS.md 2 (Workers ≠ Node), 3 (tenant), 4 (без токенов в URL), 6 (zod),
+10 (логи), 16 (opt-in по образцу vision), 19 (шифрование), 21 (инвестиции).
+
+#### 0. Что получится для пользователя
+
+- В «Профиле → ⚡️ Возможности» Mini App появляется тумблер **«Автоцены крипты»**
+  (по умолчанию выключен). В подсказке «ⓘ»: цены берутся у CoinGecko; наружу уходят
+  только названия монет (bitcoin, ethereum…), без имени, сумм и количества.
+- Когда тумблер включён, у позиций вида «Крипта» с известным тикером (BTC, ETH, SOL,
+  USDT…) цена подставляется сама при открытии экрана «💼 Инвестиции» (и в боте `/invest`).
+  Рядом пометка: «авто · 14:05» или «вручную · 01.11». Внизу экрана — «Цены крипты: CoinGecko».
+- Ручная цена **не стирается**: если автоцены нет (сбой, нет ключа, монеты нет в
+  списке, позиция в валюте, которую CoinGecko не знает) — показывается ручная, как
+  сейчас, с пометкой «устарела», если ей больше 30 дней.
+- У отдельной позиции автоцену можно выключить (галочка «Обновлять цену автоматически»
+  в форме) — тогда для неё всегда ручная цена.
+- Акции и облигации в T3b **остаются с ручной ценой** (см. §1 и вопрос 1).
+- Дисклеймер «Это учёт, а не инвестиционная рекомендация» сохраняется.
+- Если владелец не поставил ключ CoinGecko — тумблер виден, но неактивен с надписью
+  «Автоцены пока не настроены»; ничего не ломается.
+
+#### 1. Цель и границы; решение по провайдерам
+
+> **Оговорка:** в этой сессии у architect не было инструмента веб-поиска, поэтому
+> условия ниже — по состоянию знаний, а не свежей проверки. **Шаг 0 реализации**
+> — сверка актуальных условий на официальных страницах (делает executor/advisor
+> через веб-поиск до кода); при расхождении — назад в `[DESIGN]`.
+
+| Класс | Источник | Решение в T3b | Почему |
+|---|---|---|---|
+| Крипта | **CoinGecko Demo API** (бесплатный ключ, `https://api.coingecko.com/api/v3/simple/price`, заголовок `x-cg-demo-api-key`) | **входит** | Бесплатный план с ключом; ориентир — ~30 запросов/мин и ~10 000/мес; пакетный запрос `ids=a,b,c&vs_currencies=usd,eur`; требуется атрибуция «Data by CoinGecko» (проверить в шаге 0) |
+| Акции/фонды РФ, облигации РФ | MOEX ISS (без ключа, задержка ~15 мин) | **не входит → T3c** | Уже выделено в T3c; у ISS свои условия использования (свободный доступ с задержкой; перераспространение — по лицензии — проверить в T3c); доступность с IP Cloudflare проверить отдельно |
+| Зарубежные акции/ETF | Yahoo Finance | **нет** | Условия Yahoo запрещают автоматический сбор; неофициальные «API» — нарушение и ломаются |
+| Зарубежные акции/ETF | Finnhub / Alpha Vantage / Twelve Data / Tiingo (бесплатные ключи) | **не входит**, задел — интерфейс `PriceProvider` | Все требуют ключ; бесплатные планы — для личного некоммерческого использования; у Alpha Vantage очень мало запросов в сутки (порядка 25), у остальных — по одному запросу на тикер или малые пакеты. Честный вывод: «бесплатно, без ключа и законно» для зарубежных акций — нет. Если владелец захочет — отдельная задача (кандидат: Finnhub, ключ от владельца) |
+
+**Входит:** общий кэш цен (миграция 0024), провайдер CoinGecko, фиксированный список
+монет, opt-in флаг профиля + флаг позиции, «действующая цена» (авто/ручная) в
+`portfolioView`, пометки в TMA и боте, атрибуция, тумблер, документация приватности.
+
+**Не входит:** cron/фоновое обновление цен (цены — только при открытии экрана),
+пуш-алерты по ценам, история цен/графики, произвольный поиск монет по CoinGecko
+(`/search`), курсы крипты как валют позиции (позиция в валюте `BTC`/`USDT` — как в
+T3a, «нет курса»), акции/облигации, запись автоцены в `holdings.price`.
+
+#### 2. Данные — миграция `apps/api/migrations/0024_price_quotes.sql`
+
+```sql
+-- 0024_price_quotes.sql — автоцены портфеля (T3b).
+-- Общий кэш котировок: НЕ пользовательские данные, без user_id (как fx_rates).
+CREATE TABLE IF NOT EXISTS price_quotes (
+  source      TEXT NOT NULL,       -- 'coingecko'
+  asset_id    TEXT NOT NULL,       -- id монеты у провайдера: 'bitcoin' (только из белого списка)
+  vs_currency TEXT NOT NULL,       -- 'USD', 'EUR'… (верхний регистр)
+  price       TEXT NOT NULL,       -- каноническая десятичная строка (domain/decimal), не REAL
+  as_of       TEXT NOT NULL,       -- ISO-время котировки у провайдера (last_updated_at)
+  fetched_at  TEXT NOT NULL,       -- ISO-время нашего запроса (для TTL)
+  PRIMARY KEY (source, asset_id, vs_currency)
+);
+-- Состояние провайдера: пауза после 429/5xx/401, чтобы не жечь лимит.
+CREATE TABLE IF NOT EXISTS price_provider_state (
+  source        TEXT PRIMARY KEY,
+  blocked_until TEXT,              -- ISO; до этого момента внешних запросов нет
+  last_status   INTEGER,           -- HTTP-код последнего сбоя (без тел ответа)
+  updated_at    TEXT NOT NULL
+);
+-- Opt-in (правило 16 как образец): по умолчанию ничего наружу не уходит.
+ALTER TABLE profiles ADD COLUMN auto_prices_enabled INTEGER NOT NULL DEFAULT 0;
+-- Флаг позиции: 1 — брать автоцену, если есть; 0 — всегда ручная.
+ALTER TABLE holdings ADD COLUMN auto_price INTEGER NOT NULL DEFAULT 1;
+```
+
+- **`FIELDS`:** изменений нет. `price_quotes`/`price_provider_state` — глобальные
+  рыночные данные без связи с пользователем; `auto_prices_enabled`, `auto_price` —
+  целочисленные флаги (как `vision_enabled`), не текст/деньги. Тикер позиции
+  остаётся `enc1:`; id монеты выводится из тикера в JS после дешифровки и в
+  `holdings` **не хранится** (новой шифруемой колонки нет).
+- `UNIQUE(user_id, source_key)` не нужен — пользовательских вставок нет;
+  идемпотентность кэша — PRIMARY KEY + `INSERT … ON CONFLICT DO UPDATE`.
+- Индексы: PRIMARY KEY покрывает выборку `WHERE source=? AND vs_currency=? AND asset_id IN (…)`.
+- Приватность кэша: в нём только id монет из белого списка, без user_id и времени
+  «кто спросил»; связать строку кэша с пользователем нельзя.
+
+#### 3. Ключевые решения
+
+**3.1 Сопоставление тикера с монетой (однозначность).** Символы на CoinGecko не
+уникальны (десятки токенов «ETH», «USDT» в разных сетях). Поэтому — **фиксированный
+белый список** в `domain/coins.ts`: `COINS: Record<ticker, {id, name}>`, ~30
+крупных монет: BTC→bitcoin, ETH→ethereum, USDT→tether, USDC→usd-coin,
+BNB→binancecoin, SOL→solana, XRP→ripple, TON→the-open-network, TRX→tron,
+DOGE→dogecoin, ADA→cardano, AVAX→avalanche-2, DOT→polkadot, LTC→litecoin,
+LINK→chainlink, BCH→bitcoin-cash, XLM→stellar, ATOM→cosmos, NEAR→near,
+MATIC/POL→polygon-ecosystem-token, DAI→dai, ETC→ethereum-classic, XMR→monero,
+ARB→arbitrum, OP→optimism, APT→aptos, SUI→sui, SHIB→shiba-inu, UNI→uniswap,
+WBTC→wrapped-bitcoin. **Каждый id сверить с CoinGecko `/coins/list` в шаге 0**
+(они меняются, напр. MATIC→POL). Нет в списке → автоцены нет, в форме подсказка
+«для этой монеты цена вручную». Произвольный id/поиск — не в T3b (вопрос 2).
+Автоцена только для `kind='crypto'` (тикер «BTC» у акции не трогаем).
+
+**3.2 Валюта котировки.** Запрашиваем `vs_currencies` = множество валют
+крипто-позиций пользователя в нижнем регистре (обычно `usd`). Нет ключа валюты в
+ответе (CoinGecko не знает, напр., `KGS`) → для таких позиций автоцены нет, пометка
+«нет автоцены в KGS», ручная остаётся. Конвертация цены через FX **не делается**
+(лишний float и запросы); подсказка в форме: «крипту удобнее вести в USD».
+
+**3.3 Число провайдера → десятичная строка.** CoinGecko отдаёт JSON-число (float).
+Единственная граница float: `decFromProviderNumber(n)` в `domain/decimal.ts` —
+`Number.isFinite(n) && n > 0`, округление half-up до 8 знаков (через `toFixed(8)`
+для n < 1e12, иначе отказ), снятие хвостовых нулей, проверка `isCanonicalDec`;
+результат `'0'` (цена < 0.000000005) или > 12 цифр → `null` (котировки нет). Дальше —
+только строки и BigInt (правило 21), `toMinor` не используется.
+
+**3.4 Кэш, TTL, пакет, лимиты.**
+- `TTL = 15 мин` (свежая — без запроса); котировка старше TTL — «просроченная», но
+  пригодна как запасная до `QUOTE_MAX_AGE = 7 дней`; старше — не используется.
+- Один пакетный запрос на провайдер на HTTP-запрос пользователя: только id, которых
+  нет в кэше или они старше TTL, все сразу (`ids=…` ≤ 50 — потолок позиций), все
+  нужные `vs_currencies`. Внешних запросов на один GET — **не больше 1**; D1 — чтение
+  кэша одним `IN (…)` + запись одним `db.batch` + 1 чтение состояния провайдера.
+- Расчёт лимитов: Workers Free — 50 внешних подзапросов на вызов (у нас +1),
+  CPU 10 мс (разбор ≤50 котировок — пренебрежимо). CoinGecko ~10 000/мес: при
+  TTL 15 мин один набор монет даёт ≤ 96 запросов/сутки ≈ 2 900/мес; для 2–5
+  пользователей с пересекающимися монетами — с запасом. Cron не используется
+  (никаких «цена × каждый пользователь» в тике — замечание advisor).
+- Пауза при сбоях: `429` → `blocked_until = now + 10 мин`; `401/403` (ключ
+  неверный/отозван) → `+ 6 ч`; `5xx`/таймаут (5 с, `AbortSignal.timeout`) →
+  `+ 2 мин`. Во время паузы — только кэш. Гонка двух параллельных запросов
+  допустима (upsert идемпотентен).
+
+**3.5 Поведение при сбое и без ключа (fail-closed).**
+- Нет `COINGECKO_API_KEY` в env → провайдер `null`: **ни одного** внешнего запроса,
+  `auto.available=false`, всё работает на ручных ценах. Ключ передаётся только
+  заголовком, не в URL (правило 4 по духу; не попадает в логи URL).
+- Сбой/пауза/кривой ответ (zod не прошёл) → котировки из кэша ≤ 7 дней с пометкой
+  «авто, обновлено N ч назад»; нет и их → ручная цена (+ «устарела» по T3a).
+  GET `/api/tma/holdings` **никогда** не отдаёт 5xx из-за цен.
+- Профиль `auto_prices_enabled=0` → провайдер не вызывается, кэш не читается.
+- Логи (правило 10): только `price_fetch_failed` + HTTP-код и число id; никаких
+  тикеров/id монет, ключа, тел ответов.
+
+**3.6 Авто vs ручная цена (приоритет).** Чистая функция
+`effectivePrice(h, quote | null, today, nowIso)` в `domain/portfolio.ts`:
+1. Автоцена применима: профиль вкл, `h.auto_price=1`, `kind='crypto'`, тикер в
+   списке, есть котировка ≤ 7 дней.
+2. Свежая автоцена (≤ 24 ч) **побеждает** ручную.
+3. Автоцена 1–7 дней: берётся более свежая из двух (сравнение даты котировки и `price_on`).
+4. Иначе — ручная (как в T3a).
+Результат: `{price, on, source: 'auto'|'manual', stale}`; `holdingValueMinor`/`pnlMinor`
+считаются от действующей цены. **`holdings.price/price_on` автоценой не
+перезаписываются** — ручная цена всегда сохранена и видна в форме. Позиция без
+ручной цены создаваться может только как раньше (T3a требует `price` для crypto) —
+не меняем: ручная цена — страховка.
+
+#### 4. Слои и файлы
+
+| Слой | Файл | Что |
+|---|---|---|
+| Домен | `apps/api/src/domain/coins.ts` (новый) | `COINS` белый список, `coinIdFor(kind, ticker) → string \| null` |
+| Домен | `apps/api/src/domain/decimal.ts` | `decFromProviderNumber(n) → string \| null` |
+| Домен | `apps/api/src/domain/portfolio.ts` | `effectivePrice(...)`, константы `AUTO_FRESH_HOURS=24`, `QUOTE_MAX_AGE_DAYS=7`; `HoldingLike.auto_price` |
+| Данные | `apps/api/migrations/0024_price_quotes.sql` | см. §2 |
+| Данные | `apps/api/src/db/repo.ts` (рядом с `fxRepo`, глобальный, не scoped) | `priceRepo(db)`: `getMany(source, vs[], ids[])` (один SELECT `IN`), `upsertMany(rows)` (`db.batch`, ON CONFLICT), `getState(source)`, `setState(source, blockedUntil, status, now)` |
+| Данные | `apps/api/src/db/scoped/types.ts` | `HoldingRow.auto_price`, `ProfileRow.auto_prices_enabled` |
+| Данные | `apps/api/src/db/scoped/holdings.ts` | `auto_price` в `addHolding`/`patchHolding` (plaintext int) |
+| Данные | `apps/api/src/db/scoped/profile.ts` | `auto_prices_enabled` в патче и в списке флагов |
+| Данные | `apps/api/src/db/scoped/userdata.ts` | export: `auto_price` в holdings, флаг в профиле → `schema_version: 8`; delete_me — без изменений (кэш общий, не данные пользователя) |
+| Внешнее | `apps/api/src/prices/provider.ts` (новый) | `interface PriceProvider { source; latest(ids[], vs[]): Promise<{quotes: {id, vs, price, asOf}[]}> }`, `class PriceUnavailable(status?)` |
+| Внешнее | `apps/api/src/prices/coingecko.ts` (новый) | `createCoinGecko(apiKey, fetchImpl=fetch)`: `GET /simple/price?ids=…&vs_currencies=…&include_last_updated_at=true`, заголовок `x-cg-demo-api-key`, таймаут 5 с, zod `record(record(number))`, только Web API (`fetch`, `URLSearchParams`) |
+| Внешнее | `apps/api/src/prices/service.ts` (новый) | `getQuotes(db, provider \| null, refs: {id, vs}[], now) → {map, fetchedAt, stale, failed}`: кэш → пакет только по нужным → upsert → при сбое запасной кэш ≤7 дн + `setState` паузы |
+| Сервис | `apps/api/src/services/portfolio.ts` | `portfolioView(repo, p, fxGet, today, quotesGet?)`: при `p.auto_prices_enabled=1` и провайдере — собрать refs по позициям (`coinIdFor`), один `getQuotes`, затем `effectivePrice` для каждой; `HoldingItem` += `price_source`, `effective_price`, `effective_price_on`, `auto_supported`, `auto_note` (`'no_quote' \| 'ccy_unsupported' \| null`); `PortfolioView` += `auto: {enabled, available, as_of, stale, attribution}` |
+| Wiring | `apps/api/src/env.ts` | `COINGECKO_API_KEY?: string` (секрет) |
+| Wiring | `apps/api/src/http/router.ts` | `deps.prices?: PriceProvider \| null` (для тестов); по умолчанию `env.COINGECKO_API_KEY ? createCoinGecko(key) : null`; передать в `registerTmaHoldings` и в бот `/invest` |
+| TMA API | `apps/api/src/tma/holdings.ts` | `auto_price: z.boolean().optional()` в create/patch; GET отдаёт новые поля + `auto.supported_tickers` (из `COINS`, для подсказки формы) |
+| TMA API | `apps/api/src/tma/profile.ts` | `auto_prices_enabled: z.boolean().optional()` в PATCH; GET профиля += `auto_prices_enabled`, `auto_prices_available` (`!!env.COINGECKO_API_KEY`) |
+| Бот | `apps/api/src/bot/invest.ts` | пометки «авто/вручную», строка «Цены крипты: CoinGecko»; экранов не добавляем → `navigation.md`/`screens.json` **без изменений** (проверить `nav.test.ts`) |
+| Web | `apps/web/src/api.ts`, `screens/profile-toggles.tsx` | `ToggleKey += 'auto_prices_enabled'`; запись в `FEATURES` с `Info` (CoinGecko, что уходит наружу); неактивен при `auto_prices_available=false` |
+| Web | `apps/web/src/screens/invest.tsx`, `invest-form.tsx` | бейдж «авто · ЧЧ:ММ» / «вручную · дата» / «устарела» (токены палитры), строка атрибуции; в форме для crypto — галочка «Обновлять цену автоматически» (видна, если тикер в `supported_tickers`), поле ручной цены остаётся |
+| Web | `apps/web/src/demo/mock.ts`, `demo/tw.tsx` | новые поля в моках |
+
+Household (правило 20): `householdSummary` не меняется; партнёр не видит ни позиций,
+ни флагов, ни котировок по ним.
+
+#### 5. API (`/api/tma/*`, Bearer JWT, scoped(user.id), `user_id` не принимается)
+
+| Метод | Путь | Изменение | Ошибки |
+|---|---|---|---|
+| GET | `/api/tma/holdings` | items += `price_source`, `effective_price`, `effective_price_on`, `auto_supported`, `auto_note`; `value_minor/pnl_minor/price_stale` — от действующей цены; `price/price_on` — ручные (для формы); корень += `auto:{enabled, available, as_of, stale, attribution, supported_tickers}` | 401, 403; сбой цен → **200** с ручными ценами |
+| POST | `/api/tma/holdings` | `+ auto_price?: boolean` (по умолчанию true); `client_id` — как в T3a | 400 |
+| PATCH | `/api/tma/holdings/:id` | `+ auto_price?: boolean` | 400, 404 (чужой id) |
+| GET/PATCH | `/api/tma/profile` | `+ auto_prices_enabled` (boolean в PATCH; 0/1 в GET), GET `+ auto_prices_available` | 400 |
+
+Включение тумблера без ключа — разрешено (сохраняется), но цены не тянутся;
+ответ `auto.available=false`. Новых кодов ошибок нет.
+
+#### 6. Шаги реализации (после каждого — `npm run check`)
+
+0. **Сверка условий (веб-поиск, без кода):** CoinGecko Demo — лимиты, атрибуция,
+   допустимость использования в личном боте, формат `/simple/price` и заголовок
+   ключа; id монет из `COINS` по `/coins/list`. Итог — в комментарий `prices/coingecko.ts`
+   и `domain/coins.ts`. Расхождение с планом → назад в `[DESIGN]`.
+1. `domain/coins.ts` + `decFromProviderNumber` + `effectivePrice` и тесты.
+2. Миграция `0024_price_quotes.sql`; типы в `scoped/types.ts`; `auto_price` в
+   `scoped/holdings.ts`, `auto_prices_enabled` в `scoped/profile.ts`; `priceRepo` в `repo.ts`.
+3. `prices/provider.ts`, `prices/coingecko.ts` (с инъекцией `fetchImpl`) + тесты на фейковом fetch.
+4. `prices/service.ts` (кэш/TTL/пакет/пауза/запасной кэш) + тесты.
+5. `services/portfolio.ts` — действующая цена; `env.ts`, `router.ts` (deps); тесты сервиса.
+6. `tma/holdings.ts`, `tma/profile.ts` + тесты API.
+7. `bot/invest.ts` — пометки; `nav.test.ts` зелёный без правок реестра.
+8. `userdata.ts` — export `schema_version: 8`; тест.
+9. Web: `api.ts`, `profile-toggles.tsx`, `invest.tsx`, `invest-form.tsx`, моки; тесты web.
+10. `apps/api/.dev.vars.example` — строка `COINGECKO_API_KEY=` (пустая). Финал:
+    `npm run check`, T3b → `[DOCS]`. Ключ ставит владелец (§7), без ключа выкладка безопасна.
+
+#### 7. Ключ — только владелец
+
+Инструкция владельцу (executor выдаёт в конце): 1) зарегистрироваться на
+coingecko.com → Developer Dashboard → создать бесплатный Demo-ключ; 2) в папке
+проекта: `npm run wrangler -- secret put COINGECKO_API_KEY` и вставить ключ
+(для стейджинга — `--env staging`); 3) открыть «💼 Инвестиции» и включить тумблер.
+Claude ключ не видит и не хранит; в git/`.dev.vars` не попадает.
+
+#### 8. Тесты
+
+- **Домен:** `coinIdFor('crypto','btc'→'BTC') = 'bitcoin'`, `('stock','BTC') = null`,
+  неизвестный тикер → null; `decFromProviderNumber`: `64123.456789123 → '64123.45678912'`,
+  `1.2e-5 → '0.000012'`, `1e-10 → null`, `NaN/-1/0/Infinity/1e13 → null`, half-up на 8-м
+  знаке; `effectivePrice`: свежая авто бьёт ручную; авто 3 дня vs ручная вчера → ручная;
+  авто 3 дня vs ручная 40 дней → авто; авто 8 дней → ручная; `auto_price=0` → ручная;
+  профиль выкл → ручная; `today`/`now` — параметры.
+- **Провайдер (фейковый fetch):** ключ в заголовке, **не** в URL; ids и vs пакетом
+  одним вызовом; таймаут/HTTP 500/429/401 → `PriceUnavailable(status)`; кривой JSON → то же.
+- **Сервис цен:** свежий кэш → 0 вызовов fetch; часть просрочена → 1 вызов только по
+  просроченным; сбой → запасной кэш ≤7 дн и `stale:true`; 429 → пауза, повторный
+  запрос в паузе → 0 вызовов; `provider=null` (нет ключа) → 0 вызовов, пустая карта.
+- **Изоляция («A не видит B»):** A (BTC) и B (SOL), оба вкл. GET A — ни одной
+  позиции/цены B; запрос провайдеру от A содержит только `bitcoin`; в `price_quotes`
+  нет колонки `user_id` (PRAGMA table_info); PATCH `auto_price` по id позиции B от A → 404,
+  строка B не изменилась. A выкл, B вкл → GET A: 0 вызовов fetch.
+- **Fail-closed:** без ключа → 200, все `price_source:'manual'`, `auto.available=false`,
+  fetch не вызван; провайдер падает → 200, никаких 5xx; без JWT → 401.
+- **Логи (правило 10):** перехват `console.*` при сбое провайдера — нет тикеров/id монет,
+  ключа, тела ответа; есть только код.
+- **Ручная цена не теряется:** после GET с автоценой сырой `SELECT price` позиции
+  — прежний `enc1:` (тот же расшифрованный текст), `price_on` не изменился.
+- **Export:** `schema_version: 8`, `auto_price` в holdings, `auto_prices_enabled` в профиле.
+- **Household:** `householdSummary` не содержит котировок/флагов портфеля.
+- **Web:** тумблер шлёт `auto_prices_enabled: true`; неактивен при `available=false`;
+  бейдж «авто/вручную»; галочка в форме видна только для тикера из списка.
+
+#### 9. Риски и откат
+
+| Риск | Мера |
+|---|---|
+| Смена условий/лимитов CoinGecko, отзыв ключа | шаг 0 сверки; пауза при 401/403/429; без цен всё работает на ручных |
+| Неоднозначный тикер (другая монета с тем же символом) | только белый список, только `kind='crypto'` |
+| Потеря точности (float из JSON) | одна граница `decFromProviderNumber`, дальше строки + BigInt |
+| Перерасход лимитов Workers Free / CoinGecko | ≤1 внешний запрос на GET, TTL 15 мин, без cron |
+| Утечка состава портфеля | наружу только id монет без идентификаторов; кэш без user_id; opt-in DEFAULT 0; пометка в подсказке и SECURITY.md |
+| Медленный провайдер тормозит экран | таймаут 5 с, затем кэш/ручная |
+| Пользователь думает, что цена «биржевая и точная» | пометка времени котировки, атрибуция, дисклеймер |
+
+**Откат.** Мгновенный, без кода: владелец удаляет секрет
+(`npm run wrangler -- secret delete COINGECKO_API_KEY`) — внешние запросы
+прекращаются, все цены ручные. Кодом — `portfolioView` перестаёт вызывать
+`getQuotes`. Миграция `0024` не редактируется; если нужно убрать схему — новая
+`0025_drop_price_quotes.sql` (`DROP TABLE price_quotes; DROP TABLE price_provider_state;`
+`ALTER TABLE profiles DROP COLUMN auto_prices_enabled; ALTER TABLE holdings DROP COLUMN auto_price;`).
+Кэш котировок — не данные пользователей; флаги — да (в боевом режиме — по «Да» владельца).
+
+#### 10. Затронутая документация (для `documenter`)
+
+- `AGENTS.md` — правило 21: «внешних источников цен пока нет» → автоцены крипты
+  (CoinGecko, opt-in `auto_prices_enabled`, флаг `holdings.auto_price`, общий кэш
+  `price_quotes` без user_id, TTL 15 мин, приоритет авто/ручной, ручная не
+  перезаписывается, белый список `domain/coins.ts`, ключ `COINGECKO_API_KEY`).
+- `docs/ARCHITECTURE.md` — таблицы `price_quotes`, `price_provider_state`, колонки
+  0024, миграции 0001–0024, слой `prices/` в «Внешнее».
+- `SECURITY.md` — строка «Названия монет → CoinGecko (opt-in)».
+- `apps/api/.dev.vars.example`, `.env.example` (если там перечислены секреты),
+  `docs/v2-development.md` (секреты, стейджинг), `README.md` (возможности), `CHANGELOG.md`.
+- `docs/BACKLOG.md` P1-9 и `TASKS.md` — T3b закрыта; зарубежные акции — отдельная идея (если владелец захочет).
+- Формат `/export` — `schema_version 8`.
+
+#### 11. Вопросы владельцу (простым языком; в скобках — по умолчанию)
+
+1. Делаем сейчас автоцены только для крипты, а российские акции и облигации — следующей задачей (Мосбиржа)? Для зарубежных акций бесплатного источника без ключа нет. (По умолчанию — да, только крипта.)
+2. Автоцены только для ~30 популярных монет (BTC, ETH, USDT, SOL, TON…), остальные — вручную? (По умолчанию — да: так не перепутаем монеты с одинаковым названием.)
+3. Обновлять цены не чаще раза в 15 минут и только когда вы открываете экран, без фоновой работы? (По умолчанию — да.)
+4. Если автоцена свежая (до суток), показывать её вместо ручной, а ручную хранить как запасную? (По умолчанию — да.)
+5. Готовы сами получить бесплатный ключ CoinGecko и вставить его по инструкции из 3 шагов? Без ключа всё работает, просто цены остаются ручными. (По умолчанию — да, после выкладки.)
+
+задачу можно переводить в `[READY]`

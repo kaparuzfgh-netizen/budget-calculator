@@ -73,3 +73,17 @@ export function mulToMinor(qty: string, price: string): number {
   if (minor > MAX_MAJOR * 100n) throw new DomainError('TOO_LARGE', 'Сумма позиции слишком велика');
   return Number(minor);
 }
+
+/**
+ * Единственная граница float у внешних цен (T3b): число из JSON провайдера →
+ * каноническая десятичная строка (half-up до 8 знаков). null — котировки нет:
+ * не число, ≤0, ≥1e12, округлилось в 0 или не влезло в 12 цифр целой части.
+ */
+export function decFromProviderNumber(n: unknown): string | null {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0 || n >= 1e12) return null;
+  const s = n.toFixed(MAX_FRAC_DIGITS);
+  const [int = '0', frac = ''] = s.split('.');
+  const f = frac.replace(/0+$/, '');
+  const out = f ? `${int}.${f}` : int;
+  return isCanonicalDec(out) ? out : null;
+}

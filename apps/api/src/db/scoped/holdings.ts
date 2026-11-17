@@ -4,7 +4,9 @@ import type { HoldingRow } from './types';
 import type { Ctx } from './ctx';
 
 /** Поля позиции, доступные для создания/правки (id, user_id, source_key, метки времени — нет). */
-export type HoldingInput = Omit<HoldingRow, 'id' | 'user_id' | 'source_key' | 'created_at' | 'updated_at'>;
+export type HoldingInput = Omit<HoldingRow, 'id' | 'user_id' | 'source_key' | 'created_at' | 'updated_at' | 'auto_price'> & {
+  auto_price?: number;
+};
 
 const PATCHABLE = [
   'kind',
@@ -20,6 +22,7 @@ const PATCHABLE = [
   'opened_on',
   'matures_on',
   'note',
+  'auto_price',
 ] as const;
 
 export function holdingsRepo({ db, userId, en }: Ctx) {
@@ -40,8 +43,8 @@ export function holdingsRepo({ db, userId, en }: Ctx) {
       return db
         .prepare(
           `INSERT OR IGNORE INTO holdings (user_id, kind, name, ticker, currency, quantity, avg_price, price, price_on,
-             amount_minor, rate, opened_on, matures_on, note, source_key)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             amount_minor, rate, opened_on, matures_on, note, auto_price, source_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           userId,
@@ -58,6 +61,7 @@ export function holdingsRepo({ db, userId, en }: Ctx) {
           h.opened_on,
           h.matures_on,
           await en('holdings', 'note', h.note),
+          h.auto_price ?? 1,
           h.source_key ?? null,
         )
         .run();

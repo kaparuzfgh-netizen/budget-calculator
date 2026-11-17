@@ -6,6 +6,8 @@ import { accessRepo, scoped, type UserRow } from '../db/repo';
 import { configureDataKey, hasDataKey } from '../db/crypto';
 import { handleCallback, handleMessage } from '../services/access';
 import { createFrankfurter } from '../fx/frankfurter';
+import { createCoinGecko } from '../prices/coingecko';
+import type { PriceProvider } from '../prices/provider';
 import { FxUnavailable } from '../fx/provider';
 import { getFxRates } from '../fx/service';
 import { createTelegramClient, sanitizeTelegramError, type TelegramClient } from '../telegram/client';
@@ -74,6 +76,8 @@ export interface RouterDeps {
    * Если не задано — собирается из env (GEMINI_API_KEY, GROQ_API_KEY, GROQ_MODEL).
    */
   vision?: import('../services/vision').VisionProviders;
+  /** Подмена провайдера цен в тестах (null — «ключа нет»). Иначе из env.COINGECKO_API_KEY. */
+  prices?: PriceProvider | null;
 }
 
 interface TmaVariables {
@@ -197,12 +201,15 @@ export function createRouter(deps: RouterDeps = {}) {
 
   // REST API Mini App — паритет бота (веха E) + кредиты/займы (H3).
   const fxProvider = deps.fx ?? createFrankfurter();
+  /** Провайдер автоцен: deps (тесты) или секрет COINGECKO_API_KEY; нет ключа → null (ноль запросов). */
+  const pricesFor = (env: Env): PriceProvider | null =>
+    deps.prices !== undefined ? deps.prices : env.COINGECKO_API_KEY ? createCoinGecko(env.COINGECKO_API_KEY) : null;
   registerTmaApi(app, tmaAuth, fxProvider);
   registerTmaExpenses(app, tmaAuth);
-  registerTmaProfile(app, tmaAuth, fxProvider);
+  registerTmaProfile(app, tmaAuth, fxProvider, pricesFor);
   registerTmaCommitments(app, tmaAuth);
   registerTmaDebts(app, tmaAuth, fxProvider);
-  registerTmaHoldings(app, tmaAuth, fxProvider);
+  registerTmaHoldings(app, tmaAuth, fxProvider, pricesFor);
   registerTmaFx(app, tmaAuth, fxProvider);
   registerTmaHousehold(app, tmaAuth, fxProvider);
   // Скриншот банка из Mini App — те же ключи/фетч, что и у бота
@@ -265,6 +272,7 @@ export function createRouter(deps: RouterDeps = {}) {
       botUsername: c.env.TELEGRAM_BOT_USERNAME,
       fx: deps.fx ?? createFrankfurter(),
       vision,
+      prices: pricesFor(c.env),
     };
     try {
       if (cb && cb.message?.chat.type === 'private' && cb.from) {

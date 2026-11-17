@@ -103,6 +103,24 @@ Wrangler вызывается через `npm run wrangler -- <аргумент�
 Webhook Telegram и вход пользователей появятся на шаге 3 миграции — сейчас бот ещё не подключён,
 поэтому на шагах 1–6 бот не отвечает: это нормально.
 
+### Необязательный секрет: автоцены крипты (`COINGECKO_API_KEY`)
+
+Без этого секрета портфель работает полностью, но цены крипты вводятся вручную
+(в Mini App тумблер «Автоцены крипты» неактивен с пометкой «Автоцены пока не настроены»). Ключ — бесплатный Demo-план CoinGecko:
+
+1. Зарегистрироваться на [coingecko.com](https://www.coingecko.com/en/api) и войти в личный кабинет разработчика (Developer Dashboard).
+2. Создать API-ключ на бесплатном Demo-плане (в коде заложен лимит около 10 000 запросов в месяц; актуальные лимиты и названия разделов кабинета смотрите на сайте CoinGecko — они могут меняться).
+3. Передать ключ воркеру (владелец, ввод скрытый, значение нигде не сохраняется):
+   ```
+   npm run wrangler -- secret put COINGECKO_API_KEY
+   ```
+   Для стейджинга — то же с `--env staging`.
+4. Для локальной разработки добавьте строку `COINGECKO_API_KEY=...` в `apps/api/.dev.vars` (шаблон — `apps/api/.dev.vars.example`).
+
+Ключ передаётся только заголовком `x-cg-demo-api-key`, в URL и логах его нет.
+При использовании CoinGecko в продукте обязательна подпись «Data provided by CoinGecko»
+со ссылкой https://www.coingecko.com/en/api — она уже выводится в Mini App и в `/invest`.
+
 ### CI/CD: секреты GitHub
 
 | Где | Имя | Значение |
@@ -148,6 +166,9 @@ Cron на стейджинге выключен (`[env.staging.triggers] crons =
 **Дальнейшие деплои в стейджинг:** `npm run release:staging` — тот же конвейер
 (check → сборка web → миграции → deploy → /health), все wrangler-вызовы с
 `--env staging`. Прод релизится как раньше — `npm run release`.
+
+**Автоцены на стейджинге (необязательно).** Секрет `COINGECKO_API_KEY` мастер не спрашивает — задайте вручную, как в разделе «Автоцены крипты» ниже:
+`npm run wrangler -- secret put COINGECKO_API_KEY --env staging`.
 
 Ограничения: `[env.staging]` должен оставаться последним блоком wrangler.toml
 (`envSection()` в setup-utils режет по следующему top-level заголовку);
@@ -632,7 +653,7 @@ claim (следующий тик повторит). Тумблер — `⚙️ �
    `wrangler d1 execute DB --remote --file backup.sql`.
 3. **Секреты воркера** (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`,
    `JWT_SECRET`, `OWNER_TELEGRAM_ID`, `DATA_KEY`, `GEMINI_API_KEY`,
-   `GROQ_API_KEY`). Список имён — `wrangler secret list` (значения Cloudflare
+   `GROQ_API_KEY`, `COINGECKO_API_KEY`). Список имён — `wrangler secret list` (значения Cloudflare
    не отдаёт). Все значения — в менеджере паролей владельца; пересоздание —
    `wrangler secret put <NAME>` + `npm run release`. Потеря `JWT_SECRET` не
    страшна (протухнут сессии Mini App — пользователи просто перелогинятся),

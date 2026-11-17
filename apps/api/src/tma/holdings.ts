@@ -10,6 +10,8 @@ import type { Hono, Next } from 'hono';
 import type { Env } from '../env';
 import type { HoldingRow, UserRow } from '../db/repo';
 import type { FxProvider } from '../fx/provider';
+import type { PriceProvider } from '../prices/provider';
+import { makePriceSource } from '../prices/service';
 import { toMinor } from '../domain/money';
 import { mulToMinor } from '../domain/decimal';
 import { HOLDING_KINDS } from '../domain/portfolio';
@@ -58,6 +60,7 @@ const createSchema = z.object({
   opened_on: zIso.nullable().optional(),
   matures_on: zIso.nullable().optional(),
   note: zNoteN.nullable().optional(),
+  auto_price: z.boolean().optional(),
   client_id: zClientId,
 });
 // вид и client_id не правятся; null допустим для необязательных полей
@@ -74,6 +77,7 @@ const patchSchema = z.object({
   opened_on: zIso.nullable().optional(),
   matures_on: zIso.nullable().optional(),
   note: zNoteN.nullable().optional(),
+  auto_price: z.boolean().optional(),
 });
 
 type Shape = {
@@ -103,6 +107,7 @@ export function registerTmaHoldings(
   app: Hono<{ Bindings: Env; Variables: { tmaUser: UserRow } }>,
   tmaAuth: (c: C, next: Next) => Promise<Response | void>,
   fx: FxProvider,
+  prices: (env: Env) => PriceProvider | null,
 ): void {
   const wrap =
     (h: (c: C) => Promise<Response>) =>
@@ -121,8 +126,16 @@ export function registerTmaHoldings(
     tmaAuth,
     wrap(async (c) => {
       const p = await needProfile(c);
-      const v = await portfolioView(repoOf(c), p, fxGet(c, fx), todayInTz(p.timezone, new Date()));
-      return okJson(c, { items: v.items, total: v.total, allocation: v.allocation, disclaimer: v.disclaimer });
+      const now = new Date();
+      const v = await portfolioView(
+        repoOf(c),
+        p,
+        fxGet(c, fx),
+        todayInTz(p.timezone, now),
+        makePriceSource(c.env.DB, prices(c.env), now),
+        now,
+      );
+      return okJson(c, { items: v.items, total: v.total, allocation: v.allocation, auto: v.auto, disclaimer: v.disclaimer });
     }),
   );
 
@@ -152,6 +165,7 @@ export function registerTmaHoldings(
         opened_on: b.opened_on ?? null,
         matures_on: b.matures_on ?? null,
         note: b.note ?? null,
+        auto_price: b.auto_price === false ? 0 : 1,
       };
       const msg = shapeError(row);
       if (msg) return c.json(bad(msg).body, 400);
@@ -204,6 +218,7 @@ export function registerTmaHoldings(
       if (b.opened_on !== undefined) patch.opened_on = b.opened_on;
       if (b.matures_on !== undefined) patch.matures_on = b.matures_on;
       if (b.note !== undefined) patch.note = b.note;
+      if (b.auto_price !== undefined) patch.auto_price = b.auto_price ? 1 : 0;
       const merged = { ...cur, ...patch };
       const msg = shapeError(merged);
       if (msg) return c.json(bad(msg).body, 400);

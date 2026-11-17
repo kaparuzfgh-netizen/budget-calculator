@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { Bell, CalendarClock, Camera, Receipt, TrendingUp } from 'lucide-preact';
+import { Bell, CalendarClock, Camera, Coins, Receipt, TrendingUp } from 'lucide-preact';
 import type { SelectOption } from '../ui';
 import { Info } from '../ui';
 
@@ -44,7 +44,7 @@ export function Switch({
 }
 
 /** Ключи boolean-настроек профиля (PATCH /profile) — и напоминания, и фичи. */
-export type ToggleKey = 'reminders_weekly' | 'reminders_payments' | 'reminders_digest' | 'fx_alerts_enabled' | 'vision_enabled';
+export type ToggleKey = 'reminders_weekly' | 'reminders_payments' | 'reminders_digest' | 'fx_alerts_enabled' | 'vision_enabled' | 'auto_prices_enabled';
 
 export const REMINDERS: {
   key: ToggleKey;
@@ -86,6 +86,27 @@ export const FEATURES: {
       </>
     ),
     hint: 'фото банка — в боте или в форме траты',
+  },
+  {
+    key: 'auto_prices_enabled',
+    icon: Coins,
+    label: (
+      <>
+        Автоцены крипты
+        <Info title="Автоцены крипты">
+          <p>
+            Цена позиций «Крипта» с известным тикером (BTC, ETH, SOL, USDT…)
+            подставляется сама при открытии экрана «Инвестиции». Ручная цена
+            не стирается — она запасная.
+          </p>
+          <p>
+            Цены берёт сервис CoinGecko. Наружу уходят только названия монет
+            (bitcoin, ethereum…) — без имени, сумм и количества.
+          </p>
+        </Info>
+      </>
+    ),
+    hint: 'цены с CoinGecko вместо ручных',
   },
 ];
 

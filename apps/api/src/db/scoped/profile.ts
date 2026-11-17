@@ -30,7 +30,7 @@ export function profileRepo({ db, userId, en }: Ctx) {
     async upsertProfile(
       p: Omit<
         ProfileRow,
-        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'reminders_digest' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency' | 'reminder_hour' | 'cushion_minor' | 'invest_targets'
+        'user_id' | 'reminders_weekly' | 'reminders_payments' | 'reminders_digest' | 'vision_enabled' | 'fx_alerts_enabled' | 'expense_currency' | 'reminder_hour' | 'cushion_minor' | 'invest_targets' | 'auto_prices_enabled'
       > & {
         reminders_weekly?: number;
         reminders_payments?: number;
@@ -86,6 +86,7 @@ export function profileRepo({ db, userId, en }: Ctx) {
       bonus_dca_share?: number;
       /** JSON целей распределения портфеля (enc1:); null — сбросить. */
       invest_targets?: string | null;
+      auto_prices_enabled?: number;
     }) {
       const sets: string[] = ["updated_at = datetime('now')"];
       const binds: (number | string | null)[] = [];
@@ -107,6 +108,7 @@ export function profileRepo({ db, userId, en }: Ctx) {
         'bonus_prepay_share',
         'bonus_dca_share',
         'invest_targets',
+        'auto_prices_enabled',
       ] as const;
       for (const f of FIELDS) {
         if (patch[f] !== undefined) {

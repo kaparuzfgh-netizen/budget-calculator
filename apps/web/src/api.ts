@@ -161,6 +161,10 @@ export interface Profile {
   reminder_hour?: number | null;
   fx_alerts_enabled?: number;
   vision_enabled?: number;
+  /** Автоцены крипты (CoinGecko, opt-in); 0/1. */
+  auto_prices_enabled?: number;
+  /** На сервере настроен ключ CoinGecko; false — тумблер неактивен. */
+  auto_prices_available?: boolean;
   /** Подушка безопасности в living_currency (миграция 0019); null — не задана. */
   cushion_minor?: number | null;
   /** Каскад бонуса: доля дельты дохода → досрочка (0..1); 0/0 — выкл. */
@@ -309,7 +313,17 @@ export interface HoldingItem {
   avg_price: string | null;
   price: string | null;
   price_on: string | null;
+  /** Действующая цена устарела (авто >24ч; ручная >30 дней). */
   price_stale: boolean;
+  /** Откуда действующая цена. price/price_on — всегда ручные (для формы). */
+  price_source: 'auto' | 'manual';
+  effective_price: string | null;
+  effective_price_on: string | null;
+  /** ISO-время авто-котировки; null у ручной. */
+  effective_price_at: string | null;
+  auto_price: boolean;
+  auto_supported: boolean;
+  auto_note: 'no_quote' | 'ccy_unsupported' | null;
   amount_minor: number | null;
   rate: number | null;
   opened_on: string | null;
@@ -333,6 +347,14 @@ export interface HoldingsList {
   allocation: {
     current: Partial<Record<HoldingKind, number>>;
     targets: Partial<Record<HoldingKind, number>> | null;
+  };
+  auto: {
+    enabled: boolean;
+    available: boolean;
+    as_of: string | null;
+    stale: boolean;
+    attribution: { text: string; url: string };
+    supported_tickers: string[];
   };
   disclaimer: string;
 }

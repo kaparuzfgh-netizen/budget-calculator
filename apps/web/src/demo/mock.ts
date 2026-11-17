@@ -168,6 +168,8 @@ export const PROFILE: Profile = {
   reminders_digest: 1,
   fx_alerts_enabled: 1,
   vision_enabled: 0,
+  auto_prices_enabled: 0,
+  auto_prices_available: false,
   cushion_minor: 18000000,
 };
 

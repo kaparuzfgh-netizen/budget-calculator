@@ -7,6 +7,7 @@ import type { Hono, Next } from 'hono';
 import type { Env } from '../env';
 import type { ScopedRepo, UserRow } from '../db/repo';
 import type { FxProvider } from '../fx/provider';
+import type { PriceProvider } from '../prices/provider';
 import { convert, round2, toMinor } from '../domain/money';
 import { isValidTimezone, monthInTz, todayInTz } from '../bot/parse';
 import { baselineIncome } from '../services/baseline';
@@ -50,6 +51,8 @@ const profilePatchSchema = z.object({
   reminders_digest: z.boolean().optional(),
   fx_alerts_enabled: z.boolean().optional(),
   vision_enabled: z.boolean().optional(),
+  /** Автоцены крипты (CoinGecko, opt-in): наружу уходят только id монет. */
+  auto_prices_enabled: z.boolean().optional(),
   /** Свой час начала окна напоминаний 0–23; null — легаси (платежи 10:00, итог вс 20:00). */
   reminder_hour: z.number().int().min(0).max(23).nullable().optional(),
   /** «Подушка безопасности» в валюте бюджета (major); 0 — сброс. */
@@ -65,6 +68,7 @@ export function registerTmaProfile(
   app: Hono<{ Bindings: Env; Variables: { tmaUser: UserRow } }>,
   tmaAuth: (c: C, next: Next) => Promise<Response | void>,
   fx: FxProvider,
+  prices: (env: Env) => PriceProvider | null,
 ): void {
   // ── income ──
   app.get('/api/tma/income', tmaAuth, async (c) => {
@@ -178,6 +182,8 @@ export function registerTmaProfile(
       reminders_digest: p.reminders_digest,
       fx_alerts_enabled: p.fx_alerts_enabled,
       vision_enabled: p.vision_enabled,
+      auto_prices_enabled: p.auto_prices_enabled,
+      auto_prices_available: !!prices(c.env),
       cushion_minor: p.cushion_minor,
       bonus_prepay_share: p.bonus_prepay_share,
       bonus_dca_share: p.bonus_dca_share,
@@ -210,6 +216,7 @@ export function registerTmaProfile(
     if (b.reminders_digest !== undefined) patch.reminders_digest = b.reminders_digest ? 1 : 0;
     if (b.fx_alerts_enabled !== undefined) patch.fx_alerts_enabled = b.fx_alerts_enabled ? 1 : 0;
     if (b.vision_enabled !== undefined) patch.vision_enabled = b.vision_enabled ? 1 : 0;
+    if (b.auto_prices_enabled !== undefined) patch.auto_prices_enabled = b.auto_prices_enabled ? 1 : 0;
     if (b.cushion !== undefined) patch.cushion_minor = toMinor(b.cushion);
     if (b.bonus_prepay_share !== undefined) patch.bonus_prepay_share = b.bonus_prepay_share;
     if (b.bonus_dca_share !== undefined) patch.bonus_dca_share = b.bonus_dca_share;

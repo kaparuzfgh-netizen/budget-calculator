@@ -50,11 +50,25 @@ export interface HoldingForm {
   openedOn: string;
   maturesOn: string;
   note: string;
+  /** Обновлять цену автоматически (только крипта с тикером из списка). */
+  autoPrice: boolean;
 }
 export const emptyForm = (kind: HoldingKind = 'deposit'): HoldingForm => ({
   kind, name: '', ticker: '', currency: '', quantity: '', avgPrice: '', price: '', amount: '', rate: '',
-  openedOn: '', maturesOn: '', note: '',
+  openedOn: '', maturesOn: '', note: '', autoPrice: true,
 });
+
+/** Галочка автоцены видна: крипта и тикер из белого списка сервера. */
+export const autoSupported = (kind: HoldingKind, ticker: string, supported: readonly string[]): boolean =>
+  kind === 'crypto' && supported.includes(ticker.trim().toUpperCase());
+
+/** «ЧЧ:ММ» локального времени авто-котировки (ISO) или пусто. */
+export function fmtAutoTime(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 export function formError(f: HoldingForm): string | null {
   if (!f.name.trim()) return 'Введите название';
@@ -100,6 +114,7 @@ export function buildBody(
     body.quantity = normDec(f.quantity);
     body.avg_price = f.avgPrice.trim() ? normDec(f.avgPrice) : null;
     if (!o || normDec(o.price) !== normDec(f.price)) body.price = normDec(f.price);
+    if (f.kind === 'crypto') body.auto_price = f.autoPrice;
   } else {
     body.amount = parseAmount(f.amount);
   }

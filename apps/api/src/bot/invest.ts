@@ -10,6 +10,7 @@ import type { TelegramClient } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
 import { HOLDING_KINDS } from '../domain/portfolio';
 import { INVEST_DISCLAIMER, KIND_LABEL, portfolioView, type PortfolioView } from '../services/portfolio';
+import type { PriceSource } from '../prices/service';
 import { fmtMoney } from './format';
 import { withNav } from './nav/nav';
 
@@ -35,6 +36,14 @@ export function renderInvest(v: PortfolioView): string {
     if (v.total.missing_rates.length)
       lines.push(`⚠️ Нет курса для ${escapeHtml(v.total.missing_rates.join(', '))} — эти позиции не в итоге.`);
     if (v.total.fx_stale) lines.push('<i>Курсы устарели — провайдер недоступен.</i>');
+    const autoN = v.items.filter((i) => i.price_source === 'auto').length;
+    if (autoN) {
+      const at = v.auto.as_of ? new Date(v.auto.as_of).toISOString().slice(11, 16) : '';
+      lines.push(
+        `Автоцены крипты: ${autoN} поз.${at ? ` · ${at} UTC` : ''}${v.auto.stale ? ' (устарели — провайдер недоступен)' : ''}`,
+      );
+      lines.push(`<a href="${v.auto.attribution.url}">${v.auto.attribution.text}</a>`);
+    }
     lines.push('<i>Позиции правятся в приложении.</i>');
   }
   lines.push(`<i>${INVEST_DISCLAIMER}</i>`);
@@ -47,13 +56,14 @@ export async function runInvest(
   repo: ScopedRepo,
   fx: { get(ccys: string[]): Promise<FxResult> },
   today: string,
+  prices?: PriceSource | null,
 ): Promise<void> {
   const p = await repo.getProfile();
   if (!p?.onboarded_at) {
     await tg.sendMessage(chatId, 'Сначала настройка — /start');
     return;
   }
-  const v = await portfolioView(repo, p, (c) => fx.get(c), today);
+  const v = await portfolioView(repo, p, (c) => fx.get(c), today, prices);
   const markup = withNav('INVEST');
   await tg.sendMessage(chatId, renderInvest(v), markup ? { replyMarkup: markup } : {});
 }

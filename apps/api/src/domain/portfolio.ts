@@ -139,3 +139,63 @@ export function parseTargets(json: string | null | undefined): Partial<Record<Ho
     return null;
   }
 }
+
+// ── Автоцены (T3b) ──
+
+/** Автоцена моложе этого (часы) побеждает ручную. */
+export const AUTO_FRESH_HOURS = 24;
+/** Котировка старше (дни) не используется совсем. */
+export const QUOTE_MAX_AGE_DAYS = 7;
+
+export interface AutoQuote {
+  /** Каноническая десятичная строка. */
+  price: string;
+  /** ISO-время котировки у провайдера. */
+  asOf: string;
+}
+
+export interface EffectivePrice {
+  price: string | null;
+  /** 'YYYY-MM-DD' — дата цены (авто: дата котировки). */
+  on: string | null;
+  source: 'auto' | 'manual';
+  /** Авто: котировке больше суток; ручная: старше PRICE_STALE_DAYS. */
+  stale: boolean;
+  /** ISO-время авто-котировки (null у ручной). */
+  at: string | null;
+}
+
+/**
+ * Действующая цена позиции: свежая автоцена (≤24ч) побеждает ручную; автоцена
+ * 1–7 дней — только если новее ручной; иначе ручная. Ручную цену не меняет.
+ * `enabled` — флаг профиля; `today`/`nowIso` — параметрами (без I/O).
+ */
+export function effectivePrice(
+  h: Pick<HoldingLike, 'kind' | 'price' | 'price_on'> & { auto_price?: number },
+  quote: AutoQuote | null,
+  today: string,
+  nowIso: string,
+  enabled = true,
+): EffectivePrice {
+  const manual: EffectivePrice = {
+    price: h.price,
+    on: h.price_on,
+    source: 'manual',
+    stale: priceStale(h, today),
+    at: null,
+  };
+  if (!enabled || h.auto_price === 0 || h.kind !== 'crypto' || !quote) return manual;
+  const ageMs = Date.parse(nowIso) - Date.parse(quote.asOf);
+  if (!Number.isFinite(ageMs) || ageMs > QUOTE_MAX_AGE_DAYS * 86_400_000) return manual;
+  const auto: EffectivePrice = {
+    price: quote.price,
+    on: quote.asOf.slice(0, 10),
+    source: 'auto',
+    stale: ageMs > AUTO_FRESH_HOURS * 3_600_000,
+    at: quote.asOf,
+  };
+  if (ageMs <= AUTO_FRESH_HOURS * 3_600_000) return auto;
+  // 1–7 дней: берём более свежую из двух (ручная новее или равна → ручная)
+  if (h.price && h.price_on && h.price_on >= auto.on!) return manual;
+  return auto;
+}

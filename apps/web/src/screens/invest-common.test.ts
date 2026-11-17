@@ -61,3 +61,23 @@ describe('invest-common', () => {
     expect('error' in targetsFrom({ deposit: '50.5', crypto: '49.5' })).toBe(true);
   });
 });
+
+describe('автоцены (T3b)', () => {
+  it('галочка автоцены: только крипта с тикером из списка сервера', async () => {
+    const { autoSupported } = await import('./invest-common');
+    const list = ['BTC', 'ETH'];
+    expect(autoSupported('crypto', 'btc', list)).toBe(true);
+    expect(autoSupported('crypto', 'ZZZ', list)).toBe(false);
+    expect(autoSupported('stock', 'BTC', list)).toBe(false);
+    expect(autoSupported('crypto', '', list)).toBe(false);
+  });
+
+  it('auto_price уходит только у крипты; цена строкой, как раньше', () => {
+    const c = { ...crypto, autoPrice: false };
+    expect(buildBody(c, { clientId: 'c' }).auto_price).toBe(false);
+    expect(buildBody({ ...c, autoPrice: true }, { clientId: 'c' }).auto_price).toBe(true);
+    const stock = { ...emptyForm('stock'), name: 'S', currency: 'usd', quantity: '1', price: '2' };
+    expect('auto_price' in buildBody(stock, { clientId: 'c' })).toBe(false);
+    expect(typeof buildBody(c, { clientId: 'c' }).price).toBe('string');
+  });
+});
