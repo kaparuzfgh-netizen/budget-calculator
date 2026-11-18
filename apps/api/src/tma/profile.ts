@@ -7,7 +7,7 @@ import type { Hono, Next } from 'hono';
 import type { Env } from '../env';
 import type { ScopedRepo, UserRow } from '../db/repo';
 import type { FxProvider } from '../fx/provider';
-import type { PriceProvider } from '../prices/provider';
+import type { PriceProviders } from '../prices/providers';
 import { convert, round2, toMinor } from '../domain/money';
 import { isValidTimezone, monthInTz, todayInTz } from '../bot/parse';
 import { baselineIncome } from '../services/baseline';
@@ -68,7 +68,7 @@ export function registerTmaProfile(
   app: Hono<{ Bindings: Env; Variables: { tmaUser: UserRow } }>,
   tmaAuth: (c: C, next: Next) => Promise<Response | void>,
   fx: FxProvider,
-  prices: (env: Env) => PriceProvider | null,
+  prices: (env: Env) => PriceProviders,
 ): void {
   // ── income ──
   app.get('/api/tma/income', tmaAuth, async (c) => {
@@ -183,7 +183,9 @@ export function registerTmaProfile(
       fx_alerts_enabled: p.fx_alerts_enabled,
       vision_enabled: p.vision_enabled,
       auto_prices_enabled: p.auto_prices_enabled,
-      auto_prices_available: !!prices(c.env),
+      // T3c: биржа работает без ключа — переключатель доступен всегда; по источникам — auto_sources
+      auto_prices_available: true,
+      auto_sources: { coingecko: !!prices(c.env).coingecko, moex: !!prices(c.env).moex },
       cushion_minor: p.cushion_minor,
       bonus_prepay_share: p.bonus_prepay_share,
       bonus_dca_share: p.bonus_dca_share,

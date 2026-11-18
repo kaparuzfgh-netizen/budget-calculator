@@ -35,11 +35,15 @@ function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
   const qty = !!h.quantity;
   const badge =
     h.price_source === 'auto'
-      ? `авто · ${fmtAutoTime(h.effective_price_at)}`
+      ? `${h.price_provider === 'moex' ? 'биржа' : 'авто'} · ${fmtAutoTime(h.effective_price_at)}${h.price_note === 'with_aci' ? ' · с НКД' : ''}`
       : h.valued_at_cost
         ? 'по цене покупки'
         : h.auto_note === 'ccy_unsupported'
           ? `нет автоцены в ${h.currency} · вручную`
+          : h.auto_note === 'ccy_mismatch'
+            ? 'валюта позиции не совпадает с биржевой — автоцены нет'
+            : h.auto_note === 'not_found'
+              ? 'биржа цену не дала'
           : h.price_on && h.effective_price
             ? `вручную · ${fmtDay(h.price_on)}`
             : null;
@@ -240,15 +244,17 @@ export function InvestScreen({ api, nav, onFatal }: ScreenProps) {
       <Targets api={api} current={d.allocation.targets} onSaved={q.reload} />
 
       <p class={`${mutedCls} mt-6`}>
-        {d.disclaimer} {d.auto.enabled && d.auto.available ? 'Цены крипты — автоматические, остальное вручную.' : 'Цены вводятся вручную.'}
+        {d.disclaimer} {d.auto.enabled && d.auto.available ? 'Цены крипты, акций и облигаций — автоматические, остальное вручную.' : 'Цены вводятся вручную.'}
       </p>
-      {d.auto.enabled && d.auto.available && d.items.some((h) => h.price_source === 'auto') && (
-        <p class={`${mutedCls} mt-2`}>
-          <a href={d.auto.attribution.url} target="_blank" rel="noopener noreferrer" class="text-sky-400 underline">
-            {d.auto.attribution.text}
-          </a>
-        </p>
-      )}
+      {d.auto.enabled &&
+        d.auto.available &&
+        d.auto.attributions.map((a) => (
+          <p class={`${mutedCls} mt-2`}>
+            <a href={a.url} target="_blank" rel="noopener noreferrer" class="text-sky-400 underline">
+              {a.text}
+            </a>
+          </p>
+        ))}
     </>
   );
 }

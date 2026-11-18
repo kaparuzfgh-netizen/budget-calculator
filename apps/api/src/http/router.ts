@@ -6,7 +6,8 @@ import { accessRepo, scoped, type UserRow } from '../db/repo';
 import { configureDataKey, hasDataKey } from '../db/crypto';
 import { handleCallback, handleMessage } from '../services/access';
 import { createFrankfurter } from '../fx/frankfurter';
-import { createCoinGecko } from '../prices/coingecko';
+import { resolveProviders, type PriceProviders } from '../prices/providers';
+import type { MoexProvider } from '../prices/moex';
 import type { PriceProvider } from '../prices/provider';
 import { FxUnavailable } from '../fx/provider';
 import { getFxRates } from '../fx/service';
@@ -78,6 +79,8 @@ export interface RouterDeps {
   vision?: import('../services/vision').VisionProviders;
   /** Подмена провайдера цен в тестах (null — «ключа нет»). Иначе из env.COINGECKO_API_KEY. */
   prices?: PriceProvider | null;
+  /** Подмена провайдера MOEX в тестах (null — выключен). Иначе из env.MOEX_PRICES === 'on'. */
+  moex?: MoexProvider | null;
 }
 
 interface TmaVariables {
@@ -202,8 +205,7 @@ export function createRouter(deps: RouterDeps = {}) {
   // REST API Mini App — паритет бота (веха E) + кредиты/займы (H3).
   const fxProvider = deps.fx ?? createFrankfurter();
   /** Провайдер автоцен: deps (тесты) или секрет COINGECKO_API_KEY; нет ключа → null (ноль запросов). */
-  const pricesFor = (env: Env): PriceProvider | null =>
-    deps.prices !== undefined ? deps.prices : env.COINGECKO_API_KEY ? createCoinGecko(env.COINGECKO_API_KEY) : null;
+  const pricesFor = (env: Env): PriceProviders => resolveProviders(env, deps);
   registerTmaApi(app, tmaAuth, fxProvider);
   registerTmaExpenses(app, tmaAuth);
   registerTmaProfile(app, tmaAuth, fxProvider, pricesFor);

@@ -1,0 +1,21 @@
+{
+"securities": {
+	"columns": ["SECID", "BOARDID", "SHORTNAME", "CURRENCYID", "PREVPRICE", "PREVDATE"], 
+	"data": [
+		["GAZP", "SMAL", "ГАЗПРОМ ао", "SUR", 118.17, "2026-11-17"],
+		["GAZP", "SPEQ", "ГАЗПРОМ ао", "SUR", 92.45, "2026-11-17"],
+		["SBER", "SPEQ", "Сбербанк", "SUR", 275.25, "2026-11-17"],
+		["GAZP", "TQBR", "ГАЗПРОМ ао", "SUR", 118.19, "2026-11-17"],
+		["SBER", "TQBR", "Сбербанк", "SUR", 298.56, "2026-11-17"]
+	]
+},
+"marketdata": {
+	"columns": ["SECID", "BOARDID", "LAST", "LCURRENTPRICE", "MARKETPRICE", "SYSTIME", "UPDATETIME"], 
+	"data": [
+		["GAZP", "SMAL", 117.19, null, 116.69, "2026-11-18 12:20:05", "12:05:04"],
+		["GAZP", "SPEQ", null, null, 116.69, "2026-11-18 08:45:33", "08:30:31"],
+		["SBER", "SPEQ", null, null, 296.87, "2026-11-18 08:45:33", "08:30:31"],
+		["GAZP", "TQBR", 116.83, 117.01, 116.69, "2026-11-18 12:20:14", "12:05:13"],
+		["SBER", "TQBR", 298.24, 298.35, 296.87, "2026-11-18 12:20:13", "12:05:13"]
+	]
+}}

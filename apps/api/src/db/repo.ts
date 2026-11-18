@@ -77,6 +77,15 @@ export function priceRepo(db: Env['DB']) {
         .all<PriceQuoteRow>();
       return r.results;
     },
+    /** По id бумаг в любой валюте (провайдеры с родной валютой котировки, MOEX). */
+    async getByIds(source: string, ids: string[]): Promise<PriceQuoteRow[]> {
+      if (!ids.length) return [];
+      const r = await db
+        .prepare(`SELECT * FROM price_quotes WHERE source = ? AND asset_id IN (${Array(ids.length).fill('?').join(',')})`)
+        .bind(source, ...ids)
+        .all<PriceQuoteRow>();
+      return r.results;
+    },
     /** Идемпотентная запись пачкой (db.batch + ON CONFLICT). */
     async upsertMany(rows: PriceQuoteRow[]): Promise<void> {
       if (!rows.length) return;

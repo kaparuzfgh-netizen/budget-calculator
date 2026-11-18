@@ -174,11 +174,25 @@ export const AUTO_FRESH_HOURS = 24;
 /** Котировка старше (дни) не используется совсем. */
 export const QUOTE_MAX_AGE_DAYS = 7;
 
+/** Политика свежести автоцены источника: «свежая» (бьёт ручную) и «предельная» (дальше не берём). */
+export interface PricePolicy {
+  freshHours: number;
+  maxAgeDays: number;
+}
+export const CRYPTO_POLICY: PricePolicy = { freshHours: AUTO_FRESH_HOURS, maxAgeDays: QUOTE_MAX_AGE_DAYS };
+/** Биржа: выходные + праздники (96 ч), запасной кэш — новогодние каникулы (14 дней). */
+export const MOEX_POLICY: PricePolicy = { freshHours: 96, maxAgeDays: 14 };
+
+/** Виды позиций, у которых бывает автоцена (применимость источника решает priceRefFor). */
+export const AUTO_KINDS: readonly HoldingKind[] = ['crypto', 'stock', 'bond'];
+
 export interface AutoQuote {
   /** Каноническая десятичная строка. */
   price: string;
   /** ISO-время котировки у провайдера. */
   asOf: string;
+  /** Валюта котировки (у «родных» провайдеров — MOEX; у CoinGecko совпадает с запрошенной). */
+  vs?: string;
 }
 
 export interface EffectivePrice {
@@ -203,6 +217,7 @@ export function effectivePrice(
   today: string,
   nowIso: string,
   enabled = true,
+  policy: PricePolicy = CRYPTO_POLICY,
 ): EffectivePrice {
   const manual: EffectivePrice = {
     price: h.price,
@@ -211,18 +226,18 @@ export function effectivePrice(
     stale: priceStale(h, today),
     at: null,
   };
-  if (!enabled || h.auto_price === 0 || h.kind !== 'crypto' || !quote) return manual;
+  if (!enabled || h.auto_price === 0 || !AUTO_KINDS.includes(h.kind) || !quote) return manual;
   const ageMs = Date.parse(nowIso) - Date.parse(quote.asOf);
-  if (!Number.isFinite(ageMs) || ageMs > QUOTE_MAX_AGE_DAYS * 86_400_000) return manual;
+  if (!Number.isFinite(ageMs) || ageMs > policy.maxAgeDays * 86_400_000) return manual;
   const auto: EffectivePrice = {
     price: quote.price,
     on: quote.asOf.slice(0, 10),
     source: 'auto',
-    stale: ageMs > AUTO_FRESH_HOURS * 3_600_000,
+    stale: ageMs > policy.freshHours * 3_600_000,
     at: quote.asOf,
   };
-  if (ageMs <= AUTO_FRESH_HOURS * 3_600_000) return auto;
-  // 1–7 дней: берём более свежую из двух (ручная новее или равна → ручная)
+  if (ageMs <= policy.freshHours * 3_600_000) return auto;
+  // между «свежей» и предельной: берём более свежую из двух (ручная новее или равна → ручная)
   if (h.price && h.price_on && h.price_on >= auto.on!) return manual;
   return auto;
 }

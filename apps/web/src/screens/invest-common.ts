@@ -57,9 +57,12 @@ export const emptyForm = (kind: HoldingKind = 'deposit'): HoldingForm => ({
   openedOn: '', maturesOn: '', note: '',
 });
 
-/** У позиции есть автоцена: крипта и тикер из белого списка сервера. */
+const SECID_RE = /^[A-Za-z0-9-]{1,12}$/;
+/** У позиции есть автоцена: крипта из белого списка сервера либо акция/облигация с кодом Мосбиржи. */
 export const autoSupported = (kind: HoldingKind, ticker: string, supported: readonly string[]): boolean =>
-  kind === 'crypto' && supported.includes(ticker.trim().toUpperCase());
+  kind === 'crypto'
+    ? supported.includes(ticker.trim().toUpperCase())
+    : (kind === 'stock' || kind === 'bond') && SECID_RE.test(ticker.trim());
 
 /** Поле «Цена сейчас» нужно, только если автоцены у позиции нет. */
 export const needsPrice = (f: Pick<HoldingForm, 'kind' | 'ticker'>, supported: readonly string[]): boolean =>

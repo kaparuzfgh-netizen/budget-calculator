@@ -10,7 +10,7 @@ import type { TelegramClient } from '../telegram/client';
 import { escapeHtml } from '../telegram/client';
 import { HOLDING_KINDS } from '../domain/portfolio';
 import { INVEST_DISCLAIMER, KIND_LABEL, portfolioView, type PortfolioView } from '../services/portfolio';
-import type { PriceSource } from '../prices/service';
+import type { PriceSources } from '../prices/service';
 import { fmtMoney } from './format';
 import { withNav } from './nav/nav';
 
@@ -36,14 +36,19 @@ export function renderInvest(v: PortfolioView): string {
     if (v.total.missing_rates.length)
       lines.push(`⚠️ Нет курса для ${escapeHtml(v.total.missing_rates.join(', '))} — эти позиции не в итоге.`);
     if (v.total.fx_stale) lines.push('<i>Курсы устарели — провайдер недоступен.</i>');
-    const autoN = v.items.filter((i) => i.price_source === 'auto').length;
-    if (autoN) {
-      const at = v.auto.as_of ? new Date(v.auto.as_of).toISOString().slice(11, 16) : '';
-      lines.push(
-        `Автоцены крипты: ${autoN} поз.${at ? ` · ${at} UTC` : ''}${v.auto.stale ? ' (устарели — провайдер недоступен)' : ''}`,
-      );
-      lines.push(`<a href="${v.auto.attribution.url}">${v.auto.attribution.text}</a>`);
+    const cryptoN = v.items.filter((i) => i.price_provider === 'coingecko').length;
+    const moexN = v.items.filter((i) => i.price_provider === 'moex').length;
+    const at = v.auto.as_of ? new Date(v.auto.as_of).toISOString().slice(11, 16) : '';
+    const staleNote = v.auto.stale ? ' (устарели — провайдер недоступен)' : '';
+    if (cryptoN) lines.push(`Автоцены крипты: ${cryptoN} поз.${at ? ` · ${at} UTC` : ''}${staleNote}`);
+    if (moexN) {
+      const aci = v.items.some((i) => i.price_note === 'with_aci') ? ' (облигации — с НКД)' : '';
+      lines.push(`Автоцены биржи: ${moexN} поз.${aci}${cryptoN ? '' : staleNote}`);
     }
+    if (cryptoN || moexN)
+      for (const a of v.auto.attributions) lines.push(`<a href="${a.url}">${escapeHtml(a.text)}</a>`);
+    const mismatch = v.items.filter((i) => i.auto_note === 'ccy_mismatch').length;
+    if (mismatch) lines.push(`⚠️ Валюта позиции не совпадает с валютой бумаги на бирже: ${mismatch} поз. — автоцены нет.`);
     const atCost = v.items.filter((i) => i.valued_at_cost).length;
     if (atCost) lines.push(`Без цены (оценены по сумме покупки): ${atCost} поз.`);
     lines.push('<i>Позиции правятся в приложении.</i>');
@@ -58,7 +63,7 @@ export async function runInvest(
   repo: ScopedRepo,
   fx: { get(ccys: string[]): Promise<FxResult> },
   today: string,
-  prices?: PriceSource | null,
+  prices?: Partial<PriceSources> | null,
 ): Promise<void> {
   const p = await repo.getProfile();
   if (!p?.onboarded_at) {

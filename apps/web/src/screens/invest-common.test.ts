@@ -63,12 +63,13 @@ describe('invest-common', () => {
 });
 
 describe('автоцены (T3b)', () => {
-  it('галочка автоцены: только крипта с тикером из списка сервера', async () => {
+  it('автоцена: крипта из списка сервера или бумага с кодом биржи', async () => {
     const { autoSupported } = await import('./invest-common');
     const list = ['BTC', 'ETH'];
     expect(autoSupported('crypto', 'btc', list)).toBe(true);
     expect(autoSupported('crypto', 'ZZZ', list)).toBe(false);
-    expect(autoSupported('stock', 'BTC', list)).toBe(false);
+    expect(autoSupported('stock', 'BTC', list)).toBe(true); // T3c: акция с кодом — источник биржа
+    expect(autoSupported('deposit', 'BTC', list)).toBe(false);
     expect(autoSupported('crypto', '', list)).toBe(false);
   });
 
@@ -89,5 +90,25 @@ describe('автоцены (T3b)', () => {
     expect(buildBody({ ...zzz, price: '2' }, { clientId: 'c', supported: list }).price).toBe('2');
     expect(formError({ ...emptyForm('stock'), name: 'S', currency: 'usd', quantity: '1', invested: '5' }, list)).toMatch(/Цена сейчас/);
     expect(formError({ ...btc, invested: '' }, list)).toMatch(/Потрачено/);
+  });
+});
+
+describe('T3c: акции и облигации Мосбиржи', () => {
+  const stock = { ...emptyForm('stock'), name: 'Сбер', currency: 'rub', quantity: '10', invested: '2900', ticker: 'sber' };
+  it('тикер акции/облигации → цена не нужна, в тело не уходит', () => {
+    expect(needsPrice(stock, [])).toBe(false);
+    expect(formError(stock, [])).toBeNull();
+    const b = buildBody(stock, { clientId: 'c', supported: [] });
+    expect('price' in b).toBe(false);
+    expect(b.ticker).toBe('SBER');
+    expect(needsPrice({ ...stock, kind: 'bond', ticker: 'SU26238RMFS4' }, [])).toBe(false);
+  });
+  it('без тикера или с точкой — цена обязательна', () => {
+    expect(needsPrice({ ...stock, ticker: '' }, [])).toBe(true);
+    expect(formError({ ...stock, ticker: '' }, [])).toMatch(/Цена сейчас/);
+    expect(needsPrice({ ...stock, ticker: 'RU.X' }, [])).toBe(true);
+  });
+  it('крипта не зависит от бирожевого правила', () => {
+    expect(needsPrice({ ...emptyForm('crypto'), ticker: 'SBER' }, ['BTC'])).toBe(true);
   });
 });

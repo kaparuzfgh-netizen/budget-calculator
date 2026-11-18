@@ -28,7 +28,7 @@ const responseSchema = z.record(z.string(), z.record(z.string(), z.number()));
 export function createCoinGecko(apiKey: string, fetchImpl: typeof fetch = fetch): PriceProvider {
   return {
     source: 'coingecko',
-    async latest(ids, vs) {
+    async latest(ids, vs = []) {
       const idList = [...new Set(ids)].filter((i) => ID_RE.test(i));
       const vsList = [...new Set(vs.map((v) => v.toLowerCase()))].filter((v) => VS_RE.test(v));
       if (!idList.length || !vsList.length) return { quotes: [] };

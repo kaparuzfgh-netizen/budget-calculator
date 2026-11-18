@@ -1,0 +1,8 @@
+{
+"securities": {
+	"columns": ["secid", "isin", "shortname", "name", "primary_boardid", "group"], 
+	"data": [
+		["SBER", "RU0009029540", "Сбербанк", "Сбербанк России ПАО ао", "TQBR", "stock_shares"],
+		["SBERP", "RU0009029557", "Сбербанк-п", "Сбербанк России ПАО ап", "TQBR", "stock_shares"]
+	]
+}}

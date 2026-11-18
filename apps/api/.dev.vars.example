@@ -26,3 +26,8 @@ DATA_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
 # Автоцены крипты (T3b): Demo-ключ CoinGecko (coingecko.com → Developer Dashboard).
 # Без ключа внешних запросов нет — цены остаются ручными. В проде: wrangler secret put COINGECKO_API_KEY
 COINGECKO_API_KEY=
+
+# Автоцены акций и облигаций Мосбиржи (T3c): ключа нет, секрет не нужен.
+# Включено переменной [vars] MOEX_PRICES="on" в wrangler.toml. Здесь можно переопределить локально:
+# любое значение, кроме "on", — выключено (ноль запросов к бирже).
+# MOEX_PRICES=on

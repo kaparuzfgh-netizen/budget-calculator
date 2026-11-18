@@ -19,7 +19,7 @@ import { PriceUnavailable, type PriceProvider, type ProviderQuote } from '../src
 import { getQuotes } from '../src/prices/service';
 import { renderInvest } from '../src/bot/invest';
 import { portfolioView } from '../src/services/portfolio';
-import { makePriceSource } from '../src/prices/service';
+import { makePriceSources } from '../src/prices/service';
 
 // ── домен ──
 describe('coins / decFromProviderNumber', () => {
@@ -62,10 +62,10 @@ describe('effectivePrice', () => {
   it('авто 8 дней → ручная', () => {
     expect(effectivePrice({ ...h, price_on: '2026-10-01' }, q(8 * 24), today, now).source).toBe('manual');
   });
-  it('auto_price=0, профиль выкл, не crypto, нет котировки → ручная', () => {
+  it('auto_price=0, профиль выкл, вклад (не авто-вид), нет котировки → ручная', () => {
     expect(effectivePrice({ ...h, auto_price: 0 }, q(1), today, now).source).toBe('manual');
     expect(effectivePrice(h, q(1), today, now, false).source).toBe('manual');
-    expect(effectivePrice({ ...h, kind: 'stock' as never }, q(1), today, now).source).toBe('manual');
+    expect(effectivePrice({ ...h, kind: 'deposit' as never }, q(1), today, now).source).toBe('manual');
     expect(effectivePrice(h, null, today, now).source).toBe('manual');
   });
 });
@@ -132,7 +132,7 @@ function fakeProvider(prices: Record<string, number> = { bitcoin: 60000, solana:
   const state = { calls: [] as { ids: string[]; vs: string[] }[], fail: null as number | null, asOf: new Date().toISOString() };
   const p: PriceProvider = {
     source: 'coingecko',
-    async latest(ids, vs) {
+    async latest(ids, vs = []) {
       state.calls.push({ ids: [...ids], vs: [...vs] });
       if (state.fail !== null) throw new PriceUnavailable(state.fail || undefined);
       const quotes: ProviderQuote[] = [];
@@ -193,7 +193,7 @@ interface Item {
 interface List {
   items: Item[];
   total: { minor: number | null };
-  auto: { enabled: boolean; available: boolean; as_of: string | null; stale: boolean; attribution: { text: string; url: string }; supported_tickers: string[] };
+  auto: { enabled: boolean; available: boolean; as_of: string | null; stale: boolean; attributions: { text: string; url: string }[]; supported_tickers: string[] };
 }
 const listOf = async (api: ReturnType<typeof apiFor>, token: string) => (await (await api('/api/tma/holdings', { token })).json()) as List;
 const postH = (api: ReturnType<typeof apiFor>, token: string, body: unknown) => api('/api/tma/holdings', { method: 'POST', token, body });
@@ -277,7 +277,7 @@ describe('/api/tma/holdings с автоценами', () => {
     expect(it0.price).toBe('100'); // ручная цена цела
     expect(it0.price_on).toBe('2026-01-01');
     expect(l.auto).toMatchObject({ enabled: true, available: true });
-    expect(l.auto.attribution).toEqual({ text: 'Data provided by CoinGecko', url: 'https://www.coingecko.com/en/api' });
+    expect(l.auto.attributions).toEqual([{ text: 'Data provided by CoinGecko', url: 'https://www.coingecko.com/en/api' }]);
     expect(l.auto.supported_tickers).toContain('BTC');
     expect(state.calls).toHaveLength(1);
     const raw = await env.DB.prepare('SELECT price, price_on FROM holdings').first<{ price: string; price_on: string }>();
@@ -375,8 +375,9 @@ describe('/api/tma/holdings с автоценами', () => {
     expect((await on('/api/tma/profile', { method: 'PATCH', token, body: { auto_prices_enabled: true } })).status).toBe(200);
     const g1 = (await (await on('/api/tma/profile', { token })).json()) as { auto_prices_enabled: number };
     expect(g1.auto_prices_enabled).toBe(1);
-    const g2 = (await (await apiFor(null)('/api/tma/profile', { token })).json()) as { auto_prices_available: boolean };
-    expect(g2.auto_prices_available).toBe(false);
+    const g2 = (await (await apiFor(null)('/api/tma/profile', { token })).json()) as { auto_prices_available: boolean; auto_sources: { coingecko: boolean; moex: boolean } };
+    expect(g2.auto_prices_available).toBe(true); // биржа без ключа (T3c)
+    expect(g2.auto_sources).toEqual({ coingecko: false, moex: false });
     expect((await on('/api/tma/profile', { method: 'PATCH', token, body: { auto_prices_enabled: 1 } })).status).toBe(400);
   });
 
@@ -403,7 +404,7 @@ describe('бот: /invest с автоценами', () => {
     const r = scoped(env.DB, uid);
     const prof = (await r.getProfile())!;
     const get = async () => ({ perUsd: { USD: 1 }, asOf: '', stale: false });
-    const v = await portfolioView(r, prof, get, '2026-11-10', makePriceSource(env.DB, p, new Date()));
+    const v = await portfolioView(r, prof, get, '2026-11-10', makePriceSources(env.DB, { coingecko: p, moex: null }, new Date()));
     const html = renderInvest(v);
     expect(html).toContain('Автоцены крипты');
     expect(html).toContain('Data provided by CoinGecko');

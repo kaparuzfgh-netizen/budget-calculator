@@ -31,6 +31,8 @@ export default defineConfig(async () => ({
           TEST_MIGRATIONS: await readD1Migrations(migrationsDir),
           // Тестовый мастер-ключ шифрования (32 нулевых байта base64).
           DATA_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+          // Тесты не ходят в сеть: биржа выключена (в тестах MOEX подставляется фейком через deps.moex).
+          MOEX_PRICES: 'off',
         },
       },
     }),

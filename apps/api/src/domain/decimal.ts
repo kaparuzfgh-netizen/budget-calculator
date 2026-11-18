@@ -87,3 +87,51 @@ export function decFromProviderNumber(n: unknown): string | null {
   const out = f ? `${int}.${f}` : int;
   return isCanonicalDec(out) ? out : null;
 }
+
+// ── Арифметика цен (T3c): строка × строка без float ──
+
+/** Разбор неотрицательной десятичной строки (допускает 0, в отличие от parseDec). */
+function parseNonNeg(s: string): Dec | null {
+  const m = /^(\d{1,12})(?:\.(\d{1,12}))?$/.exec(s.trim());
+  if (!m) return null;
+  const frac = m[2] ?? '';
+  return { units: BigInt(m[1]! + frac), scale: frac.length };
+}
+
+/** units×10^-scale → каноническая строка (half-up до 8 знаков); null — ≤0 или не влезло в 12 цифр. */
+function canonFromUnits(units: bigint, scale: number): string | null {
+  let u = units;
+  let sc = scale;
+  if (sc > MAX_FRAC_DIGITS) {
+    const den = 10n ** BigInt(sc - MAX_FRAC_DIGITS);
+    u = (u + den / 2n) / den;
+    sc = MAX_FRAC_DIGITS;
+  }
+  if (u <= 0n) return null;
+  const out = formatDec({ units: u, scale: sc });
+  return isCanonicalDec(out) ? out : null;
+}
+
+/** a × b (канонические/неотрицательные строки), half-up до 8 знаков; null — результат ≤0 или переполнение. */
+export function mulDec(a: string, b: string): string | null {
+  const x = parseNonNeg(a);
+  const y = parseNonNeg(b);
+  if (!x || !y) return null;
+  return canonFromUnits(x.units * y.units, x.scale + y.scale);
+}
+
+/** a + b; null — переполнение/кривой ввод (сумма двух неотрицательных, хотя бы одно >0). */
+export function addDec(a: string, b: string): string | null {
+  const x = parseNonNeg(a);
+  const y = parseNonNeg(b);
+  if (!x || !y) return null;
+  const s = Math.max(x.scale, y.scale);
+  return canonFromUnits(x.units * 10n ** BigInt(s - x.scale) + y.units * 10n ** BigInt(s - y.scale), s);
+}
+
+/** a / 10^n (сдвиг масштаба), half-up до 8 знаков. */
+export function divDecPow10(a: string, n: number): string | null {
+  const x = parseNonNeg(a);
+  if (!x || !Number.isInteger(n) || n < 0) return null;
+  return canonFromUnits(x.units, x.scale + n);
+}

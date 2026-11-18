@@ -1,24 +1,29 @@
 /**
- * Сервис цен (T3b): D1-кэш (общий, без user_id) поверх провайдера.
+ * Сервис цен (T3b/T3c): D1-кэш (общий, без user_id) поверх провайдера.
  * Один пакетный внешний запрос на вызов, только по ненайденным/просроченным
- * монетам; при сбое — пауза провайдера и запасной кэш ≤7 дней. Никогда не
- * бросает из-за провайдера: сбой → failed:true. Без провайдера (нет ключа) —
- * ни одного внешнего запроса. В логи — только HTTP-код и число id (правило 10).
+ * бумагам; при сбое — пауза провайдера и запасной кэш (по умолчанию ≤7 дней,
+ * у MOEX — 14). Провайдеры с «родной» валютой котировки (MOEX): кэш и карта — по id.
+ * Никогда не бросает из-за провайдера: сбой → failed:true. Без провайдера (нет
+ * ключа/выключатель) — ни одного внешнего запроса. В логи — только источник,
+ * HTTP-код и число id (правило 10).
  */
 import { priceRepo, type PriceQuoteRow } from '../db/repo';
 import { QUOTE_MAX_AGE_DAYS, type AutoQuote } from '../domain/portfolio';
 import { PriceUnavailable, type PriceProvider } from './provider';
 
 export const QUOTE_TTL_MS = 15 * 60 * 1000;
-const MAX_AGE_MS = QUOTE_MAX_AGE_DAYS * 86_400_000;
 
 export interface QuoteRef {
   id: string;
-  /** Валюта котировки, верхний регистр. */
+  /** Валюта котировки, верхний регистр (у native-провайдеров игнорируется). */
   vs: string;
+  /** Что передать провайдеру вместо id (MOEX: 'bond:SU26238RMFS4' — рынок). Ключ кэша — всегда id. */
+  hint?: string;
 }
 
 export const quoteKey = (id: string, vs: string) => `${id}|${vs.toUpperCase()}`;
+/** Ключ в карте результата: native-провайдер — по id, иначе по (id, валюте). */
+export const mapKey = (native: boolean, id: string, vs: string) => (native ? id : quoteKey(id, vs));
 
 export interface QuoteResult {
   map: Map<string, AutoQuote>;
@@ -30,9 +35,11 @@ export interface QuoteResult {
   failed: boolean;
 }
 
-/** Источник цен для portfolioView: available — настроен ли провайдер (ключ). */
+/** Источник цен для portfolioView: available — настроен ли провайдер (ключ/выключатель). */
 export interface PriceSource {
   available: boolean;
+  /** Котировка в родной валюте бумаги: карта — по id (mapKey(true, …)). */
+  native: boolean;
   get(refs: QuoteRef[]): Promise<QuoteResult>;
 }
 
@@ -54,29 +61,34 @@ export async function getQuotes(
 ): Promise<QuoteResult> {
   if (!provider || !refs.length) return empty();
   const repo = priceRepo(db);
-  const wantKeys = new Set(refs.map((r) => quoteKey(r.id, r.vs)));
+  const native = provider.quoteCurrency === 'native';
+  const ttlMs = provider.ttlMs ?? QUOTE_TTL_MS;
+  const maxAgeMs = (provider.fallbackMaxAgeDays ?? QUOTE_MAX_AGE_DAYS) * 86_400_000;
+  const keyOf = (id: string, vs: string) => mapKey(native, id, vs);
+  const wantKeys = new Set(refs.map((r) => keyOf(r.id, r.vs)));
   const ids = [...new Set(refs.map((r) => r.id))];
   const vss = [...new Set(refs.map((r) => r.vs.toUpperCase()))];
   const nowMs = now.getTime();
   const nowIso = now.toISOString();
 
   const cached = new Map<string, PriceQuoteRow>();
-  for (const row of await repo.getMany(provider.source, vss, ids)) {
-    const k = quoteKey(row.asset_id, row.vs_currency);
+  const cachedRows = native ? await repo.getByIds(provider.source, ids) : await repo.getMany(provider.source, vss, ids);
+  for (const row of cachedRows) {
+    const k = keyOf(row.asset_id, row.vs_currency);
     if (wantKeys.has(k)) cached.set(k, row);
   }
-  const fresh = (row: PriceQuoteRow) => nowMs - Date.parse(row.fetched_at) < QUOTE_TTL_MS;
-  const usable = (row: PriceQuoteRow) => nowMs - Date.parse(row.fetched_at) < MAX_AGE_MS;
+  const fresh = (row: PriceQuoteRow) => nowMs - Date.parse(row.fetched_at) < ttlMs;
+  const usable = (row: PriceQuoteRow) => nowMs - Date.parse(row.fetched_at) < maxAgeMs;
 
   const map = new Map<string, AutoQuote>();
   const fetchedAts: string[] = [];
   const take = (k: string, row: PriceQuoteRow) => {
-    map.set(k, { price: row.price, asOf: row.as_of });
+    map.set(k, { price: row.price, asOf: row.as_of, vs: row.vs_currency });
     fetchedAts.push(row.fetched_at);
   };
 
   const need = refs.filter((r) => {
-    const row = cached.get(quoteKey(r.id, r.vs));
+    const row = cached.get(keyOf(r.id, r.vs));
     return !row || !fresh(row);
   });
   for (const [k, row] of cached) if (fresh(row)) take(k, row);
@@ -87,13 +99,13 @@ export async function getQuotes(
   let failed = false;
   if (state?.blocked_until && Date.parse(state.blocked_until) > nowMs) failed = true;
   else {
-    const needIds = [...new Set(need.map((r) => r.id))];
+    const needIds = [...new Set(need.map((r) => r.hint ?? r.id))];
     const needVs = [...new Set(need.map((r) => r.vs.toUpperCase()))];
     try {
       const { quotes } = await provider.latest(needIds, needVs);
       const rows: PriceQuoteRow[] = [];
       for (const q of quotes) {
-        const k = quoteKey(q.id, q.vs);
+        const k = keyOf(q.id, q.vs);
         if (!wantKeys.has(k)) continue;
         const row = {
           source: provider.source,
@@ -111,15 +123,15 @@ export async function getQuotes(
     } catch (e) {
       if (!(e instanceof PriceUnavailable)) throw e;
       failed = true;
-      console.error(`price_fetch_failed status=${e.status ?? 'net'} ids=${needIds.length}`);
+      console.error(`price_fetch_failed source=${provider.source} status=${e.status ?? 'net'} ids=${needIds.length}`);
       await repo.setState(provider.source, new Date(nowMs + pauseMs(e.status)).toISOString(), e.status ?? null, nowIso);
     }
   }
 
-  // запасной кэш (просроченный ≤7 дней) для всего, чего нет в map
+  // запасной кэш (просроченный, в пределах fallbackMaxAgeDays) для всего, чего нет в map
   let stale = false;
   for (const r of need) {
-    const k = quoteKey(r.id, r.vs);
+    const k = keyOf(r.id, r.vs);
     if (map.has(k)) continue;
     const row = cached.get(k);
     if (row && usable(row)) {
@@ -132,5 +144,20 @@ export async function getQuotes(
 
 /** Источник цен для portfolioView/бота: provider=null → available:false, ноль запросов. */
 export function makePriceSource(db: D1Database, provider: PriceProvider | null, now: Date): PriceSource {
-  return { available: !!provider, get: (refs) => getQuotes(db, provider, refs, now) };
+  return {
+    available: !!provider,
+    native: provider?.quoteCurrency === 'native',
+    get: (refs) => getQuotes(db, provider, refs, now),
+  };
+}
+
+export type PriceSources = { coingecko: PriceSource; moex: PriceSource };
+
+/** Источники цен по видам: нет провайдера → available:false, ноль внешних запросов. */
+export function makePriceSources(
+  db: D1Database,
+  providers: { coingecko: PriceProvider | null; moex: PriceProvider | null },
+  now: Date,
+): PriceSources {
+  return { coingecko: makePriceSource(db, providers.coingecko, now), moex: makePriceSource(db, providers.moex, now) };
 }

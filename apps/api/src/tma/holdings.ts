@@ -10,11 +10,12 @@ import type { Hono, Next } from 'hono';
 import type { Env } from '../env';
 import type { HoldingRow, UserRow } from '../db/repo';
 import type { FxProvider } from '../fx/provider';
-import type { PriceProvider } from '../prices/provider';
-import { makePriceSource } from '../prices/service';
+import type { PriceProviders } from '../prices/providers';
+import { makePriceSources } from '../prices/service';
 import { toMinor } from '../domain/money';
 import { mulToMinor } from '../domain/decimal';
-import { coinIdFor } from '../domain/coins';
+import { priceRefFor } from '../domain/price-ref';
+import { PriceUnavailable } from '../prices/provider';
 import { HOLDING_KINDS } from '../domain/portfolio';
 import { todayInTz } from '../bot/parse';
 import { portfolioView } from '../services/portfolio';
@@ -66,6 +67,15 @@ const createSchema = z.object({
   client_id: zClientId,
 });
 // вид и client_id не правятся; null допустим для необязательных полей
+const lookupSchema = z.object({
+  kind: z.enum(['stock', 'bond']),
+  q: z
+    .string()
+    .trim()
+    .min(2)
+    .max(32)
+    .regex(/^[\p{L}0-9 .-]+$/u, 'запрос'),
+});
 const patchSchema = z.object({
   name: zName.optional(),
   ticker: zTicker.nullable().optional(),
@@ -97,12 +107,13 @@ type Shape = {
 
 /**
  * Одна модель оценки на вид: qty×price (crypto/stock/bond) либо сумма (deposit/other).
- * Цена обязательна, кроме крипты с тикером из белого списка (автоцена; T10).
+ * Цена обязательна, кроме позиций с источником автоцены: крипта из белого списка (T10),
+ * акция/облигация с кодом SECID (T3c — цену даёт биржа, иначе «по цене покупки»).
  */
 function shapeError(h: Shape): string | null {
   if (h.kind === 'crypto' || h.kind === 'stock' || h.kind === 'bond') {
     if (!h.quantity) return 'нужно количество';
-    if (!h.price && coinIdFor(h.kind, h.ticker ?? null) === null) return 'нужна цена сейчас';
+    if (!h.price && priceRefFor(h.kind, h.ticker ?? null) === null) return 'нужна цена сейчас';
     if (h.amount_minor !== null) return 'для этого вида сумма не используется';
   } else {
     if (h.amount_minor === null) return 'нужна сумма';
@@ -116,7 +127,7 @@ export function registerTmaHoldings(
   app: Hono<{ Bindings: Env; Variables: { tmaUser: UserRow } }>,
   tmaAuth: (c: C, next: Next) => Promise<Response | void>,
   fx: FxProvider,
-  prices: (env: Env) => PriceProvider | null,
+  prices: (env: Env) => PriceProviders,
 ): void {
   const wrap =
     (h: (c: C) => Promise<Response>) =>
@@ -141,10 +152,32 @@ export function registerTmaHoldings(
         p,
         fxGet(c, fx),
         todayInTz(p.timezone, now),
-        makePriceSource(c.env.DB, prices(c.env), now),
+        makePriceSources(c.env.DB, prices(c.env), now),
         now,
       );
       return okJson(c, { items: v.items, total: v.total, allocation: v.allocation, auto: v.auto, disclaimer: v.disclaimer });
+    }),
+  );
+
+  // Поиск бумаги на Мосбирже для формы: ничего не пишет в БД и не кэшируется (строки поиска не храним).
+  app.get(
+    '/api/tma/holdings/lookup',
+    tmaAuth,
+    wrap(async (c) => {
+      const parsed = lookupSchema.safeParse({ kind: c.req.query('kind'), q: c.req.query('q') });
+      if (!parsed.success) return c.json(bad('запрос: вид (stock/bond) и строка поиска от 2 до 32 символов').body, 400);
+      const p = await needProfile(c);
+      if (p.auto_prices_enabled !== 1) return c.json(err('auto_disabled', 'Включите «Автоцены» в профиле', 409).body, 409);
+      const moex = prices(c.env).moex;
+      if (!moex) return c.json(err('provider_unavailable', 'Поиск бумаг временно недоступен', 503).body, 503);
+      try {
+        const items = await moex.search(parsed.data.q, parsed.data.kind);
+        return okJson(c, { items });
+      } catch (e) {
+        if (!(e instanceof PriceUnavailable)) throw e;
+        console.error(`moex_search_failed status=${e.status ?? 'net'}`);
+        return c.json(err('provider_unavailable', 'Поиск бумаг временно недоступен', 503).body, 503);
+      }
     }),
   );
 

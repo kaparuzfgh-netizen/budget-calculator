@@ -9,6 +9,8 @@ import {
   HOLDING_KINDS,
   allocation,
   depositAccrued,
+  MOEX_POLICY,
+  CRYPTO_POLICY,
   effectivePrice,
   valuation,
   investedMinor,
@@ -17,9 +19,11 @@ import {
   type EffectivePrice,
   type HoldingKind,
 } from '../domain/portfolio';
-import { SUPPORTED_TICKERS, coinIdFor } from '../domain/coins';
+import { SUPPORTED_TICKERS } from '../domain/coins';
+import { priceRefFor, type PriceRef } from '../domain/price-ref';
 import { COINGECKO_ATTRIBUTION } from '../prices/coingecko';
-import { quoteKey, type PriceSource, type QuoteRef, type QuoteResult } from '../prices/service';
+import { MOEX_ATTRIBUTION } from '../prices/moex';
+import { mapKey, type PriceSources, type QuoteRef, type QuoteResult } from '../prices/service';
 import type { FxResult } from '../fx/service';
 import { FxUnavailable } from '../fx/provider';
 import type { HoldingRow, ProfileRow, ScopedRepo } from '../db/repo';
@@ -42,16 +46,20 @@ export interface HoldingItem {
   price_stale: boolean;
   /** Откуда действующая цена: автоцена или ручная. */
   price_source: 'auto' | 'manual';
+  /** Источник автоцены (null у ручной). */
+  price_provider: 'coingecko' | 'moex' | null;
+  /** 'with_aci' — цена облигации включает НКД. */
+  price_note: 'with_aci' | null;
   effective_price: string | null;
   effective_price_on: string | null;
   /** ISO-время авто-котировки (null у ручной). */
   effective_price_at: string | null;
   /** Флаг позиции «обновлять автоматически». */
   auto_price: boolean;
-  /** Тикер крипты есть в белом списке — автоцена возможна. */
+  /** Для позиции есть источник автоцены (крипта из белого списка; акция/облигация с кодом). */
   auto_supported: boolean;
   /** Почему автоцены нет, когда она включена и поддерживается. */
-  auto_note: 'no_quote' | 'ccy_unsupported' | null;
+  auto_note: 'no_quote' | 'ccy_unsupported' | 'ccy_mismatch' | 'not_found' | null;
   amount_minor: number | null;
   rate: number | null;
   opened_on: string | null;
@@ -82,10 +90,13 @@ export interface PortfolioView {
   auto: {
     enabled: boolean;
     available: boolean;
+    /** Какие источники настроены на сервере. */
+    sources: { coingecko: boolean; moex: boolean };
     /** Самое старое fetched_at использованных котировок (ISO). */
     as_of: string | null;
     stale: boolean;
-    attribution: { text: string; url: string };
+    /** Подписи источников, цены которых могут быть на экране (по позициям портфеля). */
+    attributions: { text: string; url: string }[];
     supported_tickers: string[];
   };
   disclaimer: string;
@@ -131,6 +142,7 @@ export const toHoldingItem = (
   today: string,
   eff: EffectivePrice = effectivePrice(h, null, today, '', false),
   autoNote: HoldingItem['auto_note'] = null,
+  provider: PriceRef['source'] | null = null,
 ): HoldingItem => {
   const val = valuation({ ...h, price: eff.price });
   return {
@@ -146,11 +158,13 @@ export const toHoldingItem = (
   price_on: h.price_on,
   price_stale: eff.stale,
   price_source: eff.source,
+  price_provider: eff.source === 'auto' ? provider : null,
+  price_note: eff.source === 'auto' && provider === 'moex' && h.kind === 'bond' ? 'with_aci' : null,
   effective_price: eff.price,
   effective_price_on: eff.on,
   effective_price_at: eff.at,
   auto_price: h.auto_price !== 0,
-  auto_supported: coinIdFor(h.kind, h.ticker) !== null,
+  auto_supported: priceRefFor(h.kind, h.ticker) !== null,
   auto_note: autoNote,
   amount_minor: h.amount_minor,
   rate: h.rate,
@@ -169,29 +183,44 @@ export async function portfolioView(
   p: ProfileRow,
   fxGet: (ccys: string[]) => Promise<FxResult>,
   today: string,
-  prices?: PriceSource | null,
+  prices?: Partial<PriceSources> | null,
   now: Date = new Date(),
 ): Promise<PortfolioView> {
   const rows = (await repo.listHoldings()).results;
   const autoEnabled = p.auto_prices_enabled === 1;
+  const refOf = (h: HoldingRow): PriceRef | null => (h.auto_price !== 0 ? priceRefFor(h.kind, h.ticker) : null);
   // Автоцены: только при флаге профиля и настроенном провайдере (иначе ноль запросов).
-  let quotes: QuoteResult | null = null;
-  if (autoEnabled && prices?.available) {
-    const refs: QuoteRef[] = [];
-    for (const h of rows) {
-      const id = h.auto_price !== 0 ? coinIdFor(h.kind, h.ticker) : null;
-      if (id) refs.push({ id, vs: h.currency.toUpperCase() });
+  const quotes: Partial<Record<PriceRef['source'], QuoteResult>> = {};
+  if (autoEnabled) {
+    for (const src of ['coingecko', 'moex'] as const) {
+      const source = prices?.[src];
+      if (!source?.available) continue;
+      const refs: QuoteRef[] = [];
+      for (const h of rows) {
+        const ref = refOf(h);
+        if (ref?.source !== src) continue;
+        refs.push({ id: ref.id, vs: h.currency.toUpperCase(), ...(ref.source === 'moex' ? { hint: `${ref.kind}:${ref.id}` } : {}) });
+      }
+      if (refs.length) quotes[src] = await source.get(refs);
     }
-    if (refs.length) quotes = await prices.get(refs);
   }
   const nowIso = now.toISOString();
   const items = rows.map((h) => {
-    const id = h.auto_price !== 0 ? coinIdFor(h.kind, h.ticker) : null;
-    const q = quotes && id ? (quotes.map.get(quoteKey(id, h.currency)) ?? null) : null;
-    const eff = effectivePrice(h, q, today, nowIso, autoEnabled && !!quotes);
-    const note: HoldingItem['auto_note'] =
-      quotes && id && !q ? (quotes.failed ? 'no_quote' : 'ccy_unsupported') : null;
-    return toHoldingItem(h, today, eff, note);
+    const ref = refOf(h);
+    const qr = ref ? quotes[ref.source] : undefined;
+    let q = qr && ref ? (qr.map.get(mapKey(prices?.[ref.source]?.native ?? false, ref.id, h.currency)) ?? null) : null;
+    let note: HoldingItem['auto_note'] = null;
+    if (qr && ref) {
+      if (q && q.vs && q.vs.toUpperCase() !== h.currency.toUpperCase()) {
+        // MOEX: цена в родной валюте бумаги, в другую не переводим (float на цене запрещён, правило 21)
+        q = null;
+        note = 'ccy_mismatch';
+      } else if (!q) {
+        note = qr.failed ? 'no_quote' : ref.source === 'moex' ? 'not_found' : 'ccy_unsupported';
+      }
+    }
+    const eff = effectivePrice(h, q, today, nowIso, autoEnabled && !!qr, ref?.source === 'moex' ? MOEX_POLICY : CRYPTO_POLICY);
+    return toHoldingItem(h, today, eff, note, ref?.source ?? null);
   });
   const base = p.living_currency;
   const foreign = items.some((i) => i.currency !== base);
@@ -221,10 +250,13 @@ export async function portfolioView(
     allocation: { current: allocation(t.byKind), targets },
     auto: {
       enabled: autoEnabled,
-      available: !!prices?.available,
-      as_of: quotes?.fetchedAt ?? null,
-      stale: quotes?.stale ?? false,
-      attribution: { ...COINGECKO_ATTRIBUTION },
+      available: !!(prices?.coingecko?.available || prices?.moex?.available),
+      sources: { coingecko: !!prices?.coingecko?.available, moex: !!prices?.moex?.available },
+      as_of: Object.values(quotes).map((x) => x.fetchedAt).filter((x): x is string => !!x).sort()[0] ?? null,
+      stale: Object.values(quotes).some((x) => x.stale),
+      attributions: (['coingecko', 'moex'] as const)
+        .filter((src) => autoEnabled && !!prices?.[src]?.available && rows.some((h) => refOf(h)?.source === src))
+        .map((src) => ({ ...(src === 'moex' ? MOEX_ATTRIBUTION : COINGECKO_ATTRIBUTION) })),
       supported_tickers: SUPPORTED_TICKERS,
     },
     disclaimer: INVEST_DISCLAIMER,

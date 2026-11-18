@@ -30,6 +30,8 @@ run_worker_first = ["/api/*", "/telegram/*", "/health"]
 [vars]
 TELEGRAM_BOT_USERNAME = "Helper_6666_bot"
 MINI_APP_URL = "https://budget-companion-api.fool-undef.workers.dev"
+# Автоцены акций/облигаций с Мосбиржи (T3c): "on" — включено, иное — выключено (ноль запросов к бирже)
+MOEX_PRICES = "on"
 
 # ── Cron-триггеры (шаг 4 миграции: напоминания, валютные алерты) ─
 [triggers]
@@ -66,3 +68,4 @@ crons = []
 [env.staging.vars]
 TELEGRAM_BOT_USERNAME = "PENDING_SETUP_STAGING_BOT" # заменит npm run setup:staging
 MINI_APP_URL = "https://budget-companion-api-staging.fool-undef.workers.dev"
+MOEX_PRICES = "on"

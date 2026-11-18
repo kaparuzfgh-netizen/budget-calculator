@@ -13,8 +13,8 @@ import { INVITE_TTL_MS, MAX_ACTIVE_INVITES, TEXT, inviteLink } from '../bot/comm
 import { advance, onCcyResult, startOnboarding, type ObEffect, type ObInput, type ObState } from '../bot/onboarding';
 import { monthInTz, parseAmount, todayInTz } from '../bot/parse';
 import { runInvest } from '../bot/invest';
-import type { PriceProvider } from '../prices/provider';
-import { makePriceSource } from '../prices/service';
+import type { PriceProviders } from '../prices/providers';
+import { makePriceSources } from '../prices/service';
 import { handleExCategory, runIncome, runPlan, runProfile, runReport, runSpent, runWeek } from '../bot/features';
 import { householdLine, householdSummary } from './household';
 import { fmtMoney } from '../bot/format';
@@ -61,7 +61,7 @@ export interface AccessDeps {
   /** Ключи/настройки vision-провайдеров (Gemini/Groq) — из env или моков. */
   vision?: VisionProviders | undefined;
   /** Провайдер автоцен (T3b); нет/null — только ручные цены. */
-  prices?: PriceProvider | null | undefined;
+  prices?: PriceProviders | undefined;
 }
 
 async function sha256Hex(s: string): Promise<string> {
@@ -498,7 +498,7 @@ async function knownUser(msg: IncomingMessage, user: UserRow, deps: AccessDeps):
     return;
   }
   if (CMD('invest').test(cmd)) {
-    await runInvest(msg.chatId, tg, repo, fx, today, makePriceSource(deps.db, deps.prices ?? null, deps.now ?? new Date()));
+    await runInvest(msg.chatId, tg, repo, fx, today, makePriceSources(deps.db, deps.prices ?? { coingecko: null, moex: null }, deps.now ?? new Date()));
     return;
   }
   if (CMD('fx').test(cmd)) {

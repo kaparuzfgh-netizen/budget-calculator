@@ -161,10 +161,12 @@ export interface Profile {
   reminder_hour?: number | null;
   fx_alerts_enabled?: number;
   vision_enabled?: number;
-  /** Автоцены крипты (CoinGecko, opt-in); 0/1. */
+  /** Автоцены (крипта — CoinGecko, акции/облигации — Мосбиржа; opt-in); 0/1. */
   auto_prices_enabled?: number;
-  /** На сервере настроен ключ CoinGecko; false — тумблер неактивен. */
+  /** Тумблер доступен (биржа работает без ключа). */
   auto_prices_available?: boolean;
+  /** Какие источники автоцен включены на сервере. */
+  auto_sources?: { coingecko: boolean; moex: boolean };
   /** Подушка безопасности в living_currency (миграция 0019); null — не задана. */
   cushion_minor?: number | null;
   /** Каскад бонуса: доля дельты дохода → досрочка (0..1); 0/0 — выкл. */
@@ -325,7 +327,11 @@ export interface HoldingItem {
   effective_price_at: string | null;
   auto_price: boolean;
   auto_supported: boolean;
-  auto_note: 'no_quote' | 'ccy_unsupported' | null;
+  auto_note: 'no_quote' | 'ccy_unsupported' | 'ccy_mismatch' | 'not_found' | null;
+  /** Источник действующей автоцены (null у ручной). */
+  price_provider: 'coingecko' | 'moex' | null;
+  /** 'with_aci' — цена облигации с накопленным купонным доходом. */
+  price_note: 'with_aci' | null;
   amount_minor: number | null;
   rate: number | null;
   opened_on: string | null;
@@ -337,6 +343,15 @@ export interface HoldingItem {
   /** Цены нет — оценено по «потрачено», результат 0. */
   valued_at_cost: boolean;
   accrued_minor: number | null;
+}
+/** Результат поиска бумаги на Мосбирже (GET /api/tma/holdings/lookup). */
+export interface MoexLookupItem {
+  secid: string;
+  isin: string | null;
+  name: string;
+  kind: 'stock' | 'bond';
+  currency: string;
+  board: string;
 }
 export interface HoldingsList {
   items: HoldingItem[];
@@ -357,7 +372,10 @@ export interface HoldingsList {
     available: boolean;
     as_of: string | null;
     stale: boolean;
-    attribution: { text: string; url: string };
+    /** Какие источники настроены на сервере. */
+    sources: { coingecko: boolean; moex: boolean };
+    /** Подписи источников цен (по позициям портфеля). */
+    attributions: { text: string; url: string }[];
     supported_tickers: string[];
   };
   disclaimer: string;

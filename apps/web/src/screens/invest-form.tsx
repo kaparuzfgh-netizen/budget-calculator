@@ -4,10 +4,10 @@
  * вклад/другое — сумма (+ ставка и даты для вклада). client_id один на
  * попытку (повторная отправка не задвоит позицию). Удаление — с подтверждением.
  */
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import { Briefcase, Trash2 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { HoldingItem, HoldingKind, HoldingsList } from '../api';
+import type { HoldingItem, HoldingKind, HoldingsList, MoexLookupItem } from '../api';
 import type { ScreenProps } from '../app';
 import {
   cardCls,
@@ -99,6 +99,91 @@ function TickerField({
   );
 }
 
+const SEARCH_MIN = 2;
+const SEARCH_DEBOUNCE_MS = 400;
+
+/**
+ * Поиск бумаги на Мосбирже (акция/облигация): название, тикер или ISIN → список до 10 бумаг;
+ * выбор подставляет тикер, название (если пусто) и валюту. Тикер можно ввести и вручную
+ * (поле «Получил»). Тумблер «Автоцены» выключен или биржа недоступна — просто ручной ввод.
+ */
+function MoexSearch({
+  api,
+  kind,
+  enabled,
+  onPick,
+}: {
+  api: ScreenProps['api'];
+  kind: 'stock' | 'bond';
+  enabled: boolean;
+  onPick: (it: MoexLookupItem) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState<MoexLookupItem[]>([]);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    setItems([]);
+    setNote(null);
+    const t = q.trim();
+    if (!enabled || t.length < SEARCH_MIN) return undefined;
+    let cancelled = false;
+    const id = setTimeout(() => {
+      api
+        .get<{ items: MoexLookupItem[] }>(`/api/tma/holdings/lookup?kind=${kind}&q=${encodeURIComponent(t)}`)
+        .then((r) => {
+          if (cancelled) return;
+          setItems(r.items);
+          if (!r.items.length) setNote('Ничего не найдено — введите тикер вручную ниже.');
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          setNote(
+            e instanceof ApiError && e.status === 409
+              ? 'Включите «Автоцены» в профиле, чтобы искать бумаги.'
+              : 'Поиск на бирже недоступен — введите тикер вручную ниже.',
+          );
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [q, kind, enabled]);
+  return (
+    <Field label="Найти на Мосбирже (название, тикер или ISIN)">
+      <input
+        class={inputCls}
+        maxLength={32}
+        placeholder={kind === 'bond' ? 'например, ОФЗ 26238' : 'например, Сбербанк или SBER'}
+        value={q}
+        onInput={(e) => setQ((e.target as HTMLInputElement).value)}
+      />
+      {items.length > 0 && (
+        <ul class="mt-2 divide-y divide-line rounded-xl border border-line">
+          {items.map((it) => (
+            <li>
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[14px] text-zinc-100 hover:bg-fill"
+                onClick={() => {
+                  onPick(it);
+                  setQ('');
+                }}
+              >
+                <span class="truncate">
+                  {it.secid} · {it.name}
+                </span>
+                <span class="shrink-0 text-zinc-500">{it.currency}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {note && <p class={`${mutedCls} mt-2`}>{note}</p>}
+    </Field>
+  );
+}
+
 const swapCls = 'mb-2 rounded-2xl border border-line bg-zinc-900/60 p-3';
 const swapLabelCls = 'mb-1 block text-[12px] text-zinc-500';
 const swapInputCls = 'min-w-0 flex-1 bg-transparent text-[24px] font-medium text-zinc-100 outline-none placeholder:text-zinc-600';
@@ -124,7 +209,8 @@ function HoldingFormView({
   original,
   holdingId,
   supported,
-}: Pick<ScreenProps, 'api' | 'nav'> & { original: HoldingForm | null; holdingId?: number; supported: string[] }) {
+  autoEnabled,
+}: Pick<ScreenProps, 'api' | 'nav'> & { original: HoldingForm | null; holdingId?: number; supported: string[]; autoEnabled: boolean }) {
   const [f, setF] = useState<HoldingForm>(original ?? emptyForm());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -200,6 +286,14 @@ function HoldingFormView({
             </Field>
           )}
 
+          {(f.kind === 'stock' || f.kind === 'bond') && (
+            <MoexSearch
+              api={api}
+              kind={f.kind}
+              enabled={autoEnabled}
+              onPick={(it) => setF((s) => ({ ...s, ticker: it.secid, currency: it.currency, name: s.name.trim() ? s.name : it.name }))}
+            />
+          )}
           {usesQty(f.kind) ? (
             <>
               {/* как в обменниках: сумма и её валюта/тикер в одной строке */}
@@ -233,11 +327,18 @@ function HoldingFormView({
                   </div>
                 </div>
               </div>
-              <p class={`${mutedCls} mb-3`}>Сколько заплатили всего и сколько единиц получили. Цену за штуку считаем сами.</p>
+              <p class={`${mutedCls} mb-3`}>
+                Сколько заплатили всего и сколько единиц получили.{' '}
+                {f.kind === 'stock' || f.kind === 'bond' ? 'Количество — в штуках, не в лотах. ' : ''}Цену за штуку считаем сами.
+              </p>
               {needsPrice(f, supported) ? (
                 <Field label="Цена сейчас (за единицу)">{txt('price', { inputMode: 'decimal', placeholder: '30000' })}</Field>
               ) : (
-                <p class={`${mutedCls} mb-3`}>Цену этой монеты приложение берёт само.</p>
+                <p class={`${mutedCls} mb-3`}>
+                  {f.kind === 'crypto'
+                    ? 'Цену этой монеты приложение берёт само.'
+                    : `Цену бумаги берём с Мосбиржи${f.kind === 'bond' ? ' (с НКД)' : ''}; если биржа не ответит — оценим по сумме покупки.`}
+                </p>
               )}
             </>
           ) : (
@@ -299,8 +400,9 @@ export function InvestFormScreen({ api, nav, onFatal, holdingId }: ScreenProps &
   }
   const item = holdingId === undefined ? null : q.data?.items.find((x) => x.id === holdingId);
   const supported = q.data?.auto.supported_tickers ?? [];
+  const autoEnabled = !!q.data?.auto.enabled;
   if (holdingId !== undefined && !item) {
     return <ErrorView title="Позиция не найдена" text="Возможно, она уже удалена." onRetry={() => nav.back()} />;
   }
-  return <HoldingFormView api={api} nav={nav} original={item ? fromItem(item) : null} supported={supported} {...(holdingId !== undefined ? { holdingId } : {})} />;
+  return <HoldingFormView api={api} nav={nav} original={item ? fromItem(item) : null} supported={supported} autoEnabled={autoEnabled} {...(holdingId !== undefined ? { holdingId } : {})} />;
 }

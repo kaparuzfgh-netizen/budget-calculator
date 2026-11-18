@@ -12,8 +12,14 @@ export interface ProviderQuote {
 
 export interface PriceProvider {
   readonly source: string;
+  /** 'requested' (по умолчанию) — цена в запрошенной валюте; 'native' — в родной валюте бумаги (MOEX), ключ кэша — по id. */
+  readonly quoteCurrency?: 'requested' | 'native';
+  /** TTL кэша, мс (по умолчанию 15 мин). */
+  readonly ttlMs?: number;
+  /** Сколько дней можно отдавать просроченный кэш при сбое (по умолчанию 7). */
+  readonly fallbackMaxAgeDays?: number;
   /** Пакетный запрос: ids × vs. Сбой/таймаут/кривой ответ → PriceUnavailable. */
-  latest(ids: string[], vs: string[]): Promise<{ quotes: ProviderQuote[] }>;
+  latest(ids: string[], vs?: string[]): Promise<{ quotes: ProviderQuote[] }>;
 }
 
 /** Провайдер недоступен; status — HTTP-код (без тел ответа, правило 10). */

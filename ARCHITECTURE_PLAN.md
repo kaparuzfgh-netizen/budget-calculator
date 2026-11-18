@@ -580,3 +580,350 @@ Claude ключ не видит и не хранит; в git/`.dev.vars` не п
 - Оценка (`domain/portfolio.ts`: `investedMinor`, `pnlMinor`, `valuation`; `services/portfolio.ts`): P&L = стоимость сейчас − invested. Нет ни авто-, ни ручной цены — оценка по invested, P&L 0, `valued_at_cost: true`, позиция входит в итог. `effectivePrice` не меняется.
 - Mini App (`invest-form.tsx`, `invest-common.ts`, `invest.tsx`, `api.ts`): поля Название, Валюта, Тикер, Количество, «Потрачено всего», «Цена сейчас» — только если автоцены нет (по `supported_tickers`); галочка автообновления убрана (`auto_price` = true по умолчанию). Карточка: «Крипта · 0.002 BTC · потрачено 128 USD» + «авто · время» / «по цене покупки». Бот `/invest` — строка о позициях без цены.
 - Тесты: домен, API (BTC без price, 400 для акции без price, шифрование invested, A не видит B), web `invest-common`.
+
+---
+
+### План задачи: T3c Автоцены MOEX
+
+Источник: `TASKS.md` T3c, BACKLOG P1-9 (T3c). Продолжение T3b/T10 (в проде:
+`prices/provider.ts`, `prices/coingecko.ts`, `prices/service.ts`, `domain/coins.ts`,
+кэш `price_quotes`, `price_provider_state`, `effectivePrice`, форма с `TickerField`/`needsPrice`).
+Правила: AGENTS.md 2, 3, 4, 6, 10, 11, 16, 19, 20, 21. Кыргызские биржи **не рассматриваются**.
+
+> **Оговорка.** Факты об ISS даны владельцем (проверены им вживую) и по знаниям architect;
+> веб-доступа у architect не было. **Шаг 0** — сверка по https://iss.moex.com/iss/reference
+> и живым ответам ISS (список ниже, п. 3.9). Расхождение, ломающее план, → назад в `[DESIGN]`.
+
+> **Итог шага 0 (живые запросы к ISS, 2026-11-18, среда, торги идут).**
+> (a) Облигации: `LAST/MARKETPRICE/PREVPRICE` — **% к номиналу** (ОФЗ 26238 — 51.058; описание
+> столбца «% к номиналу»), `FACEVALUE` — непогашенный номинал (бывает 1000, 100, 74.98),
+> `ACCRUEDINT` — НКД в деньгах «в валюте расчётов», `FACEUNIT` — валюта номинала. Формула плана
+> подтверждена. (b) `securities=A,B` на уровне рынка (без борда) **работает**, `BOARDID`
+> возвращается, несуществующий SECID → пустые массивы (не ошибка), 21 код в одном запросе прошёл
+> (лимит не найден; оставляем пакет 10 из-за длины URL). У одной бумаги бывает несколько
+> бордов с разной валютой (SBCN: TQBR RUB, TQTY CNY) — белый список бордов обязателен.
+> (c) **Расхождение:** `SYSTIME` = текущее серверное московское время (12:18:06 при
+> UPDATETIME 12:03:06), а не время котировки; время котировки = `UPDATETIME` (чч:мм:сс, без
+> даты, задержка 15 мин). Решение: время котировки = дата из `SYSTIME` + `UPDATETIME`; если
+> получилось позже `SYSTIME` — минус сутки. (Поведение на выходных не проверено — сегодня
+> среда; худший случай — дата выходного дня при пятничном времени, в пределах 96 ч свежести.)
+> `PREVPRICE`+`PREVDATE` (18:50) — запасной вариант. Столбца `TRADEDATE` в marketdata нет.
+> (d) Поиск `/iss/securities.json?q=` работает с `engine=stock&market=shares|bonds&is_trading=1&limit`,
+> регистр не важен, кириллица (url-encoded) работает, `q` из 1 символа даёт пустой ответ
+> (минимум 2); находит и по ISIN; `group`: `stock_shares`, `stock_ppif` (БПИФ), `stock_bonds`;
+> без `market` лезут индексы (`INPF`, `INAV`) — фильтр по `primary_boardid` обязателен.
+> (e) Борды облигаций с торгами: `TQOB, TQCB, TQOD, TQOY` (+ `TQIR` формально без торгов,
+> оставляем); юаневые — `TQOY` (CNY). Акции/фонды: `TQBR, TQTF, TQIF`. (f) Доступность с IP
+> Cloudflare живым запросом не проверена (нет деплоя) — fail-closed уже предусмотрен. (g) Текст
+> «Порядка использования биржевой информации» не открывался; оговорка о личном использовании
+> остаётся комментарием в `prices/moex.ts`.
+
+#### 0. Что получится для пользователя
+
+- Тумблер в «Профиле → ⚡️ Возможности» переименовывается в **«Автоцены»** (один на крипту и
+  биржу, см. 3.7 и вопрос 1). В «ⓘ»: крипта — CoinGecko, акции и облигации — Московская
+  биржа (данные с задержкой 15 минут); наружу уходят только тикеры/коды бумаг, без имени,
+  сумм и количества.
+- В форме позиции вида **«Акция»** (сюда же фонды/БПИФ) и **«Облигация»** поле тикера
+  становится поиском по Мосбирже: вводишь «сбер» / «SBER» / ISIN («RU000A…», «SU26238RMFS4») —
+  появляется список до 10 бумаг «SBER · Сбербанк ао · RUB», выбираешь — подставляются тикер,
+  название (если пусто) и валюта (RUB, у юаневых облигаций — CNY). Можно ввести тикер
+  вручную («Другое…»), как у крипты.
+- «Цена сейчас» для акции/облигации с тикером **не обязательна**: цену ведёт биржа. Если
+  биржа цену не дала (бумага не найдена, нет торгов, тумблер выключен) — позиция оценивается
+  «по цене покупки» (как T10), с понятной пометкой; ручную цену можно ввести всегда.
+- Карточка: «Акция · 10 шт SBER · потрачено 2 900 ₽» + «биржа · 14:05» (или «биржа · пт 18:49»
+  в выходные). Облигация: цена за 1 шт в рублях **с НКД** (подпись «с НКД», см. 3.4).
+- Внизу экрана — «Цены акций и облигаций: Московская биржа, задержка 15 мин» рядом с
+  атрибуцией CoinGecko. В боте `/invest` — те же пометки и строка источника.
+- Количество — **в штуках, не в лотах** (подсказка в форме).
+
+#### 1. Цель и границы
+
+**Входит:** провайдер MOEX ISS (без ключа), сопоставление тикера/ISIN с бумагой через
+поиск ISS, выбор борда по белому списку, пересчёт цены облигации (% × номинал / 100 + НКД),
+обобщение `prices/service.ts` и `effectivePrice` на несколько источников, эндпоинт поиска
+для формы, пометки и атрибуция в Mini App и боте, «цена не обязательна» для stock/bond с тикером.
+
+**Не входит:** кыргызские и любые иностранные биржи; срочный и валютный рынки MOEX;
+внебиржевые бумаги; купоны/погашения/амортизация как события (T3d); журнал сделок (T3d);
+cron/фоновое обновление и пуши; хранение истории цен; перевод цены бумаги в другую валюту
+позиции (см. 3.5); коммерческое распространение данных биржи.
+
+#### 2. Данные — миграции нет
+
+Новая миграция **не нужна** (при выборе по умолчанию в вопросе 1):
+- котировки MOEX ложатся в существующий `price_quotes`: `source='moex'`, `asset_id` = SECID
+  бумаги (`SBER`, `SU26238RMFS4`, `RU000A105SK3`), `vs_currency` = валюта цены за штуку
+  (`RUB`/`CNY`), `price` — каноническая десятичная строка **цены за 1 шт** (для облигации —
+  уже пересчитанная, с НКД), `as_of` — время самой котировки (см. 3.3), `fetched_at` — наше;
+- пауза — существующий `price_provider_state` (строка `source='moex'`);
+- SECID хранится в уже шифруемом `holdings.ticker` (`enc1:`, `FIELDS` без изменений); борд
+  **не хранится** — выбирается при запросе по белому списку (3.1); новых пользовательских
+  колонок нет → `FIELDS`, экспорт (`schema_version` остаётся 9) и `delete_me` без изменений;
+- `UNIQUE(user_id, source_key)` не нужен — пользовательских вставок нет (кэш — PK + upsert).
+
+Если владелец выберет **отдельный тумблер** (вопрос 1, вариант «Нет»): миграция
+`0026_moex_prices_flag.sql` — `ALTER TABLE profiles ADD COLUMN moex_prices_enabled INTEGER NOT NULL DEFAULT 0;`
+(флаг, не в `FIELDS`; экспорт → `schema_version 10`).
+
+#### 3. Ключевые решения
+
+**3.1 Тикер → бумага → борд (однозначно).** SECID на Мосбирже уникален (в отличие от
+символов крипты), поэтому белый список бумаг не нужен — нужен белый список **бордов**
+(режимов торгов) и порядок приоритета, константы в новом `domain/moex.ts`:
+- `stock` → рынок `shares`, борды `['TQBR', 'TQTF']` (акции, затем фонды/БПИФ);
+- `bond` → рынок `bonds`, борды `['TQOB', 'TQCB', 'TQIR']` (ОФЗ, корпоративные, ПИР) —
+  состав (в т.ч. `TQOD`/`TQOY` для валютных/юаневых выпусков) уточнить в шаге 0.
+Котировка: **один запрос на рынок** без указания борда —
+`GET /iss/engines/stock/markets/{shares|bonds}/securities.json?securities=A,B,…&iss.meta=off&iss.only=securities,marketdata`
+со столбцами `securities.columns=SECID,BOARDID,SHORTNAME,CURRENCYID,FACEUNIT,FACEVALUE,ACCRUEDINT,PREVPRICE,PREVDATE`
+и `marketdata.columns=SECID,BOARDID,LAST,LCURRENTPRICE,MARKETPRICE,SYSTIME`; строки соединяются
+по `(SECID, BOARDID)`, из бордов белого списка берётся первый по приоритету, где есть цена
+(3.3). Бумага, найденная только на чужих бордах (SPEQ, SMAL, внебиржевые), → котировки нет.
+Если шаг 0 покажет, что запрос без борда не отдаёт `BOARDID` или фильтр `securities` не
+работает на уровне рынка — запасной вариант: запрос на каждый борд из списка (≤ 5 запросов).
+Пакет `securities=` — до 10 SECID на запрос (лимит длины списка проверить в шаге 0; при
+меньшем лимите — дробить).
+**ISIN и поиск** — эндпоинт формы (§5) проксирует `GET /iss/securities.json?q=<строка>&engine=stock&market=<shares|bonds>&is_trading=1&limit=10&iss.meta=off&iss.only=securities&securities.columns=secid,isin,shortname,name,primary_boardid,group`;
+результаты фильтруются по `primary_boardid` ∈ белому списку, в позицию сохраняется **SECID**
+(у ОФЗ SECID ≠ ISIN, поэтому ISIN как ключ не храним). Валюта для выбранных бумаг — вторым
+запросом к рынку (`CURRENCYID`/`FACEUNIT`, SUR → RUB). Итого ≤ 2 внешних запроса на поиск.
+Сопоставление «вид ↔ рынок» жёсткое: SECID облигации у позиции вида «Акция» котировки не
+получит (`auto_note: 'not_found'`); форма выставляет вид по `group` из поиска.
+
+**3.2 Акции: цена.** `LAST` (рубли за 1 шт, не за лот). `CURRENCYID 'SUR'` → `RUB`
+(функция `moexCcy`: SUR→RUB, остальное — как есть, проверка `CCY_RE`).
+
+**3.3 Какая цена и какое время (нет торгов, null).** Порядок для строки борда:
+`LAST` → `LCURRENTPRICE` → `MARKETPRICE` (время — `SYSTIME`) → `PREVPRICE` из блока
+securities (время — `PREVDATE` 18:50 МСК). Всё null или ≤ 0 → котировки для бумаги нет
+(не ошибка запроса). `SYSTIME`/`PREVDATE` — московское время; Москва без перехода на
+летнее время, поэтому чистая функция `mskToIso('YYYY-MM-DD HH:MM:SS') = …-03:00 → UTC ISO`.
+Время котировки — **её собственное** (на выходных — пятничное), а не время нашего запроса:
+пользователь видит «биржа · пт 18:49». В шаге 0 проверить, что на выходных `SYSTIME` не
+равен «сейчас» при старом `LAST`; если равен — время брать из `PREVDATE`/`UPDATETIME`.
+
+**3.4 Облигации: % × номинал + НКД (решение — с НКД).** `LAST/MARKETPRICE/PREVPRICE` у
+облигаций — **в процентах от номинала** (проверить в шаге 0 по описанию столбцов
+`/iss/engines/stock/markets/bonds/securities/columns.json`). `FACEVALUE` — текущий
+(непогашенный) номинал в валюте `FACEUNIT`; `ACCRUEDINT` — НКД **в деньгах** за 1 шт в той же
+валюте. Цена за 1 шт = `pct × FACEVALUE / 100 + ACCRUEDINT` — чистая функция
+`bondUnitPrice(pct, face, aci)` в `domain/moex.ts` на BigInt (`decimal.ts`: новые `mulDec`,
+`addDec`, деление на 100 — сдвиг масштаба, округление half-up до 8 знаков); числа из JSON —
+только через существующий `decFromProviderNumber`. Валюта котировки облигации — `FACEUNIT`
+(SUR→RUB; `CNY` у юаневых). **Почему с НКД:** «потрачено всего», которое вводит пользователь,
+включает уплаченный НКД; без НКД результат «+/−» систематически занижен. Честная оговорка
+(подпись в «ⓘ»): после выплаты купона НКД обнуляется и стоимость «проседает» — купоны
+появятся в T3d. Нет `FACEVALUE` → котировки нет; нет `ACCRUEDINT` → считаем 0.
+
+**3.5 Валюта котировки и getFxRates.** Котировка MOEX — в «родной» валюте бумаги
+(RUB, у юаневых облигаций — CNY). Цена **не конвертируется** в другую валюту позиции (float
+на цене нарушил бы правило 21): форма ставит валюту из поиска; если валюта позиции ≠ валюте
+котировки → автоцены нет, `auto_note: 'ccy_mismatch'` («смените валюту позиции на RUB»).
+Пересчёт в валюту бюджета — как всегда, через `getFxRates` в `tolerantRates`
+(`services/portfolio.ts`, правило 11); нет курса RUB/CNY → позиция видна, в итог не входит,
+код в `missing_rates`.
+Для этого провайдер объявляет `quoteCurrency: 'native'` (CoinGecko — `'requested'`): в
+`prices/service.ts` для native-провайдеров ключ кэша/карты — по `asset_id` (любой `vs`),
+`AutoQuote` получает поле `vs`, а сравнение с валютой позиции делает `portfolioView`.
+Это убирает вечный повторный запрос при несовпадении валют. Новый метод
+`priceRepo.getByIds(source, ids)` (один `SELECT … WHERE source=? AND asset_id IN (…)`).
+
+**3.6 Кэш, TTL, лимиты.** TTL **15 мин** круглосуточно (данные и так с задержкой 15 мин;
+вне торгов повторный запрос дешёвый и вернёт ту же последнюю цену с её датой — отдельное
+расписание биржи не моделируем: сессии менялись — вечерняя, выходные дни, — а ошибка в
+календаре хуже лишнего запроса). Запасной кэш при сбое — до **14 дней** (новогодние
+праздники длиннее 7). Свежесть для `effectivePrice` у MOEX — `freshHours = 96` (выходные +
+праздник), `maxAgeDays = 14`; у CoinGecko прежние 24 ч / 7 дней. Параметры — у провайдера
+(`ttlMs`, `fallbackMaxAgeDays`) и в политике `effectivePrice` (3.8).
+Лимиты Workers Free (50 подзапросов на вызов): один GET портфеля = CoinGecko ≤ 1 +
+MOEX ≤ 2 рынка × ⌈N/10⌉ (N ≤ 50 позиций → худший случай 10, обычно 1–2) + FX по числу валют
+(обычно 1–3) ⇒ ≤ ~15. Поиск — ≤ 2. CPU: столбцы урезаны `*.columns`, ответ ≤ 10 бумаг —
+разбор пренебрежим. Без cron. ISS без ключа и явных квот; пауза при 429 всё равно действует.
+
+**3.7 Opt-in: один общий тумблер (предложение по умолчанию).** Используем существующий
+`profiles.auto_prices_enabled` (DEFAULT 0), переименованный в UI в «Автоцены», с перечнем
+источников в «ⓘ». Обоснование: наружу уходит данные одного рода (только коды инструментов,
+без сумм и личности), пользователю проще один выключатель, нет миграции, а точечный отказ
+уже есть на уровне позиции (`holdings.auto_price`). Минус — согласие «на CoinGecko» не
+равно согласию «на биржу»; режим тестовый, реальных пользователей нет, текст «ⓘ» обновляется.
+Альтернатива — вопрос 1. Тумблер больше не зависит от ключа CoinGecko:
+`auto_prices_available = true` (биржа без ключа), плюс `auto_sources: {coingecko: bool, moex: bool}`.
+Выключатель на стороне сервера: `[vars] MOEX_PRICES = "on"` в `wrangler.toml` (иное значение →
+провайдер `null`, ноль запросов к бирже) — для тестов и отката.
+
+**3.8 Встраивание в `effectivePrice`.** Сигнатура расширяется политикой:
+`effectivePrice(h, quote, today, nowIso, enabled, policy = CRYPTO_POLICY)`, где
+`policy = {freshHours, maxAgeDays}`; `MOEX_POLICY = {96, 14}`. Жёсткая проверка
+`kind !== 'crypto'` заменяется на `AUTO_KINDS = ['crypto','stock','bond']` (применимость
+источника решает вызывающий по `priceRefFor`). Правила приоритета не меняются: свежая авто
+бьёт ручную; старше — только если новее ручной; ручная никогда не перезаписывается.
+Новая чистая функция `priceRefFor(kind, ticker) → {source:'coingecko'|'moex', id, market?} | null`
+(`domain/prices-ref.ts` или в `domain/moex.ts`): crypto → `coinIdFor`; stock/bond → SECID,
+если тикер проходит `MOEX_SECID_RE = /^[A-Z0-9-]{1,12}$/` (без точки).
+
+**3.9 Шаг 0 — что сверить (executor, веб-доступ, до кода).** (a) единицы `LAST/MARKETPRICE`
+облигаций (% номинала) и `ACCRUEDINT` (деньги, валюта) по `…/bonds/securities/columns.json`;
+(b) работает ли `securities=A,B` на уровне рынка и есть ли `BOARDID`; лимит списка;
+(c) поведение `SYSTIME` вне торгов; (d) параметры `/iss/securities.json` (`q`, `engine`,
+`market`, `is_trading`, `limit`) и минимальная длина `q`; (e) состав бордов облигаций (TQOD/TQOY);
+(f) доступность ISS с Cloudflare (запрос из `wrangler dev --remote` или стейджинга);
+(g) «Порядок использования биржевой информации» (https://fs.moex.com/files/7064/46216): итог
+вписать комментарием в `prices/moex.ts`. Ожидание: отложенные (15 мин) данные для личного
+некоммерческого использования допустимы; **перед любым коммерческим использованием**
+(платный тариф T7, реклама, публичное распространение котировок) — перечитать документ и,
+вероятно, заключить договор с биржей. Атрибуция «Источник: Московская биржа (задержка 15 мин)»
+показывается всегда.
+
+**3.10 Сбои, паузы, fail-closed.** Таймаут 5 с (`AbortSignal.timeout`); паузы — общие из
+`service.ts` (429 → 10 мин, 401/403 → 6 ч, 5xx/таймаут/кривой ответ → 2 мин), строка
+`price_provider_state` с `source='moex'`. Кривой JSON (zod не прошёл) → `PriceUnavailable`.
+GET портфеля **никогда** не отдаёт 5xx из-за цен: кэш ≤ 14 дн → ручная → «по цене покупки».
+Поиск при сбое → 503 `provider_unavailable`; форма переключается на ручной ввод тикера.
+Профиль выкл → ни поиска (409 `auto_disabled`), ни котировок, кэш не читается.
+
+**3.11 Приватность.** Наружу (iss.moex.com) уходят только SECID пачкой и строка поиска,
+которую пользователь сам ввёл; без имени, количеств, сумм, user_id; без cookies и
+заголовков с данными проекта (обычный `accept: application/json`). Кэш без user_id.
+Логи (правило 10): `price_fetch_failed source=moex status=… ids=N` и
+`moex_search_failed status=…` — без тикеров и строк поиска. В текущем логе `service.ts`
+добавить `source=`.
+
+#### 4. Слои и файлы
+
+| Слой | Файл | Что |
+|---|---|---|
+| Домен | `apps/api/src/domain/moex.ts` (новый) | `MOEX_BOARDS` (рынок → борды по приоритету), `MOEX_SECID_RE`, `moexCcy`, `mskToIso`, `pickMoexQuote(rows, kind)` (выбор борда и цены, 3.3), `bondUnitPrice(pct, face, aci)` |
+| Домен | `apps/api/src/domain/decimal.ts` | `mulDec(a,b)`, `addDec(a,b)`, `divDecPow10(a, n)` — BigInt, half-up до 8 знаков, `null` при выходе за 12 цифр |
+| Домен | `apps/api/src/domain/portfolio.ts` | `AUTO_KINDS`, `PricePolicy`, `CRYPTO_POLICY`, `MOEX_POLICY`; `effectivePrice(..., policy)`; `AutoQuote.vs?` |
+| Домен | `apps/api/src/domain/coins.ts` или новый `domain/price-ref.ts` | `priceRefFor(kind, ticker)` |
+| Данные | `apps/api/src/db/repo.ts` (`priceRepo`) | `getByIds(source, ids)` |
+| Внешнее | `apps/api/src/prices/provider.ts` | `PriceProvider` += `quoteCurrency: 'requested'\|'native'`, `ttlMs?`, `fallbackMaxAgeDays?`; `ProviderQuote` без изменений (vs = родная валюта) |
+| Внешнее | `apps/api/src/prices/moex.ts` (новый) | `createMoex(fetchImpl=fetch)`: `latest(ids)` — группировка по рынку (рынок передаётся в id как `shares:SBER`/`bonds:SU…` или отдельным аргументом — выбрать в шаге 1, ключ кэша — чистый SECID), пакеты по 10, zod `{securities:{columns,data}, marketdata:{columns,data}}`, `pickMoexQuote`; `search(q, market)` для эндпоинта; `MOEX_ATTRIBUTION = {text:'Источник: Московская биржа (задержка 15 мин)', url:'https://www.moex.com'}`; только Web API |
+| Внешнее | `apps/api/src/prices/service.ts` | native-провайдеры (ключ по id, `getByIds`), TTL/запасной кэш из провайдера, `source=` в логе; `makePriceSources(db, {coingecko, moex}, now)` → `Record<source, PriceSource>` |
+| Сервис | `apps/api/src/services/portfolio.ts` | `prices` → `Partial<Record<'coingecko'\|'moex', PriceSource>>`; refs через `priceRefFor`, по одному `get` на источник; `effectivePrice` с политикой источника; `auto_note` += `'ccy_mismatch' \| 'not_found'`; `auto_supported` — по `priceRefFor`; `auto` += `sources:{coingecko, moex}`, `attributions: [{text,url}]` (поле `attribution` убрать вместе с web в этой же задаче), `supported_tickers` — как было (крипта) |
+| Wiring | `apps/api/src/env.ts`, `wrangler.toml` | `MOEX_PRICES?: string` в `[vars]` (`"on"`; в staging тоже) |
+| Wiring | `apps/api/src/http/router.ts`, `services/access.ts` | `deps.moex?: PriceProvider \| null`; по умолчанию `env.MOEX_PRICES === 'on' ? createMoex() : null`; передать в holdings, profile, бот |
+| TMA API | `apps/api/src/tma/holdings.ts` | `shapeError`: для stock/bond цена не обязательна, если есть тикер, проходящий `MOEX_SECID_RE`; новый маршрут поиска (§5) |
+| TMA API | `apps/api/src/tma/profile.ts` | `auto_prices_available: true`, `auto_sources` |
+| Бот | `apps/api/src/bot/invest.ts` | пометки «биржа · время», «с НКД», строка источника MOEX; экраны не меняются → `docs/ux/navigation.md`/`screens.json` без правок (`nav.test.ts` зелёный) |
+| Web | `apps/web/src/api.ts` | типы `auto.sources`, `attributions`, `auto_note`, метод `moexSearch(kind, q)` |
+| Web | `apps/web/src/screens/invest-common.ts` | `needsPrice`: stock/bond с тикером → false; `formError` без цены для них |
+| Web | `apps/web/src/screens/invest-form.tsx` | `TickerField` для stock/bond: поиск (debounce 400 мс, от 2 символов) + «Другое…»; выбор подставляет тикер, имя (если пусто), валюту, вид по `group`; подсказка «в штуках, не в лотах»; при `auto_disabled`/сбое — свободный ввод |
+| Web | `apps/web/src/screens/invest.tsx` | бейдж «биржа · ЧЧ:ММ»/«биржа · пт 18:49», «с НКД», пометки `ccy_mismatch`/`not_found`, список атрибуций (токены палитры) |
+| Web | `apps/web/src/screens/profile-toggles.tsx` | «Автоцены», новый текст «ⓘ», не блокируется отсутствием ключа CoinGecko |
+| Web | `apps/web/src/demo/mock.ts`, `demo/tw.tsx` | моки с акцией и облигацией |
+
+Household (правило 20): `householdSummary` не меняется; партнёру — ни позиций, ни котировок.
+
+#### 5. API (`/api/tma/*`, Bearer JWT, scoped(user.id), `user_id` не принимается)
+
+| Метод | Путь | Изменение | Ошибки |
+|---|---|---|---|
+| GET | `/api/tma/holdings` | items: `price_source` (`'auto'` для биржи тоже) + новое `price_provider: 'coingecko'\|'moex'\|null`, `price_note: 'with_aci'\|null`, `auto_note` += `ccy_mismatch`, `not_found`; корень `auto` += `sources`, `attributions` | 401, 403; сбой цен → **200** |
+| GET | `/api/tma/holdings/lookup?kind=stock\|bond&q=…` (новый) | zod: `kind` enum, `q` trim 2..32, `/^[\p{L}0-9 .-]+$/u` → `{items:[{secid, isin, name, kind, currency, board}]}` (≤ 10) | 400 `validation`, 409 `auto_disabled` (тумблер выкл), 503 `provider_unavailable` (ISS не ответил/пауза/выключен `MOEX_PRICES`) |
+| POST / PATCH | `/api/tma/holdings[/:id]` | схема та же; `shapeError` смягчён для stock/bond с тикером; `client_id` — как в T3a (идемпотентность без изменений) | 400, 404 (чужой id), 409 `limit` |
+| GET | `/api/tma/profile` | `auto_prices_available: true`, `+ auto_sources:{coingecko, moex}` | — |
+
+Поиск не пишет в БД и не кэшируется в D1 (строки поиска — не храним). Лимит частоты —
+debounce на клиенте; серверный лимит не вводим (риски).
+
+#### 6. Шаги реализации (после каждого — `npm run check`)
+
+0. Сверка (3.9) без кода; итог — комментарием в будущий `prices/moex.ts`; расхождение → `[DESIGN]`.
+1. `decimal.ts` (`mulDec/addDec/divDecPow10`) + `domain/moex.ts` (`moexCcy`, `mskToIso`,
+   `bondUnitPrice`, `pickMoexQuote`, `MOEX_BOARDS`) + тесты на фикстурах ISS (JSON-файлы в
+   `apps/api/test/fixtures/moex/`: акция SBER, облигация ОФЗ RUB, юаневая CNY, null-цены, выходные).
+2. `portfolio.ts`: `AUTO_KINDS`, политики, `effectivePrice(..., policy)`; `priceRefFor`. Тесты
+   (старые тесты крипты зелёные без правок — политика по умолчанию = прежняя).
+3. `provider.ts` (`quoteCurrency`, TTL), `priceRepo.getByIds`, `service.ts` (native-ключи,
+   TTL/запасной кэш от провайдера, `source=` в логе, `makePriceSources`). Тесты сервиса.
+4. `prices/moex.ts` (`latest`, `search`) на фейковом fetch + тесты.
+5. `services/portfolio.ts` (несколько источников, `ccy_mismatch`/`not_found`, атрибуции);
+   `env.ts`, `wrangler.toml [vars] MOEX_PRICES="on"`, `router.ts`, `access.ts`. Тесты сервиса.
+6. `tma/holdings.ts` (`shapeError`, `lookup`), `tma/profile.ts`. Тесты API.
+7. `bot/invest.ts` — пометки и источник; `nav.test.ts` без правок реестра.
+8. Web: `api.ts`, `invest-common.ts`, `invest-form.tsx`, `invest.tsx`, `profile-toggles.tsx`, моки; тесты web.
+9. Финал: `npm run check`; T3c → `[DOCS]`. Секретов нет — выкладка без действий владельца.
+
+#### 7. Тесты
+
+- **Домен:** `bondUnitPrice('96.1','1000','12.34') = '973.34'`; номинал 10000 и амортизированный
+  (FACEVALUE 600); юаневая (`FACEUNIT 'CNY'`) → vs `CNY`; `ACCRUEDINT` null → 0; `FACEVALUE`
+  null → нет котировки; 8-й знак half-up; переполнение → null. `pickMoexQuote`: LAST есть → LAST
+  + SYSTIME; LAST null → LCURRENTPRICE → MARKETPRICE → PREVPRICE+PREVDATE; всё null → null; бумага
+  только на SPEQ → null; TQBR приоритетнее TQTF. `mskToIso('2026-11-13 18:49:59') =
+  '2026-11-13T15:49:59.000Z'`; кривая строка → null. `moexCcy('SUR')='RUB'`. `effectivePrice` с
+  `MOEX_POLICY`: котировка пятницы в воскресенье (≈ 2 дня) — свежая, бьёт ручную; 15 дней →
+  ручная; `CRYPTO_POLICY` — прежние кейсы без изменений. `priceRefFor('stock','SBER')` → moex;
+  `('crypto','SBER')` → null; `('bond','RU.X')` → null.
+- **Провайдер (фейковый fetch):** один запрос на рынок, пакеты по 10; в URL только SECID и
+  служебные параметры; `iss.meta=off`, урезанные `columns`; таймаут/500/429 → `PriceUnavailable`;
+  кривой JSON → то же; null-цены → бумага просто без котировки, остальные пришли.
+- **Сервис цен:** native-ключи — позиция SBER в USD не вызывает повторный fetch при свежем кэше
+  (0 вызовов); сбой → кэш до 14 дней (`stale:true`), 15 дней → нет; пауза `source='moex'` не
+  блокирует CoinGecko и наоборот.
+- **Портфель:** облигация CNY в портфеле с бюджетом в USD → итог через FX; нет курса CNY →
+  `missing_rates:['CNY']`, позиция видна; позиция SBER в USD → `ccy_mismatch`, оценка по ручной/
+  «по цене покупки»; нет торгов (котировка 20 дней в кэше) → ручная или `valued_at_cost`.
+- **«A не видит B»:** A (SBER), B (облигация), оба вкл.: GET A — без позиций/цен B; запрос к ISS
+  от A содержит только `SBER`; PATCH/DELETE по id позиции B от A → 404; `lookup` не возвращает и
+  не пишет ничего пользовательского (сырая проверка: в `price_quotes` нет `user_id`, число строк
+  holdings B не изменилось). A выкл, B вкл → GET A: 0 вызовов ISS; `lookup` от A → 409.
+- **Fail-closed:** `MOEX_PRICES` не `"on"` → 0 запросов к ISS, `auto.sources.moex=false`, 200;
+  ISS падает → 200, ни одного 5xx на GET; `lookup` при сбое → 503; без JWT → 401;
+  `q` из 1 символа/с `<script>` → 400.
+- **Идемпотентность:** POST акции без цены с тикером и `client_id` дважды → одна строка.
+  `shapeError`: акция без тикера и без цены → 400; облигация с тикером без цены → 201.
+- **Логи:** перехват `console.*` при сбое ISS и поиска — нет SECID, строк поиска, тел ответов.
+- **Ручная цена не теряется:** после GET с биржевой ценой сырой `SELECT price` — прежний `enc1:`.
+- **Household:** `householdSummary` без котировок.
+- **Web:** `needsPrice` для stock/bond с тикером = false; выбор из поиска ставит тикер, валюту,
+  вид; при 409/503 — свободный ввод; бейдж «биржа», «с НКД», атрибуция MOEX видна только при
+  наличии биржевых позиций.
+
+#### 8. Риски и откат
+
+| Риск | Мера |
+|---|---|
+| Единицы цены облигации поняты неверно (не %) | шаг 0 по описанию столбцов; golden-фикстура из живого ответа; тест 96.1% × 1000 |
+| ISS недоступен с IP Cloudflare / блокировки | шаг 0 (f); fail-closed — ручная/«по цене покупки»; выключатель `MOEX_PRICES` |
+| Условия биржи запрещают распространение в многопользовательском боте | личное/тестовое использование; шаг 0 (g); перед коммерцией — перечитать и договор; атрибуция всегда |
+| Неверный борд (бумага торгуется на нескольких) | белый список + приоритет; вне списка — нет автоцены |
+| Неликвидная облигация: цена месячной давности | время котировки показывается; `maxAgeDays=14`, дальше — ручная/по цене покупки |
+| Валюта позиции ≠ валюте бумаги | без конвертации цены, `ccy_mismatch` с подсказкой; форма ставит валюту сама |
+| Поиск дёргается на каждый символ | debounce 400 мс, от 2 символов, только при включённом тумблере; при злоупотреблении — серверный лимит отдельной задачей |
+| Перерасход подзапросов Workers Free | ≤ ~15 на GET (расчёт 3.6), без cron |
+| НКД путает пользователя (стоимость падает после купона) | подпись «с НКД» и пояснение в «ⓘ»; купоны — T3d |
+| Ослабление «цена обязательна» для stock/bond | без котировки — «по цене покупки» (T10), позиция не обнуляется |
+
+**Откат.** Миграции нет. Мгновенно: `MOEX_PRICES = "off"` в `wrangler.toml` + `npm run release`
+— ноль запросов к бирже, всё на ручных ценах (без релиза — строка паузы в `price_provider_state`
+для `source='moex'` с далёким `blocked_until`; это правка живой базы, в боевом режиме — по «Да»
+владельца). Кодом — откат коммита; строки `price_quotes` с `source='moex'` — не данные
+пользователей, могут остаться или быть удалены новой миграцией
+`0026_drop_moex_quotes.sql` (`DELETE FROM price_quotes WHERE source='moex'; DELETE FROM price_provider_state WHERE source='moex';`).
+Если был выбран отдельный тумблер — откат колонки новой миграцией `ALTER TABLE profiles DROP COLUMN moex_prices_enabled;`.
+
+#### 9. Затронутая документация (для `documenter`)
+
+- `AGENTS.md` правило 21 — «Облигации и акции (MOEX) — T3c» → описание: провайдер MOEX ISS без
+  ключа, `source='moex'`, SECID в `ticker`, белый список бордов (`domain/moex.ts`), цена облигации
+  `% × номинал / 100 + НКД` на BigInt, родная валюта котировки без конвертации, `MOEX_POLICY`
+  (96 ч / 14 дн), общий тумблер `auto_prices_enabled`, выключатель `MOEX_PRICES`, атрибуция MOEX,
+  оговорка о коммерческом использовании.
+- `docs/ARCHITECTURE.md` — слой `prices/` (moex), эндпоинт `lookup`, `[vars] MOEX_PRICES`.
+- `SECURITY.md` — «Коды бумаг и строки поиска → iss.moex.com (opt-in)».
+- `README.md`, `CHANGELOG.md`, `docs/v2-development.md` (переменная `MOEX_PRICES`, staging).
+- `docs/BACKLOG.md` P1-9, `TASKS.md` — T3c закрыта; впереди T3d.
+
+#### 10. Вопросы владельцу (простым языком; в скобках — по умолчанию)
+
+1. Один общий выключатель «Автоцены» для крипты и Мосбиржи? (По умолчанию — да, один; отдельный — потребует небольшого изменения базы.)
+2. Стоимость облигации считать вместе с накопленным купонным доходом (НКД) — то есть сколько вы реально получили бы при продаже? (По умолчанию — да, с подписью «с НКД».)
+3. Бумагу выбирать поиском по Мосбирже (название, тикер или ISIN) с возможностью ввести тикер вручную? (По умолчанию — да.)
+4. Если у акции или облигации есть тикер, не требовать «цену сейчас» — её даст биржа, а без неё считать по цене покупки? (По умолчанию — да.)
+5. Пользуемся биржевыми ценами только для личного учёта, а перед любой платной версией бота заново проверяем правила биржи? (По умолчанию — да.)
+
+задачу можно переводить в `[READY]`

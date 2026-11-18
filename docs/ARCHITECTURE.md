@@ -37,7 +37,7 @@ flowchart TD
     end
     REPO["db/repo.ts<br/>scoped(env.DB, user_id) — каждый запрос<br/>с WHERE user_id = ?"]
     FX["fx/service.ts → fx/frankfurter.ts<br/>getFxRates: кэш D1 (fx_rates, 6ч)"]
-    PRICES["prices/service.ts → prices/coingecko.ts<br/>getQuotes: кэш D1 (price_quotes, TTL 15 мин)"]
+    PRICES["prices/service.ts → prices/providers.ts → coingecko.ts / moex.ts<br/>getQuotes: кэш D1 (price_quotes, TTL 15 мин)"]
     D1[("D1 «budget-companion»<br/>SQLite, 26 таблиц")]
     SPA[("Workers Static Assets<br/>apps/web/dist — SPA-fallback")]
     CRON["scheduled()<br/>crons: 0 * * * * (каждый час UTC)"]
@@ -45,6 +45,7 @@ flowchart TD
 
   FRANK["🌐 Frankfurter API<br/>api.frankfurter.dev — курсы ЦБ,<br/>без ключа"]
   CG["🌐 CoinGecko Demo API<br/>api.coingecko.com — цены крипты,<br/>opt-in, ключ COINGECKO_API_KEY"]
+  MOEX["🌐 MOEX ISS<br/>iss.moex.com — цены акций и облигаций,<br/>opt-in, без ключа, задержка 15 мин"]
   TGAPI["Telegram Bot API<br/>sendMessage / sendDocument"]
 
   USER -->|"сообщение / callback"| WH["POST /telegram/webhook<br/>X-Telegram-Bot-Api-Secret-Token"]
@@ -80,6 +81,7 @@ flowchart TD
   TMA --> PRICES
   PRICES -->|"кэш D1, TTL 15 мин"| D1
   PRICES -->|"fetch (только id монет)"| CG
+  PRICES -->|"fetch (только SECID бумаг)"| MOEX
   CRON --> REM
   REM --> TGAPI
   ACCESS --> TGAPI
@@ -198,7 +200,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 
 ## Инвестиции (T3a): домен и сервисы
 
-Ручной портфель — этап 1 шага 10 (T3a). Автоцены крипты — этап 2 (T3b, см. ниже). Облигации и акции (MOEX) — T3c, журнал сделок и напоминания о погашении — T3d.
+Ручной портфель — этап 1 шага 10 (T3a). Автоцены крипты — этап 2 (T3b, см. ниже). Автоцены акций и облигаций Мосбиржи — T3c (см. раздел ниже). Журнал сделок и напоминания о погашении — T3d (впереди).
 
 - `domain/decimal.ts` — точная десятичная арифметика на BigInt. Количество и цена — каноническая строка (до 12 цифр до точки, до 8 после, больше нуля). `mulToMinor` — qty × price в minor units с округлением half-up; переполнение (> 1e9 major) — `TOO_LARGE`.
 - `domain/portfolio.ts` — чистые функции без I/O, «сегодня» передаётся параметром: стоимость позиции (qty × price для облигаций, крипты и акций; сумма для вклада и «другого»), «потрачено» (`investedMinor`: `invested`, а у старых строк — qty × avg_price), результат `pnlMinor` = стоимость сейчас − потрачено, `valuation` — оценка без цены по сумме покупки (`valued_at_cost`, P&L = 0), «цена устарела» (старше 30 дней), «≈ начислено» по вкладу (простые проценты), доли по видам, валидация целей (целые проценты, сумма 100), `dcaTargetsFrom` — веса DCA для плана.
@@ -222,6 +224,24 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 **Приватность.** Наружу уходят только id монет и валюта котировки; имена позиций, суммы, количества и `user_id` — нет. `price_quotes` общий для всех пользователей (как `fx_rates`) и не содержит данных пользователя; поэтому не входит в `FIELDS` и не участвует в `/delete_me`.
 
 **Экспорт.** `/export` — `schema_version: 9`: в `holdings` есть `invested` (0025) и `auto_price`, в `profile` — `auto_prices_enabled`.
+
+## Автоцены акций и облигаций Мосбиржи (T3c): MOEX ISS
+
+Тот же слой `prices/` и тот же общий кэш `price_quotes` (без миграций: `source='moex'`). Тумблер — общий `profiles.auto_prices_enabled` («Автоцены»).
+
+- `prices/moex.ts` — `createMoex()`: `GET https://iss.moex.com/iss/engines/stock/markets/{shares|bonds}/securities.json` (пакетно по SECID, до 10 за запрос, без указания борда — строки по всем бордам), таймаут 5 с, ответ проверяет zod, кривой JSON → `PriceUnavailable`. Поиск — `search(q, kind)`: `GET /iss/securities.json` (от 2 символов, только торгуемые бумаги своего рынка), затем один пакетный запрос на уточнение валюты и борда (всего ≤2 внешних запроса). Константа `MOEX_ATTRIBUTION` («Цены акций и облигаций: Московская биржа, задержка 15 мин» → https://www.moex.com) выводится в Mini App и боте. Ключа нет.
+- `prices/providers.ts` — `resolveProviders(env)`: `coingecko` (есть `COINGECKO_API_KEY`) и `moex` (`env.MOEX_PRICES === 'on'`); иначе `null` → ноль внешних запросов. `makePriceSources` в `prices/service.ts` отдаёт `PriceSources` по видам (`coingecko`, `moex`).
+- `domain/moex.ts` — чистая логика без I/O: белые списки бордов `MOEX_BOARDS` (акции TQBR/TQTF/TQIF; облигации TQOB/TQCB/TQIR/TQOD/TQOY; приоритет по порядку), `pickMoexQuote` (LAST → LCURRENTPRICE → MARKETPRICE → PREVPRICE, иначе PREVPRICE с PREVDATE), `bondUnitPrice` = `% × номинал / 100 + НКД` на BigInt (`decimal.ts`), `mskToIso`, `moexCcy` (SUR → RUB). Облигацию борд пропускается, если валюта расчётов борда ≠ валюте номинала (FACEUNIT). Цена облигации в валюте не конвертируется.
+- `domain/price-ref.ts` — `priceRefFor(kind, ticker)`: крипта из белого списка → CoinGecko; `stock`/`bond` с корректным SECID (`holdings.ticker`) → MOEX. Вне этого — только ручная цена.
+- `domain/portfolio.ts` — `MOEX_POLICY` (свежая ≤96 ч — выходные и праздники; запасной кэш ≤14 дн) и `CRYPTO_POLICY` (≤24 ч, ≤7 дн). Приоритет тот же, что у крипты: свежая автоцена бьёт ручную, ручная не перезаписывается.
+- `services/portfolio.ts` — котировка в валюте, отличной от валюты позиции, не используется: `auto_note: ccy_mismatch`, позиция на ручной цене или (без неё) по сумме покупки. Атрибуция MOEX попадает в `auto.attributions` только если есть позиции с MOEX-источником.
+- `tma/holdings.ts` — `GET /api/tma/holdings/lookup?kind=stock|bond&q=` (≥2 символов, ≤32): без `auto_prices_enabled` → 409 `auto_disabled`, без провайдера → 503. Поиск ничего не пишет в БД и не кэширует результат. `shapeError`: для бумаги с корректным SECID цена сейчас не обязательна — её даёт биржа.
+
+**Точки подключения:** `[vars] MOEX_PRICES` в `wrangler.toml` (не секрет; `"on"` включает, иное — выключает; в `[env.staging.vars]` тоже `"on"`). Тесты подменяют провайдер через `RouterDeps.moex`.
+
+**Приватность.** На MOEX уходят только SECID бумаг (и рынок в пути запроса) и строка поиска пользователя. Имена позиций, суммы, количества и `user_id` — нет.
+
+**Условия использования.** Данные отложенные (15 минут), используются для личного некоммерческого учёта. Перед любым коммерческим использованием перечитать «Порядок использования биржевой информации» (https://fs.moex.com/files/7064/46216) и, вероятно, заключить договор с биржей.
 
 ## Топология деплоя
 
