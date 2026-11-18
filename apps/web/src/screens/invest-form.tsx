@@ -22,6 +22,8 @@ import {
   Loading,
   mutedCls,
   primaryBtnCls,
+  Select,
+  type SelectOption,
   smBtnCls,
   useData,
 } from '../ui';
@@ -41,6 +43,61 @@ const tileCls =
   'flex items-center justify-center rounded-xl border border-line bg-zinc-900/80 py-2.5 text-[14px] font-medium text-zinc-100 transition hover:bg-zinc-800/80';
 const tileOnCls =
   'flex items-center justify-center rounded-xl border border-sky-500/60 bg-sky-500/15 py-2.5 text-[14px] font-medium text-sky-300';
+
+const TICKER_CUSTOM = '__ticker_custom__';
+
+/**
+ * Тикер справа от количества. Крипта — выпадающий список монет с автоценой
+ * (как выбор валюты) + «Другое…» для ручного ввода; акции/облигации — свободный ввод.
+ */
+function TickerField({
+  kind,
+  value,
+  supported,
+  onChange,
+}: {
+  kind: HoldingKind;
+  value: string;
+  supported: string[];
+  onChange: (v: string) => void;
+}) {
+  const up = value.toUpperCase();
+  const [custom, setCustom] = useState(!!value && !supported.includes(up));
+  const free = (
+    <input
+      class={`${inputCls} text-center font-medium uppercase`}
+      maxLength={12}
+      placeholder="Тикер"
+      value={value}
+      onInput={(e) => onChange((e.target as HTMLInputElement).value.toUpperCase())}
+    />
+  );
+  if (kind !== 'crypto') return free;
+  const options: SelectOption[] = [
+    ...supported.map((t) => ({ value: t, label: t })),
+    { value: TICKER_CUSTOM, label: 'Другое…' },
+  ];
+  return (
+    <div>
+      <Select
+        value={custom ? TICKER_CUSTOM : up}
+        options={options}
+        searchable
+        placeholder="Тикер"
+        onChange={(v) => {
+          if (v === TICKER_CUSTOM) {
+            setCustom(true);
+            onChange('');
+          } else {
+            setCustom(false);
+            onChange(v);
+          }
+        }}
+      />
+      {custom && <div class="mt-2">{free}</div>}
+    </div>
+  );
+}
 
 const swapCls = 'mb-2 rounded-2xl border border-line bg-zinc-900/60 p-3';
 const swapLabelCls = 'mb-1 block text-[12px] text-zinc-500';
@@ -171,13 +228,9 @@ function HoldingFormView({
                     placeholder="0"
                     onInput={(e) => set('quantity', (e.target as HTMLInputElement).value)}
                   />
-                  <input
-                    class={`${inputCls} w-28 shrink-0 text-center font-medium uppercase`}
-                    value={f.ticker}
-                    maxLength={12}
-                    placeholder="BTC"
-                    onInput={(e) => set('ticker', (e.target as HTMLInputElement).value)}
-                  />
+                  <div class="w-28 shrink-0">
+                    <TickerField kind={f.kind} value={f.ticker} supported={supported} onChange={(v) => set('ticker', v)} />
+                  </div>
                 </div>
               </div>
               <p class={`${mutedCls} mb-3`}>Сколько заплатили всего и сколько единиц получили. Цену за штуку считаем сами.</p>
