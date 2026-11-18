@@ -38,7 +38,7 @@ flowchart TD
     REPO["db/repo.ts<br/>scoped(env.DB, user_id) — каждый запрос<br/>с WHERE user_id = ?"]
     FX["fx/service.ts → fx/frankfurter.ts<br/>getFxRates: кэш D1 (fx_rates, 6ч)"]
     PRICES["prices/service.ts → prices/providers.ts → coingecko.ts / moex.ts<br/>getQuotes: кэш D1 (price_quotes, TTL 15 мин)"]
-    D1[("D1 «budget-companion»<br/>SQLite, 26 таблиц")]
+    D1[("D1 «budget-companion»<br/>SQLite, 27 таблиц")]
     SPA[("Workers Static Assets<br/>apps/web/dist — SPA-fallback")]
     CRON["scheduled()<br/>crons: 0 * * * * (каждый час UTC)"]
   end
@@ -145,7 +145,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 
 ## Слой данных (D1)
 
-26 таблиц, миграции `apps/api/migrations/0001–0025` — **иммутабельны**: изменения
+27 таблиц, миграции `apps/api/migrations/0001–0026` — **иммутабельны**: изменения
 только новыми файлами `NNNN_name.sql`; применение —
 `wrangler d1 migrations apply DB [--local|--remote]` (в `npm run release`
 уже встроено, при провале миграций деплой не идёт).
@@ -175,7 +175,8 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 | `households` | 0020 | Общий бюджет пары: единый недельный лимит (`enc1:`, ключ от `households.id`) |
 | `household_members` | 0020 | Члены пары (≤2, юзер — максимум в одном), роль owner/member |
 | `categories` | 0014 | Категории трат: пресеты (`preset_key`) + свои, `archived`, `sort`; `weekly_expenses.category_id`, `income_entries.received_on` |
-| `holdings` | 0023, 0024, 0025 | Ручной инвест-портфель (T3a): вид `deposit`/`bond`/`crypto`/`stock`/`other`; `name`, `ticker`, `quantity`, `avg_price` (legacy), `invested` (0025, «потрачено всего», у старых строк NULL → quantity × avg_price при чтении), `price`, `amount_minor`, `rate`, `note` — `enc1:`; `currency`, `price_on`, `opened_on`, `matures_on` — plaintext; `auto_price` (0024, флаг «брать автоцену», DEFAULT 1) — plaintext; `source_key` (`tma:<client_id>`) — идемпотентность создания; не больше 50 позиций на пользователя |
+| `holdings` | 0023, 0024, 0025, 0026 | Ручной инвест-портфель (T3a): вид `deposit`/`bond`/`crypto`/`stock`/`other`; `name`, `ticker`, `quantity`, `avg_price` (legacy), `invested` (0025, «потрачено всего», у старых строк NULL → quantity × avg_price при чтении), `price`, `amount_minor`, `rate`, `note` — `enc1:`; `currency`, `price_on`, `opened_on`, `matures_on` — plaintext; `auto_price` (0024, флаг «брать автоцену», DEFAULT 1) — plaintext; `source_key` (`tma:<client_id>`) — идемпотентность создания; не больше 50 позиций на пользователя. Журнал (0026): `realized_minor` (`enc1:`, кэш свёртки), `closed_on` (дата полной продажи, plaintext), `hidden` (DEFAULT 0), `trade_rev` (версия CAS) |
+| `holding_trades` | 0026 | Журнал покупок/продаж позиции (T3d1): `side` `buy`/`sell`, `is_initial` (начальная запись старой позиции), `traded_on` (`YYYY-MM-DD`, plaintext), `source_key` (`tma:<client_id>` / `init:<holding_id>`, уникален в пределах `user_id`); `quantity`, `amount` (с комиссией), `note` — `enc1:`, десятичные строки; индекс `(user_id, holding_id, traded_on, id)` |
 | `price_quotes` | 0024 | Глобальный кэш котировок автоцен (T3b): `source`, `asset_id` (id монеты CoinGecko), `vs_currency`, `price` (десятичная строка), `as_of` (время котировки у провайдера), `fetched_at` (для TTL 15 мин); PK `(source, asset_id, vs_currency)`; **без `user_id`** и без шифрования — не пользовательские данные; доступ — `priceRepo`, вне scoped |
 | `price_provider_state` | 0024 | Состояние провайдера цен (по `source`): `blocked_until` — пауза после сбоя (429 → 10 мин, 401/403 → 6 ч, прочее → 2 мин), `last_status` — HTTP-код без тела ответа; глобальная, вне scoped |
 
@@ -200,13 +201,29 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 
 ## Инвестиции (T3a): домен и сервисы
 
-Ручной портфель — этап 1 шага 10 (T3a). Автоцены крипты — этап 2 (T3b, см. ниже). Автоцены акций и облигаций Мосбиржи — T3c (см. раздел ниже). Журнал сделок и напоминания о погашении — T3d (впереди).
+Ручной портфель — этап 1 шага 10 (T3a). Автоцены крипты — этап 2 (T3b, см. ниже). Автоцены акций и облигаций Мосбиржи — T3c (см. раздел ниже). Журнал покупок/продаж — T3d1 (см. раздел ниже); напоминания о погашении и купоны — T3d2/T3d3 (впереди).
 
 - `domain/decimal.ts` — точная десятичная арифметика на BigInt. Количество и цена — каноническая строка (до 12 цифр до точки, до 8 после, больше нуля). `mulToMinor` — qty × price в minor units с округлением half-up; переполнение (> 1e9 major) — `TOO_LARGE`.
 - `domain/portfolio.ts` — чистые функции без I/O, «сегодня» передаётся параметром: стоимость позиции (qty × price для облигаций, крипты и акций; сумма для вклада и «другого»), «потрачено» (`investedMinor`: `invested`, а у старых строк — qty × avg_price), результат `pnlMinor` = стоимость сейчас − потрачено, `valuation` — оценка без цены по сумме покупки (`valued_at_cost`, P&L = 0), «цена устарела» (старше 30 дней), «≈ начислено» по вкладу (простые проценты), доли по видам, валидация целей (целые проценты, сумма 100), `dcaTargetsFrom` — веса DCA для плана.
 - `services/portfolio.ts` — `portfolioView`: итог в валюте бюджета. Курс запрашивается по каждой валюте отдельно (толерантно): валюта без курса не валит экран — позиция видна, в итог не входит, код валюты попадает в `missing_rates`. Если курс валюты бюджета недоступен, итог не считается (`null`).
 - `bot/invest.ts` (`/invest`, экран INVEST — только просмотр) и `tma/holdings.ts` (`/api/tma/holdings`, CRUD) используют один и тот же `portfolioView`. Мутации по id — `WHERE id=? AND user_id=?`; партнёру по household позиции не отдаются.
 - Цели распределения — `profiles.invest_targets` (`GET`/`PATCH /api/tma/profile`). По ним план делит долю бонуса «в DCA» (`bonus.dca_split` в Mini App, строка «DCA → …» в `/plan` бота) вместо прежней заглушки `{USD:1}`.
+
+## Журнал покупок/продаж (T3d1): сделки позиции
+
+Миграция 0026: таблица `holding_trades` и колонки кэша в `holdings` (`realized_minor`, `closed_on`, `hidden`, `trade_rev`).
+Журнал — источник истины; `holdings.quantity`/`invested` — кэш свёртки. Сделка только в валюте позиции.
+
+- `domain/trades.ts` — чистые функции без I/O: `applyTrade` (покупка добавляет количество и «потрачено»; продажа — прибыль по средней цене: себестоимость куска = q × invested / quantity, комиссия внутри суммы), `foldTrades` (свёртка журнала: начальная запись, затем по дате, затем по id), `startingTrade` (начальная запись старой позиции из `invested` или quantity × avg_price), `avgCost`. Арифметика — `domain/decimal.ts` (BigInt, строки).
+- `services/trades.ts` — `addTrade`, `removeTrade`, `tradesView`. Инкремент от кэша позиции, если дата не раньше последней сделки; иначе полная свёртка журнала. Ошибки (409): `oversell`, `invested_required`, `initial_locked` (начальную запись нельзя удалить, пока есть другие), `limit` (≤200 сделок на позицию), `trades_unsupported` (только крипта, акции, облигации).
+- `db/scoped/trades.ts` — `commitTrades(holdingId, expectedRev, {inserts, deleteIds}, state)`: один `db.batch` — вставки/удаления сделок и обновление `holdings` (quantity, invested, `realized_minor`, `closed_on`, `trade_rev + 1`) с условием `trade_rev = expected`. Версия не совпала — ничего не записано, `conflict` (409). Дубль `source_key` — UNIQUE, batch откатывается, ответ `duplicate: true`.
+- `closed_on` — дата полной продажи (количество стало 0). Покупка снимает её и сбрасывает `hidden`. `hidden` ставится только у закрытой позиции (иначе 409 `not_closed`).
+- **Блокировка ручных правок:** при наличии сделок `PATCH /api/tma/holdings/:id` с `quantity`/`invested`/`avg_price`/`currency` → 409 `trades_locked`. Название, тикер, цена, заметка и ставка правятся как раньше.
+- Маршруты (`tma/trades.ts`, регистрация — `http/router.ts`, все за `tmaAuth`): `GET /api/tma/holdings/:id/trades` (сделки, результат по каждой продаже, `limit`); `POST /api/tma/holdings/:id/trades` (`side`, `quantity`, `amount` — строками; `traded_on` — не позже сегодня, по умолчанию сегодня; `client_id` — идемпотентность; 201 или `duplicate: true`); `DELETE /api/tma/holdings/:id/trades/:tradeId`. Схема строгая (`strict`): `user_id` и `holding_id` из тела не принимаются. Чужая позиция или сделка → 404.
+- **Приватность:** `quantity`, `amount`, `note` сделок — `enc1:` (`FIELDS`, `holding_trades`); по ним нет WHERE и SQL-агрегатов. Партнёру по household сделки и позиции не отдаются (`householdSummary` их не содержит). Сделки не уходят во внешние провайдеры цен.
+- **Экспорт и удаление:** `/export` — `schema_version: 10`, раздел `holding_trades` (служебные `source_key` и `trade_rev` не экспортируются). `/delete_me` удаляет `holding_trades` раньше `holdings`; удаление позиции убирает и её сделки.
+- Бот сделок не ведёт; `/invest` показывает число закрытых позиций («Закрытых: N»). В Mini App — форма «Покупка/Продажа» (`apps/web/src/screens/invest-trade.tsx`).
+- Тесты: `test/domain/trades.test.ts` (свёртка, средняя цена, 8 знаков), `test/trades.test.ts` (шифрование, «A не видит и не пишет сделки B», гонки, блокировки, лимит, экспорт, бот).
 
 ## Автоцены крипты (T3b): слой `prices/`
 
@@ -223,7 +240,7 @@ JWT; невалидный JWT → 401 на любом `/api/tma/*`; токено
 
 **Приватность.** Наружу уходят только id монет и валюта котировки; имена позиций, суммы, количества и `user_id` — нет. `price_quotes` общий для всех пользователей (как `fx_rates`) и не содержит данных пользователя; поэтому не входит в `FIELDS` и не участвует в `/delete_me`.
 
-**Экспорт.** `/export` — `schema_version: 9`: в `holdings` есть `invested` (0025) и `auto_price`, в `profile` — `auto_prices_enabled`.
+**Экспорт.** `/export` — `schema_version: 9`: в `holdings` есть `invested` (0025) и `auto_price`, в `profile` — `auto_prices_enabled`. С T3d1 — `schema_version: 10` (раздел `holding_trades`, см. ниже).
 
 ## Автоцены акций и облигаций Мосбиржи (T3c): MOEX ISS
 

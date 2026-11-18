@@ -19,6 +19,7 @@ import {
   type EffectivePrice,
   type HoldingKind,
 } from '../domain/portfolio';
+import { avgCost } from '../domain/trades';
 import { SUPPORTED_TICKERS } from '../domain/coins';
 import { priceRefFor, type PriceRef } from '../domain/price-ref';
 import { COINGECKO_ATTRIBUTION } from '../prices/coingecko';
@@ -71,6 +72,16 @@ export interface HoldingItem {
   /** Цены нет — оценено по «потрачено», результат 0. */
   valued_at_cost: boolean;
   accrued_minor: number | null;
+  /** Число записей журнала (T3d1); 0 — журнала нет, количество правится вручную. */
+  trades_count: number;
+  /** Зафиксированный результат продаж (minor валюты позиции); null — продаж не было. */
+  realized_minor: number | null;
+  /** Дата полной продажи; null — позиция открыта. */
+  closed_on: string | null;
+  /** Закрытая позиция скрыта из списка. */
+  hidden: boolean;
+  /** Средняя цена покупки остатка (десятичная строка); null — нет данных. */
+  avg_cost: string | null;
 }
 
 export interface PortfolioView {
@@ -143,6 +154,7 @@ export const toHoldingItem = (
   eff: EffectivePrice = effectivePrice(h, null, today, '', false),
   autoNote: HoldingItem['auto_note'] = null,
   provider: PriceRef['source'] | null = null,
+  tradesCount = 0,
 ): HoldingItem => {
   const val = valuation({ ...h, price: eff.price });
   return {
@@ -175,6 +187,11 @@ export const toHoldingItem = (
   pnl_minor: val.pnlMinor,
   valued_at_cost: val.atCost,
   accrued_minor: depositAccrued(h, today),
+  trades_count: tradesCount,
+  realized_minor: h.realized_minor,
+  closed_on: h.closed_on,
+  hidden: h.hidden === 1,
+  avg_cost: h.closed_on ? null : avgCost({ quantity: h.quantity, invested: investedStr(h) }),
   };
 };
 
@@ -187,8 +204,9 @@ export async function portfolioView(
   now: Date = new Date(),
 ): Promise<PortfolioView> {
   const rows = (await repo.listHoldings()).results;
+  const tradeCounts = await repo.countTradesByHolding();
   const autoEnabled = p.auto_prices_enabled === 1;
-  const refOf = (h: HoldingRow): PriceRef | null => (h.auto_price !== 0 ? priceRefFor(h.kind, h.ticker) : null);
+  const refOf = (h: HoldingRow): PriceRef | null => (h.auto_price !== 0 && !h.closed_on ? priceRefFor(h.kind, h.ticker) : null);
   // Автоцены: только при флаге профиля и настроенном провайдере (иначе ноль запросов).
   const quotes: Partial<Record<PriceRef['source'], QuoteResult>> = {};
   if (autoEnabled) {
@@ -220,7 +238,7 @@ export async function portfolioView(
       }
     }
     const eff = effectivePrice(h, q, today, nowIso, autoEnabled && !!qr, ref?.source === 'moex' ? MOEX_POLICY : CRYPTO_POLICY);
-    return toHoldingItem(h, today, eff, note, ref?.source ?? null);
+    return toHoldingItem(h, today, eff, note, ref?.source ?? null, tradeCounts.get(h.id) ?? 0);
   });
   const base = p.living_currency;
   const foreign = items.some((i) => i.currency !== base);

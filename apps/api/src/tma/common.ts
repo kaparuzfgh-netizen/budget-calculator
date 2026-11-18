@@ -12,6 +12,7 @@ import { getFxRates } from '../fx/service';
 import { FxUnavailable, type FxProvider } from '../fx/provider';
 import { DomainError } from '../domain/errors';
 import { normalizeDec } from '../domain/decimal';
+import { MAX_TRADES_PER_HOLDING } from '../domain/trades';
 
 export type TmaContext = Context<{ Bindings: Env; Variables: { tmaUser: UserRow } }>;
 
@@ -22,6 +23,7 @@ export const LIMITS = {
   maxDebts: 20, // P2-2: активные кредиты — реестр и replay не разрастаются
   maxLoans: 100, // P2-2: открытые займы (closed_at IS NULL)
   maxHoldings: 50, // T3a: позиции ручного инвест-портфеля
+  maxTradesPerHolding: MAX_TRADES_PER_HOLDING, // T3d1: журнал сделок позиции
   maxNote: 200,
   maxName: 60,
   clientIdMax: 64,

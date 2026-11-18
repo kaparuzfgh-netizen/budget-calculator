@@ -216,7 +216,30 @@ export interface HoldingRow {
   note: string | null;
   /** 1 — брать автоцену, если есть (0024); 0 — всегда ручная. */
   auto_price: number;
+  /** Зафиксированный результат продаж, minor units валюты позиции (0026, enc1:); null — продаж не было. */
+  realized_minor: number | null;
+  /** Дата полной продажи (0026); null — позиция открыта. */
+  closed_on: string | null;
+  /** 1 — закрытая позиция скрыта из списка (0026). */
+  hidden: number;
+  /** Версия для CAS-записи сделок (0026). */
+  trade_rev: number;
   source_key: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Сделка журнала позиции (0026). quantity/amount — канонические десятичные строки в валюте позиции. */
+export interface TradeRow {
+  id: number;
+  user_id: number;
+  holding_id: number;
+  side: 'buy' | 'sell';
+  is_initial: number;
+  quantity: string;
+  amount: string;
+  traded_on: string;
+  note: string | null;
+  source_key: string | null;
+  created_at: string;
 }

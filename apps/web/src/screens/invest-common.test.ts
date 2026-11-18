@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBody, needsPrice, emptyForm, formError, normDec, targetsFrom } from './invest-common';
+import { buildBody, buildTradeBody, cmpDec, needsPrice, emptyForm, formError, isLocked, normDec, splitPositions, targetsFrom, tradeFormError } from './invest-common';
 
 const crypto = { ...emptyForm('crypto'), name: 'BTC', currency: 'usd', quantity: '0,12345678', invested: '128,5', price: '30000.50' };
 
@@ -110,5 +110,38 @@ describe('T3c: акции и облигации Мосбиржи', () => {
   });
   it('крипта не зависит от бирожевого правила', () => {
     expect(needsPrice({ ...emptyForm('crypto'), ticker: 'SBER' }, ['BTC'])).toBe(true);
+  });
+});
+
+describe('журнал сделок (T3d1)', () => {
+  const tf = { side: 'sell' as const, quantity: '0,5', amount: '100', tradedOn: '2026-01-02', note: ' x ' };
+  it('cmpDec: BigInt, 8-й знак', () => {
+    expect(cmpDec('1.00000001', '1')).toBe(1);
+    expect(cmpDec('1', '1.00000000')).toBe(0);
+    expect(cmpDec('0,5', '0.50000001')).toBe(-1);
+  });
+  it('tradeFormError: пусто/ноль/больше остатка/будущее', () => {
+    expect(tradeFormError({ ...tf, quantity: '' }, '1')).toMatch(/Количество/);
+    expect(tradeFormError({ ...tf, amount: '0' }, '1')).toMatch(/Сумма/);
+    expect(tradeFormError({ ...tf, quantity: '1.00000001' }, '1')).toMatch(/Нельзя продать больше/);
+    expect(tradeFormError(tf, null)).toMatch(/Нельзя продать/);
+    expect(tradeFormError(tf, '0.5')).toBeNull();
+    expect(tradeFormError({ ...tf, side: 'buy', quantity: '999' }, null)).toBeNull();
+    expect(tradeFormError({ ...tf, tradedOn: '2999-01-01' }, '1', '2026-01-02')).toMatch(/будущем/);
+  });
+  it('buildTradeBody: строки и client_id', () => {
+    const b = buildTradeBody(tf, 'cid');
+    expect(b).toEqual({ side: 'sell', quantity: '0.5', amount: '100', traded_on: '2026-01-02', note: 'x', client_id: 'cid' });
+  });
+  it('isLocked и buildBody без quantity/invested/currency', () => {
+    expect(isLocked({ trades_count: 2 })).toBe(true);
+    expect(isLocked({ trades_count: 0 })).toBe(false);
+    const b = buildBody(crypto, { original: crypto, locked: true });
+    for (const k of ['quantity', 'invested', 'currency']) expect(k in b, k).toBe(false);
+  });
+  it('splitPositions: открытые / закрытые / скрытые', () => {
+    const mk = (closed_on: string | null, hidden: boolean) => ({ closed_on, hidden }) as never;
+    const r = splitPositions([mk(null, false), mk('2026-01-01', false), mk('2026-01-01', true)]);
+    expect([r.open.length, r.closed.length, r.hidden.length]).toEqual([1, 1, 1]);
   });
 });

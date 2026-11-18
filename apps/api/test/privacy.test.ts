@@ -50,7 +50,7 @@ async function onboarded(tgId: number) {
 }
 /** Таблицы с колонкой user_id (PRAGMA/sqlite_master в workerd D1 запрещены — список статичен по миграциям). */
 function userIdTables(): string[] {
-  return ['consents', 'audit_log', 'profiles', 'commitments', 'commitment_changes', 'commitment_payments', 'weekly_expenses', 'categories', 'income_entries', 'debts', 'debt_events', 'loans', 'loan_events', 'exchanges', 'conversation_state', 'reminder_log'];
+  return ['consents', 'audit_log', 'profiles', 'commitments', 'commitment_changes', 'commitment_payments', 'weekly_expenses', 'categories', 'income_entries', 'debts', 'debt_events', 'loans', 'loan_events', 'exchanges', 'conversation_state', 'reminder_log', 'holdings', 'holding_trades'];
 }
 
 describe('/export', () => {
@@ -97,7 +97,7 @@ describe('/export', () => {
       exchanges: { from_ccy: string; note: string; user_id: number }[];
       schema_version: number;
     };
-    expect(j.schema_version).toBe(9);
+    expect(j.schema_version).toBe(10);
     expect(j.profile.user_id).toBe(uidA);
     expect(j.commitments.map((c) => c.name)).toEqual(['A-тайное']);
     expect(j.commitment_payments).toHaveLength(1);

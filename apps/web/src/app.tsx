@@ -24,6 +24,7 @@ import { ReportScreen } from './screens/report';
 import { CategoriesScreen } from './screens/categories';
 import { InvestScreen } from './screens/invest';
 import { InvestFormScreen } from './screens/invest-form';
+import { InvestTradeScreen } from './screens/invest-trade';
 
 export type Route =
   | { id: 'home' }
@@ -45,7 +46,8 @@ export type Route =
   | { id: 'report' }
   | { id: 'categories' }
   | { id: 'invest' }
-  | { id: 'invest-form'; holdingId?: number };
+  | { id: 'invest-form'; holdingId?: number }
+  | { id: 'invest-trade'; holdingId: number; side: 'buy' | 'sell' };
 
 export interface Nav {
   push: (r: Route) => void;
@@ -156,6 +158,9 @@ export function App({ api, name, onFatal }: { api: Api; name: string | null; onF
       break;
     case 'invest-form':
       screen = <InvestFormScreen {...props} {...(top.holdingId !== undefined ? { holdingId: top.holdingId } : {})} />;
+      break;
+    case 'invest-trade':
+      screen = <InvestTradeScreen {...props} holdingId={top.holdingId} side={top.side} />;
       break;
     default:
       screen = <HomeScreen {...props} name={name} />;

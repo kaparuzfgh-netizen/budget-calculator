@@ -4,9 +4,11 @@ import type { HoldingRow } from './types';
 import type { Ctx } from './ctx';
 
 /** Поля позиции, доступные для создания/правки (id, user_id, source_key, метки времени — нет). */
-export type HoldingInput = Omit<HoldingRow, 'id' | 'user_id' | 'source_key' | 'created_at' | 'updated_at' | 'auto_price' | 'invested'> & {
+export type HoldingInput = Omit<HoldingRow, 'id' | 'user_id' | 'source_key' | 'created_at' | 'updated_at' | 'auto_price' | 'invested' | 'realized_minor' | 'closed_on' | 'hidden' | 'trade_rev'> & {
   invested?: string | null;
   auto_price?: number;
+  /** Скрыть закрытую позицию (PATCH); создание всегда с 0. */
+  hidden?: number;
 };
 
 const PATCHABLE = [
@@ -25,6 +27,7 @@ const PATCHABLE = [
   'matures_on',
   'note',
   'auto_price',
+  'hidden',
 ] as const;
 
 export function holdingsRepo({ db, userId, en }: Ctx) {
@@ -88,8 +91,13 @@ export function holdingsRepo({ db, userId, en }: Ctx) {
       binds.push(id, userId);
       return db.prepare(`UPDATE holdings SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).bind(...binds).run();
     },
-    deleteHolding(id: number) {
-      return db.prepare('DELETE FROM holdings WHERE id = ? AND user_id = ?').bind(id, userId).run();
+    /** Позиция + её сделки одним batch (FK: сначала сделки). */
+    async deleteHolding(id: number) {
+      const res = await db.batch([
+        db.prepare('DELETE FROM holding_trades WHERE holding_id = ? AND user_id = ?').bind(id, userId),
+        db.prepare('DELETE FROM holdings WHERE id = ? AND user_id = ?').bind(id, userId),
+      ]);
+      return res[1]!;
     },
   };
 }

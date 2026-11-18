@@ -927,3 +927,370 @@ debounce на клиенте; серверный лимит не вводим (�
 5. Пользуемся биржевыми ценами только для личного учёта, а перед любой платной версией бота заново проверяем правила биржи? (По умолчанию — да.)
 
 задачу можно переводить в `[READY]`
+
+---
+
+### План задачи: T3d1 Журнал покупок/продаж
+
+Источник: `TASKS.md` T3d (вердикт advisor — GO с правками; ответы владельца утверждены),
+BACKLOG P1-9 (T3d). Продолжение T3a/T3b/T10/T3c (в проде: `holdings` с `invested` (0025),
+`domain/decimal.ts` (`mulToMinor`, `mulDec`, `addDec`, `divDecPow10`), `domain/portfolio.ts`
+(`valuation`, `investedMinor`), `services/portfolio.ts`, `tma/holdings.ts`, `bot/invest.ts`,
+`web/screens/invest*.tsx`). Правила: AGENTS.md 2, 3, 5, 6, 9, 10, 11, 19, 20, 21.
+
+**Решения владельца (не пересматриваются):** (1) прибыль при продаже — по **средней цене**
+покупки; (2) при наличии сделок ручная правка количества и «потрачено» в PATCH **закрыта**;
+(3) комиссия — **внутри суммы** сделки; (4) проданная целиком позиция остаётся **«закрыта»** с
+итоговым результатом и может быть **скрыта**.
+
+#### 0. Что получится для пользователя
+
+- В форме позиции (крипта, акции, облигации) Mini App появляется блок **«Сделки»**: кнопки
+  «Купить ещё» и «Продать» и список: «12.11 · купил 0.5 BTC за 15 000 USD (≈ 30 000 за 1)»,
+  «20.11 · продал 0.2 BTC за 9 000 USD · +3 000».
+- Покупка: «Потратил [сумма]» + «Получил [количество]» + дата. Продажа: «Продал [количество]» +
+  «Получил [сумма]» + дата (кнопка «Всё» подставляет весь остаток). Подсказка: «Сумму вводите
+  с комиссией — сколько реально ушло / пришло».
+- Количество, «потрачено» и средняя цена пересчитываются сами. При продаже показывается
+  **«зафиксировано +X»** (выручка минус средняя цена покупки × проданное количество).
+- Когда у позиции есть сделки, «Количество», «Потратил» и валюта в форме — только для чтения
+  с подписью «меняется через сделки». Название, тикер, цена, заметка — правятся как раньше.
+- Продали всё — позиция остаётся как **«Закрыта · результат +X»** (стоимость 0, в итог и доли
+  не входит, цены для неё не запрашиваются). В форме — кнопка «Скрыть из списка»; скрытые —
+  под ссылкой «Показать скрытые (N)». Купили снова — позиция открывается.
+- Ошибочную сделку можно удалить (с подтверждением). Правки сделки нет — удалить и внести заново.
+- Старые позиции работают как раньше. При первой сделке их текущие количество и «потрачено»
+  становятся **«начальной записью»** журнала (не нужно вспоминать прошлые покупки).
+- Бот `/invest`: «позиций: N» считает только открытые; строка «Закрытых: M». Экраны бота
+  не меняются.
+
+#### 1. Цель и границы
+
+**Входит:** таблица `holding_trades` и 4 колонки `holdings` (миграция 0026); домен сделок
+(свёртка журнала, средняя цена, зафиксированный результат, «нельзя продать больше, чем есть»);
+`subDec`/`divDec`/`mulDivDec` в `decimal.ts`; API: список/добавить/удалить сделку; блокировка
+ручной правки `quantity`/`invested`/`avg_price`/`currency` при сделках; закрытие и скрытие;
+`/export` (`schema_version` 9 → 10) и `/delete_me`; UI Mini App; мелкая правка `/invest` в боте.
+
+**Не входит:** T3d2 напоминания о погашении; T3d3 купоны/погашения/амортизация (MOEX);
+правка сделки (только удаление); FIFO/LIFO, налоговые отчёты; сделки для `deposit`/`other`;
+сделка в валюте, отличной от валюты позиции (никакой конвертации); импорт выписок
+брокера/биржи; ввод сделок в боте; переводы между позициями; сплиты акций; cron и пуши;
+партнёру по household — ничего (правило 20, `householdSummary` не меняется).
+
+#### 2. Данные — миграция `apps/api/migrations/0026_holding_trades.sql`
+
+```sql
+-- 0026_holding_trades.sql — журнал покупок/продаж позиций (T3d1).
+-- Чувствительные колонки — enc1: (FIELDS в src/db/crypto.ts). Количества и суммы —
+-- канонические десятичные строки (domain/decimal.ts, правило 21), в валюте позиции.
+CREATE TABLE IF NOT EXISTS holding_trades (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  holding_id  INTEGER NOT NULL REFERENCES holdings(id),
+  side        TEXT    NOT NULL CHECK (side IN ('buy','sell')),
+  is_initial  INTEGER NOT NULL DEFAULT 0 CHECK (is_initial IN (0,1)), -- начальная запись старой позиции
+  quantity    TEXT    NOT NULL,   -- enc1: str, сколько единиц куплено/продано
+  amount      TEXT    NOT NULL,   -- enc1: str, сколько всего ушло/пришло, с комиссией
+  traded_on   TEXT    NOT NULL,   -- 'YYYY-MM-DD', plaintext
+  note        TEXT,               -- enc1: str
+  source_key  TEXT,               -- 'tma:<client_id>' | 'init:<holding_id>' (идемпотентность)
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_holding_trades ON holding_trades(user_id, holding_id, traded_on, id);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_holding_trades_user_key
+  ON holding_trades(user_id, source_key) WHERE source_key IS NOT NULL;
+
+-- Кэш свёртки журнала в позиции (источник истины — holding_trades).
+ALTER TABLE holdings ADD COLUMN realized_minor INTEGER;                -- enc1: num, зафиксированный результат (minor units валюты позиции)
+ALTER TABLE holdings ADD COLUMN closed_on TEXT;                        -- 'YYYY-MM-DD' дата полной продажи, plaintext; NULL — открыта
+ALTER TABLE holdings ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;     -- 1 — закрытая позиция скрыта из списка
+ALTER TABLE holdings ADD COLUMN trade_rev INTEGER NOT NULL DEFAULT 0;  -- версия для CAS-записи сделок
+```
+
+**`FIELDS` (`apps/api/src/db/crypto.ts`):**
+`holding_trades: { quantity: 'str', amount: 'str', note: 'str' }`; в `holdings` добавить
+`realized_minor: 'num'`. Plaintext: `side` (enum с CHECK), `is_initial`, `traded_on`,
+`holding_id`, `source_key`, `closed_on`, `hidden`, `trade_rev` — как `kind`/даты у `holdings`.
+Ни WHERE, ни ORDER BY, ни SUM по `quantity`/`amount`/`note`/`realized_minor`: суммы и свёртка —
+в JS после дешифровки. `COUNT(*)` и `MAX(traded_on)` по plaintext-колонкам допустимы.
+`encryptBackfill` подхватит таблицу (итерирует `FIELDS`) — проверить тестом.
+
+**2.1 Ключевое решение: журнал — источник истины, `holdings` — кэш свёртки.** Если считать
+количество/«потрачено» из журнала на каждом GET портфеля, это до 50 позиций × 200 сделок ×
+3 расшифровки — не влезает в CPU 10 мс Workers Free. Поэтому каждая запись сделки в одном
+атомарном `db.batch` (D1 — транзакция) кладёт новые `quantity`, `invested`, `realized_minor`,
+`closed_on` в строку позиции. GET портфеля журнал **не читает**. Целостность — CAS по
+`trade_rev` (2.2) и тест-инвариант «кэш = свёртка журнала».
+
+**2.2 Атомарная запись (CAS).** Сервис читает позицию (`trade_rev = r`), считает новое
+состояние в JS и шлёт одним `db.batch`:
+1. (только для первой сделки старой позиции) `INSERT OR IGNORE INTO holding_trades (…) SELECT …
+   WHERE EXISTS (SELECT 1 FROM holdings WHERE id=? AND user_id=? AND trade_rev=?)` — начальная
+   запись, `source_key='init:<holding_id>'`;
+2. вставка/удаление сделки с тем же `WHERE EXISTS (… trade_rev = r)` (удаление ещё и
+   `WHERE id=? AND user_id=? AND holding_id=?`);
+3. `UPDATE holdings SET quantity=?, invested=?, realized_minor=?, closed_on=?,
+   hidden = CASE WHEN ? IS NULL THEN 0 ELSE hidden END, trade_rev = trade_rev + 1,
+   updated_at = datetime('now') WHERE id=? AND user_id=? AND trade_rev=?`.
+Применилось ⇔ `changes = 1` у шага 3. Иначе (параллельная запись) — ничего не изменилось
+(все шаги под одним предикатом версии): повтор поиска по `source_key` → `{duplicate:true}`
+или 409 `conflict` (клиент повторяет с тем же `client_id`). `EXISTS` с `user_id` — это и есть
+**проверка владения позицией внутри записи**: даже подделанный `holding_id` чужой позиции
+даёт 0 строк.
+
+**2.3 Ленивая начальная запись.** Старые позиции (и все новые — POST позиции не меняется)
+живут без журнала. При первой сделке создаётся начальная запись: `side='buy'`,
+`is_initial=1`, `quantity = holdings.quantity`, `amount = invested` (или
+`mulDec(quantity, avg_price)` у строк T3a без `invested`), `traded_on = opened_on ??
+date(created_at)`. Нет ни `invested`, ни `avg_price` → 409 `invested_required` («Сначала
+укажите в позиции, сколько потратили»), ничего не пишется. В свёртке начальная запись
+всегда первая, независимо от даты. Если после удаления сделки в журнале остаётся только
+начальная запись — она удаляется тем же batch, позиция возвращается к ручному режиму
+(состояние = значения начальной записи, `realized_minor = NULL`).
+
+**2.4 Инкремент или полная пересборка.** Добавление сделки с датой ≥ последней
+(`MAX(traded_on)` по plaintext, при равенстве — порядок по id) — инкремент от кэша позиции,
+журнал не читается. Сделка задним числом и удаление сделки — полная пересборка: чтение
+журнала позиции (≤ 200 строк), сортировка в JS, свёртка. Пересборка может выявить «продано
+больше, чем было» (удалили покупку, на которой держалась продажа; покупка задним числом не
+может, продажа задним числом — может) → 409 `oversell`, ничего не пишется.
+
+#### 3. Домен (чистые функции, без I/O; «сегодня» — параметром)
+
+**3.1 `domain/decimal.ts` (дополнить, BigInt через `parseNonNeg`/`canonFromUnits`, без float):**
+- `subDec(a, b): string | null` — `a − b`; при равенстве возвращает `'0'` (единственный
+  неканонический результат, вызывающий проверяет `=== '0'`); `null` — результат < 0 или кривой ввод.
+- `divDec(a, b): string | null` — `a / b`, half-up до 8 знаков; `null` — `b = 0`, результат
+  округлился в 0 или > 12 цифр целой части.
+- `mulDivDec(a, b, c): string | null` — `a × b / c` одним округлением (без промежуточной
+  потери 8-го знака); нужно для «доли потраченного» при частичной продаже.
+
+**3.2 `domain/trades.ts` (новый):**
+- `TRADE_KINDS = ['crypto','stock','bond']`, `MAX_TRADES_PER_HOLDING = 200`.
+- `TradeLike { id, side: 'buy'|'sell', quantity, amount, traded_on, is_initial }`;
+  `PositionState { quantity: string|null, invested: string|null, realizedMinor: number|null, closedOn: string|null }`.
+- `sortTrades(ts)` — начальная первой, затем `traded_on`, затем `id`.
+- `applyTrade(state, t) → { state, realizedMinor: number|null }`:
+  - **buy:** `quantity = addDec(q0, q)`, `invested = addDec(inv0, amount)`, `closedOn = null`;
+    переполнение (`null`) → `DomainError('TOO_LARGE')`.
+  - **sell:** `q > quantity` (`compareDec`) → `DomainError('OVERSELL')`. Доля «потрачено»:
+    `cost = (q == quantity) ? invested : mulDivDec(invested, q, quantity)` (полная продажа —
+    без деления, нет остатка в копейку). Результат продажи
+    `r = mulToMinor(amount,'1') − mulToMinor(cost,'1')` (каждое — half-up до minor; расхождение
+    ≤ 1 minor — допустимо и описано в тестах). `realizedMinor += r`;
+    `quantity = subDec(quantity, q)`, `invested = subDec(invested, cost)`; если `quantity === '0'`
+    → `quantity = null`, `invested = null`, `closedOn = t.traded_on`.
+  Это и есть «прибыль по средней цене»: `cost = q × invested/quantity = q × средняя цена`.
+- `foldTrades(ts) → { state, perTrade: Map<id, realizedMinor|null> }` — свёртка от пустого
+  состояния по `sortTrades`.
+- `startingTrade(h) → Omit<TradeLike,'id'> | null` — правило 2.3 (строки T3a: `mulDec(quantity, avg_price)`).
+- `avgCost(state) → string | null` — `divDec(invested, quantity)`; `unitPrice(t)` —
+  `divDec(amount, quantity)` для подписи в списке.
+- `tradeError(kind, closedOn?)` — вид вне `TRADE_KINDS` → `DomainError('TRADES_UNSUPPORTED')`.
+
+**3.3 `domain/portfolio.ts`:** `HoldingLike += closed_on, realized_minor`. `valuation`:
+закрытая позиция (`closed_on` задан) → `{valueMinor: 0, pnlMinor: null, atCost: false}`.
+`pnlMinor` открытой позиции — как раньше («сейчас − оставшееся потрачено»); зафиксированное
+отдаётся отдельно (`realized_minor`). `portfolioTotals`/`allocation` не меняются (у закрытых 0).
+
+**3.4 Эталонные примеры (юнит-тесты; `golden.legacy.json` не трогаем):**
+- А: buy 1 BTC / 30000; buy 1 / 50000 → qty `2`, invested `80000`, avg `40000`.
+  sell 0.5 / 30000 → cost `20000`, результат +1 000 000 minor; qty `1.5`, invested `60000`.
+  sell 1.5 / 45000 → cost `60000` (полная, без деления), результат −1 500 000; итог −500 000;
+  `closedOn` = дата продажи, qty/invested = null.
+- Б (8 знаков): buy 0.00000003 / 0.01; sell 0.00000001 / 0.01 → cost
+  `mulDivDec('0.01','0.00000001','0.00000003') = '0.00333333'`, результат +1 minor; остаток
+  qty `0.00000002`, invested `0.00666667`.
+- В: sell 1.00000001 при qty 1 → `OVERSELL`.
+- Г: покупка задним числом перед продажей меняет результат этой продажи (пересборка).
+- Д: удаление покупки, после которого продажа больше остатка → `OVERSELL`.
+- Е: buy после закрытия → позиция открыта, `closedOn = null`, `realizedMinor` сохранился.
+- `subDec('1','1') = '0'`, `subDec('1','2') = null`; `divDec('1','3') = '0.33333333'`,
+  `divDec('1','0') = null`; `mulDivDec` half-up на 8-м знаке.
+
+#### 4. Слои и файлы
+
+| Слой | Файл | Что |
+|---|---|---|
+| Домен | `apps/api/src/domain/decimal.ts` | `subDec`, `divDec`, `mulDivDec` (3.1) |
+| Домен | `apps/api/src/domain/trades.ts` (новый) | 3.2 |
+| Домен | `apps/api/src/domain/portfolio.ts` | `HoldingLike` += `closed_on`, `realized_minor`; `valuation` для закрытых |
+| Данные | `apps/api/migrations/0026_holding_trades.sql` | §2 |
+| Данные | `apps/api/src/db/crypto.ts` | `FIELDS.holding_trades`, `FIELDS.holdings.realized_minor` |
+| Данные | `apps/api/src/db/scoped/types.ts` | `TradeRow`; `HoldingRow` += `realized_minor`, `closed_on`, `hidden`, `trade_rev` |
+| Данные | `apps/api/src/db/scoped/trades.ts` (новый, часть scoped) | `listTrades(holdingId)` (`WHERE user_id=? AND holding_id=?`, `decRows`, порядок — в JS); `countTrades(holdingId)`; `countTradesByHolding()` (`GROUP BY holding_id`, plaintext) → `Map`; `lastTradeOn(holdingId)`; `findTradeByKey(key)`; `commitTrades(holdingId, rev, {inserts, deleteIds}, state)` — batch 2.2, возвращает `{applied, insertedId}`. Все шифруемые поля через `en(...)` |
+| Данные | `apps/api/src/db/scoped/index.ts`, `db/repo.ts` | подключить `tradesRepo(c)`, экспорт типа `TradeRow` |
+| Данные | `apps/api/src/db/scoped/holdings.ts` | `PATCHABLE += 'hidden'`; `HoldingInput` без `realized_minor/closed_on/trade_rev` (их пишет только `commitTrades`); `deleteHolding` → `db.batch([DELETE FROM holding_trades WHERE holding_id=? AND user_id=?, DELETE FROM holdings WHERE id=? AND user_id=?])` (FK D1 включены — сначала сделки) |
+| Данные | `apps/api/src/db/scoped/userdata.ts` | export: `holding_trades` (`SELECT … WHERE user_id=? ORDER BY id` + `decRows`), `strip` убирает `source_key` и `trade_rev`; `schema_version: 10`; delete_me: `'holding_trades'` **перед** `'holdings'` |
+| Сервис | `apps/api/src/services/trades.ts` (новый) | `addTrade(repo, holdingId, input, today)`, `removeTrade(repo, holdingId, tradeId)`, `tradesView(repo, holdingId)`: загрузка позиции (`getHolding` → нет → `not_found`), проверки вида/лимита/начальной записи, инкремент/пересборка (2.4), `commitTrades`, разбор CAS. Ошибки — типизированные (`{status, body}` как в `tma/common.err`) |
+| Сервис | `apps/api/src/services/portfolio.ts` | `HoldingItem` += `trades_count`, `realized_minor`, `closed_on`, `hidden`, `avg_cost`; refs автоцен **не** собираются для закрытых; `trades_count` — один `countTradesByHolding()` на GET |
+| TMA API | `apps/api/src/tma/trades.ts` (новый) + регистрация в `tma/api.ts` | маршруты §5 |
+| TMA API | `apps/api/src/tma/holdings.ts` | PATCH: блокировка при `trades_count > 0`; `hidden`; `shapeError` пропускает «нужно количество» у закрытых |
+| TMA API | `apps/api/src/tma/common.ts` | `LIMITS.maxTradesPerHolding = 200` (= домену) |
+| Бот | `apps/api/src/bot/invest.ts` | «позиций: N» — только открытые; строка «Закрытых: M»; экраны не меняются → `navigation.md`/`screens.json` без правок, `nav.test.ts` зелёный |
+| Web | `apps/web/src/api.ts` | `HoldingItem` += поля; типы `TradeItem`, `TradesView` |
+| Web | `apps/web/src/app.tsx` | экран `{ id: 'invest-trade'; holdingId: number; side: 'buy' \| 'sell' }` |
+| Web | `apps/web/src/screens/invest-trade.tsx` (новый) | форма сделки (§6) |
+| Web | `apps/web/src/screens/invest-form.tsx` | блок «Сделки», блокировка полей, закрытая позиция, «Скрыть» |
+| Web | `apps/web/src/screens/invest.tsx` | «зафиксировано», секция «Закрытые», «Показать скрытые (N)» |
+| Web | `apps/web/src/screens/invest-common.ts` | `isLocked`, `cmpDec` (BigInt по строкам), `tradeFormError`, `buildTradeBody`, `splitPositions`; `buildBody` не шлёт `quantity/invested/currency` при блокировке |
+| Web | `apps/web/src/demo/mock.ts`, `demo/tw.tsx` | моки сделок, закрытой и скрытой позиции |
+
+#### 5. API (`/api/tma/*`, Bearer JWT, `tmaAuth`, `needProfile`, scoped(user.id); `user_id` и `holding_id` из тела не принимаются)
+
+| Метод | Путь | Тело / ответ | Ошибки |
+|---|---|---|---|
+| GET | `/api/tma/holdings/:id/trades` | → `{ holding:{id, currency, quantity, invested, avg_cost, realized_minor, closed_on}, items:[{id, side, quantity, amount, unit_price, traded_on, note, initial, realized_minor\|null}], limit:200 }`; журнала нет → `items: []` (начальная запись на чтении не создаётся) | 401, 403, 404 (нет/чужая позиция) |
+| POST | `/api/tma/holdings/:id/trades` | `{side:'buy'\|'sell', quantity: zDec, amount: zDec, traded_on?: zIso, note?: string\|null, client_id?}` → 201 `{id, holding}`; повтор `client_id` → 200 `{id, duplicate:true}` | 400 `validation` (в т.ч. дата вне `dayInRange`, `TOO_LARGE`, JSON-число вместо строки), 404, 409 `trades_unsupported` (вклад/другое), 409 `invested_required`, 409 `oversell` («Нельзя продать больше, чем есть: X»), 409 `limit` (200), 409 `conflict` |
+| DELETE | `/api/tma/holdings/:id/trades/:tradeId` | → 200 `{ok:true, holding}`; осталась одна начальная → удаляется тоже | 404 (нет/чужая/другой позиции), 409 `oversell`, 409 `initial_locked` (начальную нельзя удалить, пока есть другие сделки), 409 `conflict` |
+| PATCH | `/api/tma/holdings/:id` | `+ hidden?: boolean`; при сделках поля `quantity`/`invested`/`avg_price`/`currency` → отказ | 409 `trades_locked` («Количество и сумма меняются через сделки»), 409 `not_closed` (скрыть открытую), прежние 400/404 |
+| DELETE | `/api/tma/holdings/:id` | удаляет позицию вместе со сделками (batch, сначала сделки) | 404 |
+| GET | `/api/tma/holdings` | items += `trades_count`, `realized_minor`, `closed_on`, `hidden`, `avg_cost`; скрытые отдаются с флагом (фильтрует UI) | без изменений |
+
+- Zod — `strict()` для тела сделки; `traded_on` по умолчанию — «сегодня» в таймзоне
+  профиля (`todayInTz`), допустимо 2000-01-01…сегодня; `note` — `LIMITS.maxNote`.
+- **Идемпотентность:** `source_key = 'tma:<client_id>'` + `UNIQUE(user_id, source_key)`;
+  проверка `findTradeByKey` до записи; после неудачного CAS — повторная проверка
+  (`dupResult`). Начальная запись — `'init:<holding_id>'` (UNIQUE ловит гонку).
+- **Валюта:** у сделки нет поля валюты — всегда валюта позиции; смена валюты позиции при
+  сделках закрыта (`trades_locked`).
+- **Владение:** `getHolding(id)` (`WHERE id=? AND user_id=?`) → 404; плюс `EXISTS` с
+  `user_id` внутри каждой записи (2.2). Удаление сделки — `WHERE id=? AND user_id=? AND holding_id=?`.
+- **Лимит:** `countTrades(holdingId) >= 200` → 409 `limit` (CAS не даст параллельно превысить
+  больше чем на одну запись; допустимо).
+- Логи (правило 10): только коды ошибок; ни количеств, ни сумм, ни заметок.
+
+#### 6. UI Mini App
+
+- **`invest-trade.tsx`** (новый экран, стиль обменника как в форме позиции): покупка —
+  «Потратил [сумма | валюта позиции текстом]» и «Получил [количество | тикер]»; продажа —
+  «Продал [количество | тикер]» (под полем «Есть: 1.5 BTC», кнопка «Всё») и «Получил
+  [сумма | валюта]». Дата (`type=date`, по умолчанию сегодня, `max` = сегодня), заметка.
+  Подсказка о комиссии. `client_id = crypto.randomUUID()` на попытку. Успех →
+  `nav.flash('Покупка записана' | 'Продажа записана')`, `nav.back()`. Ошибки 409 — текст сервера.
+- **`invest-form.tsx`** (правка позиции вида crypto/stock/bond): блок «Сделки» — кнопки
+  «Купить ещё»/«Продать» (продажа скрыта у закрытой), список из `GET …/trades`: дата,
+  купил/продал, количество, сумма, «≈ цена за 1», у продажи «+/−» (зелёный/красный — те же
+  классы, что у P&L); начальная запись — подпись «Начальная запись», без корзины, пока есть
+  другие сделки; корзина с подтверждением «Удалить сделку?». При `trades_count > 0`
+  количество, «Потратил» и валюта — текст + подпись «меняется через сделки». Закрытая
+  позиция: «Закрыта 20.11 · результат +X» и кнопка «Скрыть из списка» / «Показывать в
+  списке» (PATCH `hidden`). Подтверждение удаления позиции: «Удалить вместе с N сделками?».
+- **`invest.tsx`:** открытая позиция с ненулевым `realized_minor` — строка «зафиксировано +X»;
+  закрытые — отдельная секция «Закрытые» под открытыми, карточка «Закрыта · результат +X»;
+  скрытые не показываются, внизу секции ссылка «Показать скрытые (N)» (локальное состояние).
+- Цвета — только существующие токены палитры (dark/light), без literal `white|black/<alpha>`.
+- Деньги и количества уходят **строками**; сравнение «продаю не больше, чем есть» на клиенте —
+  `cmpDec` на BigInt (без `Number`), окончательная проверка — сервер.
+
+#### 7. Тесты
+
+- **Домен:** 3.4 целиком; `startingTrade` для строки с `invested`, строки T3a (`avg_price`)
+  и без обоих (`null`); `valuation` закрытой = 0; `sortTrades` — начальная первой даже при
+  более поздней дате.
+- **Шифрование:** сырой `SELECT` по `holding_trades` — `quantity/amount/note` начинаются с
+  `enc1:`; `holdings.realized_minor` — тоже; `encryptBackfill` шифрует legacy-plaintext строку сделки.
+- **«A не видит и не пишет сделки B»:** B — позиция со сделками. A: GET `…/holdings/<idB>/trades`
+  → 404; POST сделки на `idB` → 404, сырой `COUNT(*)` сделок позиции B и её строка не изменились;
+  DELETE `…/holdings/<своя>/trades/<сделка B>` → 404, сделка B на месте; DELETE
+  `…/holdings/<idB>/trades/<сделка B>` → 404. Repo-уровень: `commitTrades(idB, …)` от scoped(A)
+  → `applied:false`, 0 строк (предикат `EXISTS … user_id`). GET портфеля A — без позиций и
+  `trades_count` B.
+- **Идемпотентность:** два POST с одним `client_id` → одна сделка, количество не удвоилось,
+  второй ответ `duplicate:true`; один `client_id` у A и B — независимые записи; гонка двух
+  разных сделок (`Promise.all`) → обе применены или одна 409 `conflict`, но после неё
+  **инвариант: кэш позиции = `foldTrades(listTrades)`** (проверяется и после серии случайных
+  покупок/продаж/удалений).
+- **Ленивая начальная запись:** позиция T3a (qty 1, avg 30000, invested null) + продажа 0.5 /
+  20000 → 2 строки, начальная `amount='30000'`, результат +500 000; позиция без invested и avg →
+  409 `invested_required`, 0 строк; удаление единственной реальной сделки → журнал пуст,
+  PATCH `quantity` снова 200.
+- **Блокировка:** при сделках PATCH `quantity`/`invested`/`avg_price`/`currency` → 409
+  `trades_locked`; PATCH `name`/`price`/`note` → 200.
+- **Закрытие/скрытие:** продажа всего → `closed_on`, `value_minor 0`, не в итоге и долях;
+  фейковый провайдер цен не получает тикер закрытой позиции; PATCH `hidden:true` → 200,
+  на открытой → 409 `not_closed`; покупка после закрытия → открыта, `hidden` сброшен.
+- **Fail-closed / валидация:** без JWT → 401; не onboarded → 403; `traded_on` в будущем → 400;
+  `quantity` числом → 400; `side:'gift'` → 400; лишнее поле (`user_id`, `holding_id`) → 400
+  (strict); вклад → 409 `trades_unsupported`; 201-я сделка → 409 `limit` (засев через repo);
+  продажа больше остатка → 409 `oversell`, ничего не записано.
+- **Удаление:** DELETE позиции со сделками → нет ни позиции, ни сделок (FK не мешает);
+  `deleteAllUserData` → 0 строк `holding_trades` у A, сделки B на месте, FK не нарушен.
+- **Export:** `schema_version: 10`, раздел `holding_trades` без `source_key`; в `holdings` есть
+  `realized_minor`/`closed_on`/`hidden`, нет `trade_rev`. Обновить ожидания `9 → 10` в
+  `holdings.test.ts`, `prices.test.ts`, `privacy.test.ts`, `tma-api.test.ts`; в
+  `privacy.test.ts` `userIdTables()` добавить `'holdings'` и `'holding_trades'`.
+- **Household:** `householdSummary` не содержит сделок и результатов.
+- **Логи:** перехват `console.*` при ошибках сделок — нет количеств, сумм, заметок.
+- **Бот:** `renderInvest` — «позиций: N» без закрытых, строка «Закрытых: M».
+- **Web:** `tradeFormError` (пусто/ноль/больше остатка), `buildTradeBody` (строки, `client_id`),
+  `cmpDec` на 8-м знаке, `isLocked` → `buildBody` без `quantity/invested/currency`,
+  `splitPositions` (открытые/закрытые/скрытые и счётчик).
+
+#### 8. Риски и откат
+
+| Риск | Мера |
+|---|---|
+| Кэш позиции разошёлся с журналом | CAS по `trade_rev` в одном batch; полная пересборка при задним числом/удалении; тест-инвариант |
+| CPU 10 мс при пересборке (≤ 200 сделок × 3 расшифровки) | пересборка только при удалении/задним числом; лимит 200; инкремент без чтения журнала; GET портфеля журнал не читает. Если замеры покажут превышение — снизить лимит до 100 (константа) |
+| Копеечное расхождение «зафиксировано» | округление каждой суммы half-up до minor; полная продажа без деления; описано в тестах (≤ 1 minor на сделку) |
+| Пользователь не понимает «по средней цене» | подпись в «ⓘ» блока «Сделки»: «результат продажи = выручка − средняя цена покупки × количество» |
+| Блокировка правки раздражает (опечатка в сделке) | удалить сделку и внести заново; удаление последней реальной сделки возвращает ручной режим |
+| Позиция T3a без «потрачено» не может получить сделку | понятная 409 `invested_required` и подсказка в форме |
+| Порядок удаления и FK | `deleteHolding` и `delete_me` — сначала `holding_trades`; тесты |
+| Экспорт 10 ломает старые парсеры | экспорт для человека/архива; версия поднята явно |
+| Утечка партнёру | household-код не меняется, отдельный тест |
+
+**Откат.** Миграции иммутабельны: `0026` не редактируется. Быстрый откат — кодом (откат
+коммита): кэш в `holdings` уже содержит текущие количество и «потрачено», поэтому открытые
+позиции после отката показываются правильно; новые колонки и таблица просто не читаются.
+Закрытые позиции (`quantity = NULL`) старый код покажет со стоимостью 0 — приемлемо.
+Удалить схему — новой миграцией `0027_drop_holding_trades.sql`: `DROP TABLE holding_trades;`
+`ALTER TABLE holdings DROP COLUMN realized_minor;` `… DROP COLUMN closed_on;`
+`… DROP COLUMN hidden;` `… DROP COLUMN trade_rev;` — это удаление данных (журнал и
+зафиксированные результаты), в боевом режиме только после «Да» владельца. Режим сейчас
+ТЕСТОВЫЙ, реальных данных нет.
+
+#### 9. Порядок шагов (после каждого — `npm run check`)
+
+1. `decimal.ts`: `subDec`, `divDec`, `mulDivDec` + тесты. Ничего не подключено.
+2. `domain/trades.ts` + тесты 3.4; `portfolio.ts` (`closed_on`, `realized_minor`, `valuation`) + тесты.
+3. Миграция `0026_holding_trades.sql`; `FIELDS` в `crypto.ts`; типы в `scoped/types.ts`.
+4. `db/scoped/trades.ts` + `scoped/index.ts` + экспорт типа в `repo.ts`; `holdings.ts`
+   (`hidden`, batch-`deleteHolding`). Тесты repo: шифрование, «A не пишет B» на уровне
+   `commitTrades`, FK-порядок.
+5. `userdata.ts`: export `schema_version 10`, delete_me (`holding_trades` перед `holdings`);
+   обновить ожидания версии и `userIdTables()` в существующих тестах.
+6. `services/trades.ts` (CAS, начальная запись, инкремент/пересборка) + тесты, включая инвариант.
+7. `services/portfolio.ts` (новые поля, без автоцен для закрытых) + тесты.
+8. `tma/trades.ts` + регистрация в `tma/api.ts`; `tma/holdings.ts` (блокировка, `hidden`,
+   `shapeError`); `LIMITS.maxTradesPerHolding`. Тесты API (§7).
+9. `bot/invest.ts` — счётчики открытых/закрытых; `nav.test.ts` зелёный без правок реестра.
+10. Web: `api.ts`, `app.tsx`, `invest-common.ts`, `invest-trade.tsx`, `invest-form.tsx`,
+    `invest.tsx`, моки; тесты web.
+11. Финал: `npm run check`; T3d → `[DOCS]`. Секретов и действий владельца не нужно.
+
+#### 10. Затронутая документация (для `documenter`)
+
+- `AGENTS.md` правило 21: «Журнал сделок — T3d (впереди)» → описание T3d1: таблица
+  `holding_trades` (0026), поля `quantity`/`amount`/`note` и `holdings.realized_minor` в
+  `FIELDS`; журнал — источник истины, `holdings` — кэш свёртки (CAS по `trade_rev`, один
+  batch); прибыль по средней цене (`domain/trades.ts`); комиссия внутри суммы; сделка только
+  в валюте позиции; лимит 200 на позицию; при сделках PATCH `quantity/invested/avg_price/currency`
+  → 409; ленивая начальная запись (`init:<holding_id>`); закрытие (`closed_on`) и скрытие
+  (`hidden`); тест «A не видит/не пишет сделки B» обязателен.
+- `CLAUDE.md` — «сейчас последняя — 0025» → 0026.
+- `docs/ARCHITECTURE.md` — таблица `holding_trades`, колонки 0026, миграции 0001–0026,
+  маршруты сделок, экспорт `schema_version: 10`.
+- `docs/BACKLOG.md` P1-9 и `TASKS.md` — T3d1 сделан; впереди T3d2 (напоминания о погашении),
+  T3d3 (купоны MOEX).
+- `README.md` (возможности: журнал покупок/продаж), `CHANGELOG.md`.
+
+#### 11. Вопросы владельцу
+
+Новых вопросов нет: ключевые решения утверждены (см. начало раздела). По умолчанию, без
+отдельного вопроса: ошибочную сделку удаляют и вносят заново (без правки); закрытые позиции
+не входят в итог портфеля; старые позиции превращаются в «начальную запись» при первой сделке.
+
+задачу можно переводить в `[READY]`

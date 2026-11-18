@@ -136,7 +136,7 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     `hh_<hex>` (хэш хранится от полного кода с префиксом). Выход члена
     удаляет только ЕГО опустевший household (+ зануляет
     `invites.household_id` — FK), чужие пустые не трогает.
-21. **Инвестиции (T3a — ручной портфель, T3b — автоцены крипты, T10 — форма «количество + потрачено всего»):** таблица `holdings` (миграция 0023; `auto_price` — миграция 0024; `invested` — миграция 0025),
+21. **Инвестиции (T3a — ручной портфель, T3b — автоцены крипты, T10 — форма «количество + потрачено всего», T3d1 — журнал покупок/продаж):** таблица `holdings` (миграция 0023; `auto_price` — миграция 0024; `invested` — миграция 0025; журнал — миграция 0026),
     колонка `profiles.invest_targets`. Количество, «потрачено» и цены — канонические десятичные
     строки (`domain/decimal.ts`: до 12 цифр до точки и до 8 после, больше нуля);
     арифметика — на BigInt (`mulToMinor`, округление half-up до minor units).
@@ -144,7 +144,7 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     и обнуляет цены мелких токенов. Суммы вкладов и «другого» — `amount_minor`
     (minor units валюты позиции). Все текстовые, денежные и процентные поля позиции
     и `invest_targets` — в `FIELDS` (`db/crypto.ts`): `name`, `ticker`, `quantity`,
-    `avg_price`, `invested`, `price`, `amount_minor`, `rate`, `note`, `invest_targets`. По ним не
+    `avg_price`, `invested`, `price`, `amount_minor`, `rate`, `note`, `invest_targets`, `realized_minor` (T3d1). По ним не
     пишем сырые WHERE и SQL-агрегаты: суммы и доли считаются в JS после дешифровки
     (`listHoldings`). `currency`, `price_on`, даты — plaintext. Партнёру по household
     позиции и цели не отдаются (`householdSummary` их не содержит). Ручная цена вводится
@@ -189,7 +189,12 @@ Cloudflare (миграция v1→v2 завершена шагом 9 — legacy-
     Московская биржа, задержка 15 мин» (`MOEX_ATTRIBUTION`) обязательна в Mini App и в боте. Наружу уходят только
     коды бумаг (SECID) и строка поиска — без имён, сумм и количеств. Перед коммерческим использованием обязательно
     перечитать «Порядок использования биржевой информации» (https://fs.moex.com/files/7064/46216).
-    Журнал сделок — T3d (впереди).
+    **Журнал покупок/продаж (T3d1):** таблица `holding_trades` (миграция 0026): `side` (`buy`/`sell`), `is_initial` (начальная запись старой позиции), `traded_on` — plaintext `YYYY-MM-DD`, `source_key` (`tma:<client_id>` / `init:<holding_id>`, уникальность по `(user_id, source_key)`). `quantity`, `amount` (сумма **с комиссией**, в валюте позиции), `note` — `enc1:` и в `FIELDS` (`holding_trades`); по ним не пишем WHERE и SQL-агрегаты, свёртка — в JS.
+    **Журнал — источник истины, `holdings` — кэш свёртки:** `quantity`, `invested`, `realized_minor` (enc1 num, зафиксированный результат в minor units валюты позиции), `closed_on` (дата полной продажи, plaintext; NULL — открыта), `hidden` (скрыта из списка; только у закрытой, снимается при новой покупке), `trade_rev` (версия для CAS). Кэш пишется ТОЛЬКО через `repo.commitTrades` (CAS по `trade_rev`, один `db.batch`). Свёртка — `domain/trades.ts` (чистые функции).
+    **Правила учёта:** прибыль при продаже — по **средней цене**: себестоимость продаваемого куска = q × invested / quantity; `realized` — сумма − себестоимость. Продажа больше остатка → 409 `oversell`. Позиция без журнала: первая сделка создаёт начальную запись из `invested` (или quantity × avg_price); если «потрачено» неизвестно → 409 `invested_required`. Начальную запись нельзя удалить, пока есть другие сделки (`initial_locked`). Лимит — 200 сделок на позицию (`MAX_TRADES_PER_HOLDING`, ошибка `limit`). Сделки — только для крипты, акций и облигаций (`trades_unsupported`); валюта сделки — валюта позиции.
+    **Блокировка ручных правок:** при наличии сделок `PATCH /api/tma/holdings/:id` с `quantity`/`invested`/`avg_price`/`currency` → 409 `trades_locked` (меняются только сделками). `hidden: true` — только у закрытой позиции (иначе 409 `not_closed`).
+    **Маршруты:** `GET /api/tma/holdings/:id/trades`, `POST /api/tma/holdings/:id/trades` (`client_id` — идемпотентность, дубль → `duplicate: true`), `DELETE /api/tma/holdings/:id/trades/:tradeId` (`tma/trades.ts`, регистрируются в `http/router.ts`). Только `scoped(user.id)`, чужая позиция/сделка → 404; тест «A не видит B» — `test/trades.test.ts`.
+    **Экспорт и удаление:** `/export` — `schema_version` 10 (раздел `holding_trades`, служебные `source_key` и `trade_rev` не экспортируются); `/delete_me` удаляет сделки раньше позиций. Бот сделок не ведёт (`/invest` показывает число закрытых позиций). Журнал — учёт, а не рекомендация.
     Итог считает `services/portfolio.ts`: курс запрашивается по каждой валюте толерантно;
     валюта без курса — позиция видна, в итог не входит, код в `missing_rates`.
     Тест «A не видит B» для `holdings` обязателен.

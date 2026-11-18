@@ -267,13 +267,13 @@ describe('цели и каскад бонуса', () => {
 });
 
 describe('export / delete_me / household', () => {
-  it('export: schema_version 9, holdings без source_key; delete_me стирает только свои', async () => {
+  it('export: schema_version 10, holdings без source_key; delete_me стирает только свои', async () => {
     const a = await user(50);
     const b = await user(51);
     await post(a.token, { ...crypto1, client_id: 'x1' });
     await post(b.token, dep1);
     const ex = (await (await api('/api/tma/export', { token: a.token })).json()) as { schema_version: number; holdings: Record<string, unknown>[] };
-    expect(ex.schema_version).toBe(9);
+    expect(ex.schema_version).toBe(10);
     expect(ex.holdings).toHaveLength(1);
     expect(ex.holdings[0]!.name).toBe('Биткоин');
     expect('source_key' in ex.holdings[0]!).toBe(false);

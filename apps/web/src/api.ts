@@ -343,6 +343,44 @@ export interface HoldingItem {
   /** Цены нет — оценено по «потрачено», результат 0. */
   valued_at_cost: boolean;
   accrued_minor: number | null;
+  /** Записей в журнале сделок (T3d1); >0 — количество/«потрачено»/валюта правятся только сделками. */
+  trades_count: number;
+  /** Зафиксированный результат продаж (minor валюты позиции); null — продаж не было. */
+  realized_minor: number | null;
+  /** Дата полной продажи; null — позиция открыта. */
+  closed_on: string | null;
+  /** Закрытая позиция скрыта из списка. */
+  hidden: boolean;
+  /** Средняя цена покупки остатка (десятичная строка). */
+  avg_cost: string | null;
+}
+/** Сделка журнала (GET /api/tma/holdings/:id/trades). */
+export interface TradeItem {
+  id: number;
+  side: 'buy' | 'sell';
+  quantity: string;
+  amount: string;
+  /** Цена за единицу (десятичная строка); null — не посчиталась. */
+  unit_price: string | null;
+  traded_on: string;
+  note: string | null;
+  /** Начальная запись старой позиции. */
+  initial: boolean;
+  /** Зафиксированный результат продажи (minor); null у покупок. */
+  realized_minor: number | null;
+}
+export interface TradesView {
+  holding: {
+    id: number;
+    currency: string;
+    quantity: string | null;
+    invested: string | null;
+    avg_cost: string | null;
+    realized_minor: number | null;
+    closed_on: string | null;
+  };
+  items: TradeItem[];
+  limit: number;
 }
 /** Результат поиска бумаги на Мосбирже (GET /api/tma/holdings/lookup). */
 export interface MoexLookupItem {

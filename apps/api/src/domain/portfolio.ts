@@ -27,6 +27,10 @@ export interface HoldingLike {
   rate: number | null; // % годовых
   opened_on: string | null;
   matures_on: string | null;
+  /** Дата полной продажи (T3d1); null/нет — позиция открыта. */
+  closed_on?: string | null;
+  /** Зафиксированный результат продаж, minor валюты позиции (T3d1). */
+  realized_minor?: number | null;
 }
 
 const dayNum = (iso: string) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / 86_400_000);
@@ -59,8 +63,9 @@ export function pnlMinor(h: Pick<HoldingLike, 'quantity' | 'price' | 'avg_price'
  * по «потрачено» (atCost, результат 0). Без цены и без «потрачено» — 0 и null.
  */
 export function valuation(
-  h: Pick<HoldingLike, 'quantity' | 'price' | 'avg_price' | 'invested' | 'amount_minor'>,
+  h: Pick<HoldingLike, 'quantity' | 'price' | 'avg_price' | 'invested' | 'amount_minor'> & { closed_on?: string | null },
 ): { valueMinor: number; pnlMinor: number | null; atCost: boolean } {
+  if (h.closed_on) return { valueMinor: 0, pnlMinor: null, atCost: false };
   if (h.quantity && !h.price) {
     const inv = investedMinor(h);
     if (inv !== null) return { valueMinor: inv, pnlMinor: 0, atCost: true };

@@ -135,3 +135,55 @@ export function divDecPow10(a: string, n: number): string | null {
   if (!x || !Number.isInteger(n) || n < 0) return null;
   return canonFromUnits(x.units, x.scale + n);
 }
+
+// ── Журнал сделок (T3d1): вычитание и деление без float ──
+
+/** a − b; при равенстве '0' (единственный неканонический результат); null — результат < 0 или кривой ввод. */
+export function subDec(a: string, b: string): string | null {
+  const x = parseNonNeg(a);
+  const y = parseNonNeg(b);
+  if (!x || !y) return null;
+  const s = Math.max(x.scale, y.scale);
+  const d = x.units * 10n ** BigInt(s - x.scale) - y.units * 10n ** BigInt(s - y.scale);
+  if (d < 0n) return null;
+  if (d === 0n) return '0';
+  return canonFromUnits(d, s);
+}
+
+/** Деление units/den с half-up (оба > 0) → каноническая строка до 8 знаков. */
+function divUnits(num: bigint, scale: number, den: bigint): string | null {
+  if (den <= 0n || num < 0n) return null;
+  // num×10^(8−scale)/den с запасом: считаем сразу в 8 знаках после точки
+  const shift = MAX_FRAC_DIGITS - scale;
+  const n = shift >= 0 ? num * 10n ** BigInt(shift) : num;
+  const d = shift >= 0 ? den : den * 10n ** BigInt(-shift);
+  const q = (n * 2n + d) / (d * 2n);
+  return canonFromUnits(q, MAX_FRAC_DIGITS);
+}
+
+/** a / b, half-up до 8 знаков; null — b = 0, результат округлился в 0 или > 12 цифр целой части. */
+export function divDec(a: string, b: string): string | null {
+  const x = parseNonNeg(a);
+  const y = parseNonNeg(b);
+  if (!x || !y || y.units === 0n) return null;
+  // (xu/10^xs) / (yu/10^ys) = xu×10^ys / (yu×10^xs)
+  return divUnits(x.units * 10n ** BigInt(y.scale), 0, y.units * 10n ** BigInt(x.scale));
+}
+
+/** a × b / c одним округлением (half-up до 8 знаков); null — c = 0, результат 0 или переполнение. */
+export function mulDivDec(a: string, b: string, c: string): string | null {
+  const x = parseNonNeg(a);
+  const y = parseNonNeg(b);
+  const z = parseNonNeg(c);
+  if (!x || !y || !z || z.units === 0n) return null;
+  // (xu×yu/10^(xs+ys)) / (zu/10^zs) = xu×yu×10^zs / (zu×10^(xs+ys))
+  return divUnits(x.units * y.units * 10n ** BigInt(z.scale), 0, z.units * 10n ** BigInt(x.scale + y.scale));
+}
+
+/** Сравнение двух неотрицательных десятичных строк (0 допустим): -1 | 0 | 1; кривой ввод → 1. */
+export function compareDecStr(a: string, b: string): -1 | 0 | 1 {
+  const x = parseNonNeg(a);
+  const y = parseNonNeg(b);
+  if (!x || !y) return 1;
+  return compareDec(x, y);
+}

@@ -17,14 +17,17 @@ import { withNav } from './nav/nav';
 /** Чистый рендер итога (HTML для Telegram). */
 export function renderInvest(v: PortfolioView): string {
   const lines = ['💼 <b>Инвестиции</b>'];
-  if (!v.items.length) {
+  const open = v.items.filter((i) => !i.closed_on);
+  const closedN = v.items.length - open.length;
+  if (!open.length && !closedN) {
     lines.push('Позиций пока нет. Добавьте вклад, облигации, крипту или акции в приложении (кнопка у поля ввода).');
   } else {
     lines.push(
       v.total.minor === null
-        ? `Итого: курсы недоступны — сумма не посчитана (${v.items.length} поз.)`
-        : `Итого: <b>${fmtMoney(v.total.minor / 100, v.total.currency)}</b> · позиций: ${v.items.length}`,
+        ? `Итого: курсы недоступны — сумма не посчитана (${open.length} поз.)`
+        : `Итого: <b>${fmtMoney(v.total.minor / 100, v.total.currency)}</b> · позиций: ${open.length}`,
     );
+    if (closedN) lines.push(`Закрытых: ${closedN}`);
     const cur = v.allocation.current;
     const shares = HOLDING_KINDS.filter((k) => cur[k]).map((k) => `${KIND_LABEL[k].toLowerCase()} ${cur[k]}%`);
     if (shares.length) lines.push(`Доли: ${shares.join(' · ')}`);

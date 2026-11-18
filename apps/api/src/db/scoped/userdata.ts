@@ -1,6 +1,6 @@
 /** Часть scoped-репозитория (см. db/scoped/index.ts) — каждый запрос с WHERE user_id = ?. */
 import { decRows } from '../crypto';
-import type { IncomeEntryRow, DebtEventRow, CommitmentPaymentRow, CommitmentChangeRow, LoanEventRow } from './types';
+import type { TradeRow, IncomeEntryRow, DebtEventRow, CommitmentPaymentRow, CommitmentChangeRow, LoanEventRow } from './types';
 import type { Ctx } from './ctx';
 import type { profileRepo } from './profile';
 import type { commitmentsRepo } from './commitments';
@@ -25,7 +25,7 @@ export function userDataRepo({ db, userId }: Ctx, r: DataSources) {
   return {
     /** /export — только собственные строки пользователя, без секретов/хэшей. */
     async exportUserData() {
-      const [profile, commitments, commitPays, commitChanges, expenses, income, debts, debtEvents, loans, loanEvents, exchanges, categories, holdings] =
+      const [profile, commitments, commitPays, commitChanges, expenses, income, debts, debtEvents, loans, loanEvents, exchanges, categories, holdings, trades] =
         await Promise.all([
           r.getProfile(),
           r.listCommitments(false),
@@ -40,14 +40,16 @@ export function userDataRepo({ db, userId }: Ctx, r: DataSources) {
           r.listExchanges(),
           r.listCategories(true),
           r.listHoldings(),
+          db.prepare('SELECT * FROM holding_trades WHERE user_id = ? ORDER BY id').bind(userId).all<TradeRow>().then((r) => decRows('holding_trades', r)),
         ]);
       const strip = <T extends Record<string, unknown>>(r: T) => {
-        const { source_key, ...rest } = r; // update_id-идемпотентность не экспортируем
+        const { source_key, trade_rev, ...rest } = r; // идемпотентность и версия CAS не экспортируем
         void source_key;
+        void trade_rev;
         return rest;
       };
       return {
-        schema_version: 9,
+        schema_version: 10,
         exported_at: new Date().toISOString(),
         profile: profile ? strip(profile as unknown as Record<string, unknown>) : null,
         commitments: commitments.results.map((c) => strip(c as unknown as Record<string, unknown>)),
@@ -62,6 +64,7 @@ export function userDataRepo({ db, userId }: Ctx, r: DataSources) {
         exchanges: exchanges.results.map((x) => strip(x as unknown as Record<string, unknown>)),
         categories: categories.results.map((x) => strip(x as unknown as Record<string, unknown>)),
         holdings: holdings.results.map((x) => strip(x as unknown as Record<string, unknown>)),
+        holding_trades: trades.results.map((x) => strip(x as unknown as Record<string, unknown>)),
       };
     },
     /** /delete_me — все строки пользователя во всех таблицах с user_id (children first). */
@@ -71,6 +74,7 @@ export function userDataRepo({ db, userId }: Ctx, r: DataSources) {
         'income_entries',
         'weekly_expenses',
         'categories',
+        'holding_trades',
         'holdings',
         'loan_events',
         'loans',

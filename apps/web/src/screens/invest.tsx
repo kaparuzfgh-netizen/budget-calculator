@@ -29,7 +29,7 @@ import {
   smBtnCls,
   useData,
 } from '../ui';
-import { fmtAutoTime, KIND_LABEL, KIND_PLURAL, KINDS, targetsFrom } from './invest-common';
+import { fmtAutoTime, KIND_LABEL, KIND_PLURAL, KINDS, splitPositions, targetsFrom } from './invest-common';
 
 function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
   const qty = !!h.quantity;
@@ -78,11 +78,34 @@ function Position({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
           <span class={mutedCls}>≈ начислено {fmtMinor(h.accrued_minor, h.currency)}</span>
         ) : null}
       </div>
+      {h.realized_minor !== null && h.realized_minor !== 0 && (
+        <p class={`mt-1 text-[12px] ${h.realized_minor >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          зафиксировано {h.realized_minor >= 0 ? '+' : ''}
+          {fmtMinor(h.realized_minor, h.currency)}
+        </p>
+      )}
       {h.price_stale && (
         <p class="mt-1 text-[12px] text-amber-400">
           {h.price_source === 'auto'
             ? `Автоцена устарела (${fmtAutoTime(h.effective_price_at)}) — провайдер недоступен`
             : `Цена на ${h.effective_price_on ? fmtDay(h.effective_price_on) : '—'} — обновите цену`}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function ClosedPosition({ h, onOpen }: { h: HoldingItem; onOpen: () => void }) {
+  return (
+    <li class={`${liCls} cursor-pointer transition hover:bg-fill`} onClick={onOpen}>
+      <div class={rowCls}>
+        <span class="text-[15px] text-zinc-100">{h.name}</span>
+        <span class={mutedCls}>Закрыта{h.closed_on ? ` ${fmtDay(h.closed_on)}` : ''}</span>
+      </div>
+      {h.realized_minor !== null && (
+        <p class={`mt-1 text-[13px] ${h.realized_minor >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          результат {h.realized_minor >= 0 ? '+' : ''}
+          {fmtMinor(h.realized_minor, h.currency)}
         </p>
       )}
     </li>
@@ -184,6 +207,7 @@ function Targets({
 
 export function InvestScreen({ api, nav, onFatal }: ScreenProps) {
   const q = useData(() => api.get<HoldingsList>('/api/tma/holdings'), onFatal, []);
+  const [showHidden, setShowHidden] = useState(false);
 
   if (q.loading) return <Loading />;
   if (q.error || !q.data) {
@@ -191,6 +215,8 @@ export function InvestScreen({ api, nav, onFatal }: ScreenProps) {
     return <ErrorView title={v.title} text={v.text} onRetry={q.reload} />;
   }
   const d = q.data;
+  const { open, closed, hidden } = splitPositions(d.items);
+  const visibleClosed = showHidden ? [...closed, ...hidden] : closed;
   const shares = KINDS.filter((k) => d.allocation.current[k]);
 
   return (
@@ -230,16 +256,38 @@ export function InvestScreen({ api, nav, onFatal }: ScreenProps) {
 
       <h2 class={`${headCls} mt-6`}>Позиции</h2>
       <div class={`${listCardCls} mt-2`}>
-        {d.items.length ? (
+        {open.length ? (
           <ul class="divide-y divide-line-soft">
-            {d.items.map((h) => (
+            {open.map((h) => (
               <Position h={h} onOpen={() => nav.push({ id: 'invest-form', holdingId: h.id })} />
             ))}
           </ul>
+        ) : closed.length + hidden.length > 0 ? (
+          <p class={`${mutedCls} px-4 py-3`}>Открытых позиций нет.</p>
         ) : (
           <p class={`${mutedCls} px-4 py-3`}>Пока пусто. Добавьте вклад, облигации, крипту или акции.</p>
         )}
       </div>
+
+      {(visibleClosed.length > 0 || hidden.length > 0) && (
+        <>
+          <h2 class={`${headCls} mt-6`}>Закрытые</h2>
+          <div class={`${listCardCls} mt-2`}>
+            {visibleClosed.length > 0 && (
+              <ul class="divide-y divide-line-soft">
+                {visibleClosed.map((h) => (
+                  <ClosedPosition h={h} onOpen={() => nav.push({ id: 'invest-form', holdingId: h.id })} />
+                ))}
+              </ul>
+            )}
+            {hidden.length > 0 && (
+              <button type="button" class={`${mutedCls} w-full px-4 py-3 text-left underline`} onClick={() => setShowHidden(!showHidden)}>
+                {showHidden ? 'Скрыть скрытые' : `Показать скрытые (${hidden.length})`}
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
       <Targets api={api} current={d.allocation.targets} onSaved={q.reload} />
 

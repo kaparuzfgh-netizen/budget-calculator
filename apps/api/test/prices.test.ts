@@ -381,7 +381,7 @@ describe('/api/tma/holdings с автоценами', () => {
     expect((await on('/api/tma/profile', { method: 'PATCH', token, body: { auto_prices_enabled: 1 } })).status).toBe(400);
   });
 
-  it('export: schema_version 9, auto_price и auto_prices_enabled', async () => {
+  it('export: schema_version 10, auto_price и auto_prices_enabled', async () => {
     const { p } = fakeProvider();
     const api = apiFor(p);
     const { token } = await user(9);
@@ -389,7 +389,7 @@ describe('/api/tma/holdings с автоценами', () => {
     const ex = (await (await api('/api/tma/export', { token })).json()) as {
       schema_version: number; holdings: { auto_price: number }[]; profile: { auto_prices_enabled: number };
     };
-    expect(ex.schema_version).toBe(9);
+    expect(ex.schema_version).toBe(10);
     expect(ex.holdings[0]!.auto_price).toBe(1);
     expect(ex.profile.auto_prices_enabled).toBe(1);
   });

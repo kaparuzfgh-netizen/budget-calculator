@@ -4,7 +4,7 @@
  * сервер СТРОКАМИ (JSON-число потеряет 8-й знак), сумма вклада — числом.
  * Это учёт, а не инвестиционная рекомендация.
  */
-import type { HoldingKind } from '../api';
+import type { HoldingItem, HoldingKind } from '../api';
 import { amountError, currencyError, LIMITS, parseAmount } from '../fmt';
 
 export const KINDS: readonly HoldingKind[] = ['deposit', 'bond', 'crypto', 'stock', 'other'];
@@ -76,13 +76,15 @@ export function fmtAutoTime(iso: string | null): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export function formError(f: HoldingForm, supported: readonly string[] = []): string | null {
+export function formError(f: HoldingForm, supported: readonly string[] = [], closed = false): string | null {
   if (!f.name.trim()) return 'Введите название';
   if (f.name.trim().length > LIMITS.maxName) return `Название — до ${LIMITS.maxName} символов`;
   const c = currencyError(f.currency);
   if (c) return c;
   if (f.ticker.trim() && !/^[A-Za-z0-9.-]{1,12}$/.test(f.ticker.trim())) return 'Тикер — латиница/цифры, до 12 знаков';
-  if (usesQty(f.kind)) {
+  if (closed) {
+    // закрытая позиция: количества нет, правятся только название, тикер и заметка
+  } else if (usesQty(f.kind)) {
     const e =
       decError(f.quantity, 'Количество') ??
       decError(f.invested, 'Потрачено') ??
@@ -106,7 +108,7 @@ export function formError(f: HoldingForm, supported: readonly string[] = []): st
  */
 export function buildBody(
   f: HoldingForm,
-  opts: { clientId?: string; original?: HoldingForm; supported?: readonly string[] },
+  opts: { clientId?: string; original?: HoldingForm; supported?: readonly string[]; locked?: boolean },
 ): Record<string, unknown> {
   const o = opts.original;
   const body: Record<string, unknown> = {
@@ -118,9 +120,12 @@ export function buildBody(
     matures_on: f.maturesOn || null,
     rate: usesRate(f.kind) && f.rate.trim() ? parseAmount(f.rate) : null,
   };
+  if (opts.locked) delete body.currency; // есть сделки: валюта, количество и «потрачено» меняются только сделками
   if (usesQty(f.kind)) {
-    body.quantity = normDec(f.quantity);
-    body.invested = normDec(f.invested);
+    if (!opts.locked) {
+      body.quantity = normDec(f.quantity);
+      body.invested = normDec(f.invested);
+    }
     if (needsPrice(f, opts.supported ?? []) && (!o || normDec(o.price) !== normDec(f.price))) body.price = normDec(f.price);
   } else {
     body.amount = parseAmount(f.amount);
@@ -146,4 +151,65 @@ export function targetsFrom(draft: Partial<Record<HoldingKind, string>>): { erro
   }
   if (sum !== 100) return { error: `Сумма долей должна быть 100% (сейчас ${sum}%)` };
   return { targets: t };
+}
+
+// ── журнал сделок (T3d1) ──
+
+/** Есть журнал: количество, «потрачено» и валюта правятся только сделками. */
+export const isLocked = (h: Pick<HoldingItem, 'trades_count'> | null | undefined): boolean => !!h && h.trades_count > 0;
+
+/** Сравнение десятичных строк без Number (BigInt, 8 знаков): -1 | 0 | 1. Мусор → NaN-подобно 1. */
+export function cmpDec(a: string, b: string): -1 | 0 | 1 {
+  const parse = (s: string): bigint | null => {
+    const m = /^(\d{1,12})(?:[.,](\d{1,8}))?$/.exec(s.trim());
+    return m ? BigInt(m[1]! + (m[2] ?? '').padEnd(8, '0')) : null;
+  };
+  const x = parse(a);
+  const y = parse(b);
+  if (x === null || y === null) return 1;
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+export interface TradeForm {
+  side: 'buy' | 'sell';
+  quantity: string;
+  amount: string;
+  tradedOn: string;
+  note: string;
+}
+
+/** Проверка формы сделки; have — сколько сейчас есть (для продажи). */
+export function tradeFormError(f: TradeForm, have: string | null, today?: string): string | null {
+  if (normDec(f.quantity) === null) return 'Количество: число больше нуля, до 8 знаков после запятой';
+  if (normDec(f.amount) === null) return 'Сумма: число больше нуля, до 8 знаков после запятой';
+  if (f.tradedOn && today && f.tradedOn > today) return 'Дата не может быть в будущем';
+  if (f.side === 'sell') {
+    if (have === null || cmpDec(normDec(f.quantity)!, have) > 0) return `Нельзя продать больше, чем есть: ${have ?? '0'}`;
+  }
+  return null;
+}
+
+/** Тело POST сделки: количество и сумма — СТРОКАМИ; client_id — на попытку. */
+export function buildTradeBody(f: TradeForm, clientId: string): Record<string, unknown> {
+  return {
+    side: f.side,
+    quantity: normDec(f.quantity),
+    amount: normDec(f.amount),
+    ...(f.tradedOn ? { traded_on: f.tradedOn } : {}),
+    note: f.note.trim() || null,
+    client_id: clientId,
+  };
+}
+
+/** Открытые / закрытые видимые / скрытые закрытые. */
+export function splitPositions(items: HoldingItem[]): { open: HoldingItem[]; closed: HoldingItem[]; hidden: HoldingItem[] } {
+  const open: HoldingItem[] = [];
+  const closed: HoldingItem[] = [];
+  const hidden: HoldingItem[] = [];
+  for (const h of items) {
+    if (!h.closed_on) open.push(h);
+    else if (h.hidden) hidden.push(h);
+    else closed.push(h);
+  }
+  return { open, closed, hidden };
 }

@@ -26,6 +26,7 @@ import { registerTmaExpenses } from '../tma/expenses';
 import { registerTmaProfile } from '../tma/profile';
 import { registerTmaDebts } from '../tma/debts';
 import { registerTmaHoldings } from '../tma/holdings';
+import { registerTmaTrades } from '../tma/trades';
 import { registerTmaFx } from '../tma/fx';
 import { registerTmaHousehold } from '../tma/household';
 import { registerTmaVision } from '../tma/vision';
@@ -212,6 +213,7 @@ export function createRouter(deps: RouterDeps = {}) {
   registerTmaCommitments(app, tmaAuth);
   registerTmaDebts(app, tmaAuth, fxProvider);
   registerTmaHoldings(app, tmaAuth, fxProvider, pricesFor);
+  registerTmaTrades(app, tmaAuth);
   registerTmaFx(app, tmaAuth, fxProvider);
   registerTmaHousehold(app, tmaAuth, fxProvider);
   // Скриншот банка из Mini App — те же ключи/фетч, что и у бота

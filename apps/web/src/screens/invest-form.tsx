@@ -7,7 +7,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { Briefcase, Trash2 } from 'lucide-preact';
 import { ApiError } from '../api';
-import type { HoldingItem, HoldingKind, HoldingsList, MoexLookupItem } from '../api';
+import type { HoldingItem, HoldingKind, HoldingsList, MoexLookupItem, TradesView } from '../api';
+import { fmtDay, fmtMinor } from '../fmt';
 import type { ScreenProps } from '../app';
 import {
   cardCls,
@@ -31,6 +32,7 @@ import {
   buildBody,
   emptyForm,
   formError,
+  isLocked,
   needsPrice,
   KIND_LABEL,
   KINDS,
@@ -188,7 +190,97 @@ const swapCls = 'mb-2 rounded-2xl border border-line bg-zinc-900/60 p-3';
 const swapLabelCls = 'mb-1 block text-[12px] text-zinc-500';
 const swapInputCls = 'min-w-0 flex-1 bg-transparent text-[24px] font-medium text-zinc-100 outline-none placeholder:text-zinc-600';
 
-const fromItem =(h: HoldingItem): HoldingForm => ({
+const resultText = (minor: number, ccy: string): string => `${minor >= 0 ? '+' : ''}${fmtMinor(minor, ccy)}`;
+const resultCls = (minor: number): string => (minor >= 0 ? 'text-emerald-400' : 'text-red-400');
+
+/** Блок «Сделки» (T3d1): купить/продать и журнал с удалением (с подтверждением). */
+function TradesBlock({
+  api,
+  nav,
+  item,
+  onChanged,
+}: Pick<ScreenProps, 'api' | 'nav'> & { item: HoldingItem; onChanged: () => void }) {
+  const has = item.trades_count > 0;
+  const q = useData(
+    () => (has ? api.get<TradesView>(`/api/tma/holdings/${item.id}/trades`) : Promise.resolve(null)),
+    () => undefined,
+    [item.id, item.trades_count],
+  );
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ticker = item.ticker ?? 'шт.';
+  const remove = async (id: number) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.del(`/api/tma/holdings/${item.id}/trades/${id}`);
+      setConfirmId(null);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Не удалось удалить — проверьте соединение');
+    }
+    setBusy(false);
+  };
+  const items = q.data ? [...q.data.items].reverse() : [];
+  return (
+    <>
+      <h2 class="mb-2 mt-6 text-[15px] font-semibold">Сделки</h2>
+      <div class={cardCls}>
+        <div class="flex gap-2">
+          <button type="button" class={`${smBtnCls} flex-1 justify-center`} onClick={() => nav.push({ id: 'invest-trade', holdingId: item.id, side: 'buy' })}>
+            Купить ещё
+          </button>
+          {!item.closed_on && (
+            <button type="button" class={`${smBtnCls} flex-1 justify-center`} onClick={() => nav.push({ id: 'invest-trade', holdingId: item.id, side: 'sell' })}>
+              Продать
+            </button>
+          )}
+        </div>
+        <p class={`${mutedCls} mt-2`}>Результат продажи = выручка − средняя цена покупки × количество.</p>
+        {has && q.loading && <p class={`${mutedCls} mt-2`}>Загружаю…</p>}
+        {has && q.error ? <p class={`${mutedCls} mt-2`}>Не удалось загрузить сделки.</p> : null}
+        {items.length > 0 && (
+          <ul class="mt-3 divide-y divide-line-soft">
+            {items.map((t) => (
+              <li class="py-2">
+                <div class="flex items-start justify-between gap-2">
+                  <span class="text-[14px] text-zinc-100">
+                    {fmtDay(t.traded_on)} · {t.initial ? 'начальная запись:' : t.side === 'buy' ? 'купил' : 'продал'} {t.quantity} {ticker} за {t.amount}{' '}
+                    {item.currency}
+                    {t.unit_price ? ` (≈ ${t.unit_price} за 1)` : ''}
+                    {t.realized_minor !== null && (
+                      <span class={resultCls(t.realized_minor)}> · {resultText(t.realized_minor, item.currency)}</span>
+                    )}
+                  </span>
+                  {!t.initial &&
+                    (confirmId === t.id ? (
+                      <span class="flex shrink-0 gap-1">
+                        <button type="button" class={dangerBtnCls} disabled={busy} onClick={() => void remove(t.id)}>
+                          Удалить сделку?
+                        </button>
+                        <button type="button" class={smBtnCls} onClick={() => setConfirmId(null)}>
+                          Нет
+                        </button>
+                      </span>
+                    ) : (
+                      <button type="button" class="shrink-0 p-1 text-zinc-500 hover:text-red-400" aria-label="Удалить сделку" onClick={() => setConfirmId(t.id)}>
+                        <Trash2 size={16} strokeWidth={1.5} />
+                      </button>
+                    ))}
+                </div>
+                {t.note && <span class="block text-[12px] text-zinc-500">{t.note}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <FormError msg={err} />
+      </div>
+    </>
+  );
+}
+
+const fromItem = (h: HoldingItem): HoldingForm => ({
   kind: h.kind,
   name: h.name,
   ticker: h.ticker ?? '',
@@ -210,13 +302,25 @@ function HoldingFormView({
   holdingId,
   supported,
   autoEnabled,
-}: Pick<ScreenProps, 'api' | 'nav'> & { original: HoldingForm | null; holdingId?: number; supported: string[]; autoEnabled: boolean }) {
+  item,
+  onChanged,
+}: Pick<ScreenProps, 'api' | 'nav'> & {
+  original: HoldingForm | null;
+  holdingId?: number;
+  supported: string[];
+  autoEnabled: boolean;
+  item: HoldingItem | null;
+  onChanged: () => void;
+}) {
   const [f, setF] = useState<HoldingForm>(original ?? emptyForm());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [cid] = useState(() => crypto.randomUUID()); // client_id на попытку формы
   const edit = holdingId !== undefined;
+  const locked = edit && isLocked(item); // есть журнал: количество, «потрачено», валюта — только сделками
+  const closed = edit && !!item?.closed_on;
+  const tradable = edit && (f.kind === 'crypto' || f.kind === 'stock' || f.kind === 'bond');
   const set = <K extends keyof HoldingForm>(k: K, v: HoldingForm[K]) => setF((s) => ({ ...s, [k]: v }));
   const txt = (k: keyof HoldingForm, props: Record<string, unknown> = {}) => (
     <input
@@ -229,13 +333,13 @@ function HoldingFormView({
 
   const submit = async (ev: Event) => {
     ev.preventDefault();
-    const e0 = formError(f, supported);
+    const e0 = formError(f, supported, closed);
     if (e0) return setErr(e0);
     setBusy(true);
     setErr(null);
     try {
       if (edit) {
-        await api.patch(`/api/tma/holdings/${holdingId}`, buildBody(f, { original: original!, supported }));
+        await api.patch(`/api/tma/holdings/${holdingId}`, buildBody(f, { original: original!, supported, locked }));
         nav.flash('Позиция обновлена');
       } else {
         await api.post('/api/tma/holdings', buildBody(f, { clientId: cid, supported }));
@@ -247,6 +351,19 @@ function HoldingFormView({
       setBusy(false);
     }
     return undefined;
+  };
+
+  const toggleHidden = async (hidden: boolean) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.patch(`/api/tma/holdings/${holdingId}`, { hidden });
+      nav.flash(hidden ? 'Позиция скрыта из списка' : 'Позиция снова в списке');
+      nav.back();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Не удалось сохранить — проверьте соединение');
+      setBusy(false);
+    }
   };
 
   const del = async () => {
@@ -294,7 +411,42 @@ function HoldingFormView({
               onPick={(it) => setF((s) => ({ ...s, ticker: it.secid, currency: it.currency, name: s.name.trim() ? s.name : it.name }))}
             />
           )}
-          {usesQty(f.kind) ? (
+          {closed && item ? (
+            <div class="mb-3 rounded-2xl border border-line bg-zinc-900/60 p-3">
+              <p class="text-[15px] text-zinc-100">
+                Закрыта {fmtDay(item.closed_on!)}
+                {item.realized_minor !== null && (
+                  <span class={resultCls(item.realized_minor)}> · результат {resultText(item.realized_minor, item.currency)}</span>
+                )}
+              </p>
+              <p class={`${mutedCls} mt-1`}>Позиция продана целиком. Купите ещё — она снова откроется.</p>
+            </div>
+          ) : locked && item ? (
+            <>
+              <div class={swapCls}>
+                <span class={swapLabelCls}>Потрачено</span>
+                <p class="text-[24px] font-medium text-zinc-100">
+                  {item.invested ?? '—'} {item.currency}
+                </p>
+              </div>
+              <div class={swapCls}>
+                <span class={swapLabelCls}>Количество</span>
+                <p class="text-[24px] font-medium text-zinc-100">
+                  {item.quantity ?? '—'} {item.ticker ?? ''}
+                </p>
+                {item.avg_cost && (
+                  <p class="text-[12px] text-zinc-500">
+                    Средняя цена покупки: {item.avg_cost} {item.currency}
+                  </p>
+                )}
+              </div>
+              <p class={`${mutedCls} mb-3`}>Количество, сумма и валюта меняются через сделки.</p>
+              <Field label="Тикер">
+                <TickerField kind={f.kind} value={f.ticker} supported={supported} onChange={(v) => set('ticker', v)} />
+              </Field>
+              {needsPrice(f, supported) && <Field label="Цена сейчас (за единицу)">{txt('price', { inputMode: 'decimal', placeholder: '30000' })}</Field>}
+            </>
+          ) : usesQty(f.kind) ? (
             <>
               {/* как в обменниках: сумма и её валюта/тикер в одной строке */}
               <div class={swapCls}>
@@ -363,12 +515,20 @@ function HoldingFormView({
           </button>
         </form>
       </div>
+      {tradable && item && <TradesBlock api={api} nav={nav} item={item} onChanged={onChanged} />}
+      {closed && item && (
+        <div class="mt-4">
+          <button type="button" class={`${smBtnCls} w-full justify-center`} disabled={busy} onClick={() => void toggleHidden(!item.hidden)}>
+            {item.hidden ? 'Показывать в списке' : 'Скрыть из списка'}
+          </button>
+        </div>
+      )}
       {edit && (
         <div class="mt-4">
           {confirmDel ? (
             <div class="flex gap-2">
               <button type="button" class={`${dangerBtnCls} flex-1`} disabled={busy} onClick={() => void del()}>
-                Точно удалить?
+                {item && item.trades_count > 0 ? `Удалить вместе с ${item.trades_count} сделками?` : 'Точно удалить?'}
               </button>
               <button type="button" class={smBtnCls} onClick={() => setConfirmDel(false)}>
                 Нет
@@ -404,5 +564,17 @@ export function InvestFormScreen({ api, nav, onFatal, holdingId }: ScreenProps &
   if (holdingId !== undefined && !item) {
     return <ErrorView title="Позиция не найдена" text="Возможно, она уже удалена." onRetry={() => nav.back()} />;
   }
-  return <HoldingFormView api={api} nav={nav} original={item ? fromItem(item) : null} supported={supported} autoEnabled={autoEnabled} {...(holdingId !== undefined ? { holdingId } : {})} />;
+  return (
+    <HoldingFormView
+      key={item ? `${item.trades_count}:${item.quantity}:${item.closed_on}:${item.hidden}` : 'new'}
+      api={api}
+      nav={nav}
+      original={item ? fromItem(item) : null}
+      supported={supported}
+      autoEnabled={autoEnabled}
+      item={item ?? null}
+      onChanged={q.reload}
+      {...(holdingId !== undefined ? { holdingId } : {})}
+    />
+  );
 }

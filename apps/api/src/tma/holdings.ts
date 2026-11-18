@@ -91,6 +91,7 @@ const patchSchema = z.object({
   matures_on: zIso.nullable().optional(),
   note: zNoteN.nullable().optional(),
   auto_price: z.boolean().optional(),
+  hidden: z.boolean().optional(), // скрыть/показать закрытую позицию (T3d1)
 });
 
 type Shape = {
@@ -103,6 +104,8 @@ type Shape = {
   amount_minor: number | null;
   opened_on: string | null;
   matures_on: string | null;
+  /** Закрытая позиция (T3d1): количества нет, цена не нужна. */
+  closed_on?: string | null;
 };
 
 /**
@@ -112,6 +115,7 @@ type Shape = {
  */
 function shapeError(h: Shape): string | null {
   if (h.kind === 'crypto' || h.kind === 'stock' || h.kind === 'bond') {
+    if (h.closed_on) return null;
     if (!h.quantity) return 'нужно количество';
     if (!h.price && priceRefFor(h.kind, h.ticker ?? null) === null) return 'нужна цена сейчас';
     if (h.amount_minor !== null) return 'для этого вида сумма не используется';
@@ -247,7 +251,15 @@ export function registerTmaHoldings(
       if (!cur) return c.json(notFound().body, 404);
       const b = parsed.data;
       const today = todayInTz(p.timezone, new Date());
+      // T3d1: при наличии журнала количество/сумма/валюта меняются только сделками
+      if (
+        (b.quantity !== undefined || b.invested !== undefined || b.avg_price !== undefined || b.currency !== undefined) &&
+        (await repo.countTrades(id)) > 0
+      )
+        return c.json(err('trades_locked', 'Количество и сумма меняются через сделки', 409).body, 409);
+      if (b.hidden === true && !cur.closed_on) return c.json(err('not_closed', 'Скрыть можно только закрытую позицию', 409).body, 409);
       const patch: Parameters<typeof repo.patchHolding>[1] = {};
+      if (b.hidden !== undefined) patch.hidden = b.hidden ? 1 : 0;
       if (b.name !== undefined) patch.name = b.name;
       if (b.ticker !== undefined) patch.ticker = b.ticker;
       if (b.currency !== undefined) patch.currency = b.currency;
